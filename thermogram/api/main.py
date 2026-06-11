@@ -11,12 +11,13 @@ import json
 import re
 import uuid
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .influx import fetch_series, list_signals
 from ..solver.assemble import assemble
@@ -24,6 +25,7 @@ from ..solver.simulate import simulate_ivp, simulate_zoh
 from ..solver.fit import build_forward, fit_nls, fit_mcmc
 from ..solver.identifiability import group_params
 from ..solver.physics import expand, model_hash
+from ..models import AtomicModel, House, Study
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR   = _REPO_ROOT / "data"
@@ -48,11 +50,25 @@ def _valid_name(name: str) -> bool:
     return bool(re.fullmatch(r"[a-zA-Z0-9_\-]+", name))
 
 
-def _load_house(name: str) -> dict:
+def _load_house_raw(name: str) -> dict:
     path = HOUSES_DIR / f"{name}.json"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"House '{name}' not found")
     return json.loads(path.read_text())
+
+
+def _validate_house(data: Any, context: str = "body") -> House:
+    try:
+        return House.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+def _validate_study(data: Any) -> Study:
+    try:
+        return Study.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
 
 def _save_house(name: str, data: dict) -> None:
@@ -65,9 +81,21 @@ def _compute_model_hash(house: dict) -> str:
     return model_hash(elements)
 
 
+def _attach_stale_flags(house_raw: dict) -> dict:
+    """Inject _model_hash and _stale_* flags onto a raw house dict (mutates and returns)."""
+    current_hash = _compute_model_hash(house_raw)
+    house_raw["_model_hash"] = current_hash
+    for study in house_raw.get("studies", []):
+        run = study.get("run")
+        fit = study.get("fit")
+        study["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
+        study["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
+    return house_raw
+
+
 # ── houses ────────────────────────────────────────────────────────────────────
 
-@app.get("/houses")
+@app.get("/houses", response_model=list[dict])
 def get_houses() -> list[dict]:
     """List all house files with summary info."""
     result = []
@@ -87,27 +115,20 @@ def get_houses() -> list[dict]:
     return result
 
 
-@app.get("/houses/{name}")
-def get_house(name: str) -> dict:
-    house = _load_house(name)
-    house["_model_hash"] = _compute_model_hash(house)
-    # Flag stale studies: study.run.model_hash or study.fit.model_hash differs
-    current_hash = house["_model_hash"]
-    for study in house.get("studies", []):
-        run = study.get("run")
-        fit = study.get("fit")
-        study["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
-        study["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
-    return house
+@app.get("/houses/{name}", response_model=House)
+def get_house(name: str) -> House:
+    raw = _attach_stale_flags(_load_house_raw(name))
+    return _validate_house(raw)
 
 
 @app.put("/houses/{name}")
-def put_house(name: str, body: dict) -> dict:
+def put_house(name: str, body: House) -> dict:
     if not _valid_name(name):
         raise HTTPException(status_code=400, detail="Invalid house name (alphanumeric, _ and - only)")
-    body["name"] = name
-    _save_house(name, body)
-    return {"ok": True, "name": name, "model_hash": _compute_model_hash(body)}
+    raw = body.model_dump(by_alias=True, exclude_none=True)
+    raw["name"] = name
+    _save_house(name, raw)
+    return {"ok": True, "name": name, "model_hash": _compute_model_hash(raw)}
 
 
 @app.delete("/houses/{name}")
@@ -122,22 +143,22 @@ def delete_house(name: str) -> dict:
 
 
 @app.post("/houses")
-def create_house(body: dict) -> dict:
+def create_house(body: House) -> dict:
     """Create a new house. Generates a name from label if not provided."""
-    label = body.get("label", "").strip() or "new_house"
-    name = body.get("name") or re.sub(r"[^a-zA-Z0-9_\-]", "_", label).lower()
+    label = (body.label or "").strip() or "new_house"
+    name = body.name or re.sub(r"[^a-zA-Z0-9_\-]", "_", label).lower()
     if not _valid_name(name):
         name = "house_" + str(uuid.uuid4())[:8]
     path = HOUSES_DIR / f"{name}.json"
-    # Avoid clobbering existing house
     if path.exists():
         name = name + "_" + str(uuid.uuid4())[:8]
-    body.setdefault("schema_version", "0.3")
-    body.setdefault("rooms", [])
-    body.setdefault("elements", [])
-    body.setdefault("studies", [])
-    body["name"] = name
-    _save_house(name, body)
+    raw = body.model_dump(by_alias=True, exclude_none=True)
+    raw.setdefault("schema_version", "0.3")
+    raw.setdefault("rooms", [])
+    raw.setdefault("elements", [])
+    raw.setdefault("studies", [])
+    raw["name"] = name
+    _save_house(name, raw)
     return {"ok": True, "name": name}
 
 
@@ -146,33 +167,34 @@ def create_house(body: dict) -> dict:
 @app.post("/houses/{name}/expand")
 def post_house_expand(name: str) -> dict:
     """Expand the house into an atomic model (preview, no persist)."""
-    house = _load_house(name)
+    house_raw = _load_house_raw(name)
+    house = _validate_house(house_raw)
     try:
-        atomic_model, expansion_map = expand(house)
+        atomic_model_raw, expansion_map = expand(
+            house.model_dump(by_alias=True, exclude_none=True)
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"model": atomic_model, "expansion_map": expansion_map}
+    validated = AtomicModel.model_validate(atomic_model_raw)
+    return {
+        "model": validated.model_dump(by_alias=True, exclude_none=True),
+        "expansion_map": expansion_map,
+    }
 
 
 # ── studies (embedded in house) ───────────────────────────────────────────────
 
 @app.post("/houses/{name}/studies")
 def create_study(name: str, body: dict) -> dict:
-    """Create a new study embedded in the house.
+    """Create a new study embedded in the house."""
+    house_raw = _load_house_raw(name)
+    house = _validate_house(house_raw)
 
-    Body fields (all optional):
-        label: str
-        type: "run" | "fit"
-    Returns {"ok": True, "id": study_id}
-    """
-    house = _load_house(name)
-
-    # Pre-populate inputs and observations from house element signals
     try:
-        atomic_model, _ = expand(house)
+        atomic_model_raw, _ = expand(house.model_dump(by_alias=True, exclude_none=True))
         auto_inputs: dict[str, str] = {}
         auto_observations: dict[str, str] = {}
-        for node in atomic_model.get("nodes", []):
+        for node in atomic_model_raw.get("nodes", []):
             if node["kind"] == "boundary":
                 t_src = node.get("T_source")
                 if isinstance(t_src, str):
@@ -181,8 +203,7 @@ def create_study(name: str, body: dict) -> dict:
                 sig = node.get("signal")
                 if sig:
                     auto_inputs[node["id"]] = sig
-        # Mass nodes from rooms with obs_signal → observations
-        for room in house.get("rooms", []):
+        for room in house_raw.get("rooms", []):
             if room.get("role", "mass") == "mass" and room.get("obs_signal"):
                 node_id = f"z_{room['id'].replace('-', '')}"
                 auto_observations[node_id] = room["obs_signal"]
@@ -191,8 +212,8 @@ def create_study(name: str, body: dict) -> dict:
         auto_observations = {}
 
     study_id = str(uuid.uuid4())
-    label = (body.get("label") or "").strip() or house.get("label", study_id)
-    study = {
+    label = (body.get("label") or "").strip() or (house.label or study_id)
+    study_raw = {
         "id":           study_id,
         "label":        label,
         "type":         body.get("type", "run"),
@@ -202,50 +223,51 @@ def create_study(name: str, body: dict) -> dict:
         "end":          "",
         "solver":       "zoh",
     }
+    _validate_study(study_raw)
 
-    house.setdefault("studies", []).append(study)
-    _save_house(name, house)
+    house_raw.setdefault("studies", []).append(study_raw)
+    _save_house(name, house_raw)
     return {"ok": True, "id": study_id}
 
 
-@app.get("/houses/{name}/studies/{study_id}")
-def get_study(name: str, study_id: str) -> dict:
-    house = _load_house(name)
-    for s in house.get("studies", []):
+@app.get("/houses/{name}/studies/{study_id}", response_model=Study)
+def get_study(name: str, study_id: str) -> Study:
+    house_raw = _load_house_raw(name)
+    current_hash = _compute_model_hash(house_raw)
+    for s in house_raw.get("studies", []):
         if s["id"] == study_id:
-            current_hash = _compute_model_hash(house)
             run = s.get("run")
             fit = s.get("fit")
             s["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
             s["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
-            return s
+            return _validate_study(s)
     raise HTTPException(status_code=404, detail=f"Study '{study_id}' not found in house '{name}'")
 
 
 @app.put("/houses/{name}/studies/{study_id}")
-def put_study(name: str, study_id: str, body: dict) -> dict:
-    house = _load_house(name)
-    studies = house.setdefault("studies", [])
+def put_study(name: str, study_id: str, body: Study) -> dict:
+    house_raw = _load_house_raw(name)
+    studies = house_raw.setdefault("studies", [])
     for i, s in enumerate(studies):
         if s["id"] == study_id:
-            body["id"] = study_id
-            studies[i] = body
-            _save_house(name, house)
+            raw = body.model_dump(by_alias=True, exclude_none=True)
+            raw["id"] = study_id
+            studies[i] = raw
+            _save_house(name, house_raw)
             return {"ok": True, "id": study_id}
     raise HTTPException(status_code=404, detail=f"Study '{study_id}' not found in house '{name}'")
 
 
 @app.delete("/houses/{name}/studies/{study_id}")
 def delete_study(name: str, study_id: str) -> dict:
-    house = _load_house(name)
-    studies = house.get("studies", [])
+    house_raw = _load_house_raw(name)
+    studies = house_raw.get("studies", [])
     new_studies = [s for s in studies if s["id"] != study_id]
     if len(new_studies) == len(studies):
         raise HTTPException(status_code=404, detail=f"Study '{study_id}' not found in house '{name}'")
-    house["studies"] = new_studies
-    _save_house(name, house)
+    house_raw["studies"] = new_studies
+    _save_house(name, house_raw)
     return {"ok": True}
-
 
 
 # ── simulate ──────────────────────────────────────────────────────────────────
@@ -257,8 +279,8 @@ class SimulateRequest(BaseModel):
     end: str
     inputs: dict[str, str]        # node_id → signal name
     solver: str = "zoh"           # "ivp" | "zoh"
-    dt_minutes: int = 15          # ZOH time step (ignored for ivp)
-    y0_uniform: float | None = None       # uniform initial temperature [°C] for all masses; None → auto
+    dt_minutes: int = 15
+    y0_uniform: float | None = None
     param_overrides: dict[str, float] = {}  # node_id.field → value, applied after expand
 
 
@@ -267,9 +289,10 @@ def post_simulate_run(req: SimulateRequest) -> dict:
     """Expand the house, fetch inputs from InfluxDB, run the solver, persist result."""
     import numpy as np
 
-    house = _load_house(req.house_name)
+    house_raw = _load_house_raw(req.house_name)
+    house = _validate_house(house_raw)
     try:
-        atomic_model, _ = expand(house)
+        atomic_model, _ = expand(house.model_dump(by_alias=True, exclude_none=True))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
 
@@ -299,8 +322,6 @@ def post_simulate_run(req: SimulateRequest) -> dict:
         except Exception as e:
             errors[node_id] = str(e)
 
-    # Auto-fetch signals for source nodes (e.g. solar gains from glazing with SHGC)
-    # that are not already covered by req.inputs.
     nodes_by_id = {n["id"]: n for n in atomic_model.get("nodes", [])}
     for src_id in system.source_ids:
         if src_id in inputs:
@@ -315,8 +336,6 @@ def post_simulate_run(req: SimulateRequest) -> dict:
             except Exception as e:
                 errors[src_id] = str(e)
 
-    # Auto-fill boundary nodes with a fixed numeric T_source (e.g. ground with T_fixed).
-    # simulate_zoh/ivp require an entry in inputs for every boundary_id.
     import datetime as _dt
     t0_sec = _dt.datetime.fromisoformat(req.start).timestamp()
     t1_sec = _dt.datetime.fromisoformat(req.end).timestamp()
@@ -355,7 +374,7 @@ def post_simulate_run(req: SimulateRequest) -> dict:
         datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
         for ts in result.t
     ]
-    current_hash = _compute_model_hash(house)
+    current_hash = _compute_model_hash(house_raw)
     timestamp = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
     run_record = {
         "model_hash": current_hash,
@@ -368,11 +387,11 @@ def post_simulate_run(req: SimulateRequest) -> dict:
             **({"y0_uniform": req.y0_uniform} if req.y0_uniform is not None else {}),
         },
     }
-    for study in house.get("studies", []):
+    for study in house_raw.get("studies", []):
         if study["id"] == req.study_id:
             study["run"] = run_record
             break
-    _save_house(req.house_name, house)
+    _save_house(req.house_name, house_raw)
 
     return {
         "t": t_iso,
@@ -393,14 +412,17 @@ def post_simulate_run(req: SimulateRequest) -> dict:
 # ── fit ───────────────────────────────────────────────────────────────────────
 
 class PreviewGroupsRequest(BaseModel):
-    atomic_model: dict
+    atomic_model: AtomicModel
     param_keys: list[str]
 
 
 @app.post("/fit/preview-groups")
 def post_fit_preview_groups(req: PreviewGroupsRequest) -> list[list[str]]:
     try:
-        return group_params(req.atomic_model, req.param_keys)
+        return group_params(
+            req.atomic_model.model_dump(by_alias=True, exclude_none=True),
+            req.param_keys,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -424,9 +446,10 @@ def post_fit_run(req: FitRequest) -> dict:
     """Expand the house, fetch inputs + observations from InfluxDB, run NLS or MCMC fit, persist result."""
     import numpy as np
 
-    house = _load_house(req.house_name)
+    house_raw = _load_house_raw(req.house_name)
+    house = _validate_house(house_raw)
     try:
-        atomic_model, _ = expand(house)
+        atomic_model, _ = expand(house.model_dump(by_alias=True, exclude_none=True))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
 
@@ -455,7 +478,6 @@ def post_fit_run(req: FitRequest) -> dict:
             detail={"message": "Failed to fetch some signals", "errors": errors},
         )
 
-    # Auto-fill boundary nodes with a fixed numeric T_source (e.g. ground with T_fixed).
     import datetime as _dt
     _t0_sec = _dt.datetime.fromisoformat(req.start).timestamp()
     _t1_sec = _dt.datetime.fromisoformat(req.end).timestamp()
@@ -520,7 +542,7 @@ def post_fit_run(req: FitRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fit error: {e}") from e
 
-    current_hash = _compute_model_hash(house)
+    current_hash = _compute_model_hash(house_raw)
     timestamp = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
     fit_record = {
         "model_hash":    current_hash,
@@ -533,11 +555,11 @@ def post_fit_run(req: FitRequest) -> dict:
         },
         "result_params": response.get("params_fitted") or response.get("params_mean"),
     }
-    for study in house.get("studies", []):
+    for study in house_raw.get("studies", []):
         if study["id"] == req.study_id:
             study["fit"] = fit_record
             break
-    _save_house(req.house_name, house)
+    _save_house(req.house_name, house_raw)
     response["fit_record"] = fit_record
     response["atomic_model"] = atomic_model
 

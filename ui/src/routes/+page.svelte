@@ -381,6 +381,9 @@
 				<button class="nav-item nav-back" onclick={() => { houseName = null; house = null; selectedStudyId = null; atomicModel = null; activeSection = 'houses'; }}>← all houses</button>
 			{/if}
 		</div>
+		<div class="nav-bottom">
+			<a class="nav-link" href="/docs" target="_blank" rel="noopener">API docs ↗</a>
+		</div>
 	</nav>
 
 	<!-- main area -->
@@ -680,6 +683,17 @@
 		border-top: 1px solid #334155;
 		flex-shrink: 0;
 	}
+
+	.nav-link {
+		display: block;
+		color: #64748b;
+		font-size: 12px;
+		text-decoration: none;
+		padding: 4px 6px;
+		border-radius: 4px;
+	}
+
+	.nav-link:hover { color: #94a3b8; background: #1e3a5f22; }
 
 	.nav-logo {
 		color: #94a3b8;
