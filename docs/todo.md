@@ -1,238 +1,275 @@
-# thermogram — todo
+# thermogram — todo: road to v1
+
+For architecture see [project_description.md](project_description.md).
+The target design is [modeling_pipeline.md](modeling_pipeline.md); v1
+implements its **pseudo layer (the φ-space)** in minimal form. The beliefs /
+domain / agent layers and the SystemTemplate hot-path of
+[implementation.md](implementation.md) remain post-v1.
 
 ---
 
-## Data model
+## What v1 is
 
-### House file (`houses/<name>.json`)
+A minimal working app demonstrating the key value:
 
-One file per house. The RC model is derived deterministically from elements on
-load — not stored. Studies are embedded in the house file.
+> Describe your house in physical terms, point the app at measured
+> temperature data, press Fit — and read off the thermal properties of the
+> building (wall R / λ, capacitance) **with uncertainty**, mapped back onto
+> the building elements you described.
 
-```json
-{
-  "name": "my_house",
-  "elements": [ ... ],
-  "studies": [
-    {
-      "id": "<uuid4>",
-      "label": "Winter 2024",
-      "type": "run",
-      "date_range": ["2024-01-01", "2024-02-28"],
-      "inputs": {
-        "solar_signal": "...",
-        "obs_signal": "..."
-      },
-      "result": {
-        "settings": { ... },
-        "model_hash": "a3f9bc...",
-        "output_file": "my_house_<study_id>_run_20240115T143022.parquet",
-        "result_params": { ... }
-      }
-    }
-  ]
-}
-```
+The enabler is the **pseudo layer**: the fit no longer patches RC node
+fields directly (today's `fit_config["params"]` + `_patch_model` label-hack)
+but operates on a φ-vector of pseudos (`Req`, `Ceq`, `RC_chain`, `T_boundary`,
+`Q_source`) expanded to atoms via combine rules. This is what makes the
+parameter choice clean, the fit identifiable by construction, and the
+mapping back to elements well-defined.
 
-Each study is either `"type": "run"` (forward simulation) or `"type": "fit"` (parameter estimation) — not both. `result_params` is only populated for fit results.
+Acceptance scenario (the "v1 demo"):
 
-### RC model (derived, not stored)
+1. Fresh clone, `uv sync`, `npm run build`, start the server. **No InfluxDB,
+   no env vars.**
+2. Open the bundled example house. It has one fit study pre-configured
+   against a bundled example dataset.
+3. The study's φ-table shows a handful of pseudos with physically composed
+   priors. Press Fit. It converges with default settings.
+4. The result reads as element-level properties: `Mur SE: U = 1.4 ± 0.3`
+   (posterior vs prior visible), plus residual charts that look unstructured.
+5. Total time for a newcomer following the README: under 10 minutes.
 
-`expand(elements) → rc_model` — pure function, called on load and after any
-element edit. No selection mechanism: all elements are always used.
-
-### Model hash
-
-SHA-256 of the canonical JSON serialization of `elements` (keys sorted,
-no whitespace), first 12 hex chars. Stored on each run/fit result. On load,
-recompute and compare — flag study as stale if they differ.
-
-```python
-def model_hash(elements):
-    canonical = json.dumps(elements, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha256(canonical.encode()).hexdigest()[:12]
-```
-
-### Parquet files
-
-Stored alongside house files. Named automatically:
-`<house_name>_<study_id>_<type>_<timestamp>.parquet`
-where `<type>` is `run` or `fit`. Referenced by filename in the study JSON.
+Steps are ordered; each is independently testable and leaves the app working.
 
 ---
 
-## Milestones
+## Step 0 — Green baseline (broken today)
 
-### ~~M1 — House view: flat list~~ ✓ done
+The test suite currently fails: `data/examples/*.json` fixtures were lost
+when the data dir moved out of the code tree, `pytest` is not a declared
+dependency, and `test_physics.py` reads the live `data/houses/maison_test.json`
+which has since been edited (UUIDs changed).
 
-### ~~M1b — House view: grid layout + icon toolbar + split view~~ ✓ done
+- [ ] Add a `dev` dependency group to `pyproject.toml` (`pytest`).
+- [ ] Recreate the test fixtures (`chambre_1r1c.json`, `chambre_2r2c.json`,
+      `chambre_v1.json`) as **committed files** under `solver/tests/fixtures/`
+      — test data lives with the tests, not in the mutable `data/` dir.
+- [ ] Point `test_physics.py` at a committed fixture copy of `maison_test`,
+      never at live user data.
+- [ ] Fix whatever still fails after that (11 failures predate the fixture
+      loss — triage them).
 
-### ~~M1c — UUID + label rename~~ ✓ done
-
-### ~~M2 — Element signals~~ ✓ done
-
-### ~~M3 — `expand()` + study spawning~~ ✓ done
-
-### ~~M4 — New data model migration~~ ✓ done
-
-Migrate from the current study-centric layout to the house-centric model
-described above.
-
-1. **Backend**: `houses/` directory, `GET /houses`, `GET /houses/{name}`,
-   `PUT /houses/{name}`. Studies embedded in house JSON.
-2. **`expand(elements)`** — drop the `selection` argument; always expand all
-   elements.
-3. **Model hash** — compute on every save; store on run/fit results; expose
-   stale flag on load.
-4. **Parquet naming** — `<house>_<study_id>_<type>_<timestamp>.parquet`.
-5. **UI** — house picker / list on home screen; study list inside house view.
-
-### M5 — Results projected back on house
-
-1. `GET /houses/{name}/studies/{id}/results_by_element` — projects run output
-   through expansion map, returns `{ element_id: { Q_mean, Q_peak, T_mean? } }`.
-2. House rows show `Q_mean` / `Q_peak` badges after a run, color-tinted by
-   magnitude.
-3. Click a row → filter study charts to that element's traces.
-
-### ~~M6 — Working Fit~~ ✓ done
-
-1. ~~Fit runs correctly end-to-end (NLS + optional MCMC).~~ ✓
-2. ~~Fit result saved: `result_params` in house JSON; model hash + timestamp stored.~~ ✓
-3. ~~Model hash stored on fit result; stale flag shown if elements changed.~~ ✓
-4. ~~Post-fit forward simulation with fitted params + charts (temperatures, residuals, input power).~~ ✓
-5. ~~`param_overrides` on `/simulate/run` — patches RC model with fitted values before solve.~~ ✓
-6. ~~`y0_uniform` propagated to fit (`/fit/run`) and post-fit simulation (`/simulate/run`).~~ ✓
-7. ~~Human-readable parameter names + units in FitPanel tables.~~ ✓
-8. Post-fit `λ ± σ` badges per layer on house rows, color-coded by posterior shift vs prior.
-9. **Promote to priors** — write `result_params` back as tightened priors on elements.
-
-### M7 — Fit UI polish
-
-#### M7.1 — Initial values for fit parameters
-
-Currently `nominal` values shown in FitPanel come from the RC model node fields
-(the physical defaults set at expand time). These are often poor starting points,
-especially for `C` nodes (thermal mass), causing slow convergence or wrong local
-minima.
-
-Three options, in order of effort:
-
-- **A — Derive from elements (recommended first step)**  
-  At expand time, `physics.py` already computes `R_wall`, `C_wall` per element
-  (stored in `wall_chains`). Expose these as the nominal for wall-chain params
-  (`wall_label.R`, `wall_label.C`). For zone `C` nodes: derive from room volume
-  × air volumetric heat capacity (1200 J/m³K) + furnishings estimate.  
-  No new API needed — enrich the RC model node fields so `n.R` / `n.C` already
-  hold the element-level physical estimates.
-
-- **B — Warm start from a previous fit result**  
-  If the study already has `result_params`, pre-fill `nominal` with those values
-  in FitPanel (and tighten `sigma_log` accordingly). Already partially designed
-  as M6.9 "Promote to priors".
-
-- **C — Auto-scale from data**  
-  Estimate τ = RC from the observed temperature signal (step response or
-  autocorrelation). Back out a plausible R or C given the other. Useful when
-  no physical knowledge is available.
-
-#### M7.2 — Series resistor identifiability grouping
-
-Currently `identifiability.group_params()` only groups **parallel** resistors
-(same endpoint pair → one shared multiplier). **Series** resistors between two
-zones are also unidentifiable individually — only their sum is observable.
-
-Example: `R_si` (surface resistance) in series with `R_wall` (bulk wall
-resistance) between the same two temperature nodes. Fitting them separately is
-ill-posed; only `R_si + R_wall` is constrained by data.
-
-Design:
-
-- Detect series chains: a path of resistance nodes between two non-resistance
-  nodes where all intermediate nodes are pure resistances (no mass, no source).
-  Each such chain → one group (sum parameter).
-- The group representative is the first key in chain order; fitted value is the
-  total series R, distributed to members proportionally to their nominals.
-- In `_patch_model`, handle `series_chain_label.R` similarly to wall chains.
-- Expose in FitPanel as a single row `R_si + R_wall (Mur SE) [m²K/W]` with
-  combined nominal = sum of member nominals.
-
-Note: `Rsi` and `Rse` (surface resistances, small, ~0.01–0.04 m²K/W) are
-often the dominant series-identifiability issue in practice. A simpler fix is
-to just **freeze** them by default (check `fixed: true`) in FitPanel, since
-their value is well-known and not worth fitting. This may be sufficient for M7.
+**Test:** `uv run pytest` is green on a fresh clone, and stays green after
+the user edits any house in `data/houses/`.
 
 ---
 
-## Backlog
+## Step 1 — Synthetic round-trip on the current fit path
 
-### ~~Heavy wall — chain-N discretization~~ ✓ done
+The scientific core as one automated test — and the safety net for the
+pseudo-layer refactor that follows.
 
-**Implemented:**
+- [ ] Script/test: take a small example house (1 room, 1 chained wall,
+      outdoor boundary), `expand()`, simulate forward with **known**
+      ground-truth params and synthetic weather (sinusoid + noise) →
+      synthetic "measured" indoor temperature.
+- [ ] Perturb priors away from ground truth (×2 on R, ×0.5 on C), run
+      `fit_nls` on the synthetic observations.
+- [ ] Assert recovery: fitted `R_wall`, `C_wall` within tolerance (e.g. 10 %
+      or 2σ); reported σ consistent with the injected noise.
+- [ ] Keep as a pytest (mark `slow` if needed).
 
-- `_opaque_chain_n()` — `max over layers of ceil(d/δ)` at 24h period, computed in `expand()`.
-- `_opaque_C_total()` — `area × Σ(ρ·cp·d)` per layer.
-- `_expand_opaque()` emits N identical RC lumps flanked by R_se / R_si.
-  Outdoor side is detected automatically from the boundary node type; R_se and
-  solar gain are placed on the correct side regardless of `between` order.
-- `solar_absorptance` field on opaque elements: injects `α·A·solar_signal` as a
-  source node into the outer surface mass node.
-- `_patch_model()` fans out element-level `(label.R, label.C)` fit params to all
-  N lump nodes via `model["wall_chains"]`.
-- Wall mass node labels: `[outer]` / `[inner]` / `[wall]` instead of `[0]` / `[N-1]`.
-- Opaque element editor: `solar α` numeric input (0–1, step 0.05) with tooltip.
-- Opaque element row: `×N` chain badge in key figures, sourced from `rcModel.wall_chains`
-  passed down from `+page.svelte` (reuses the already-fetched expand result, no extra call).
-- Simulation chart: wall mass nodes (`m_*`) hidden by default (`show: false`), togglable via legend.
-- House panel row layout: 2-line grid — row 1: icon | label | connectivity | signals | role;
-  row 2: chevron | figures (full width).
+**Test:** `uv run pytest -m roundtrip` recovers ground-truth parameters
+through the *current* fit path.
 
-**UI — still to do:**
+---
 
-- RC graph: render the N lump nodes + interior resistances visually in series
-  between the two zone nodes, with R_se/R_si on each end.
+## Step 2 — Pseudo layer in the solver (φ-space)
 
-### Parallel/series resistance identifiability
+Minimal version of the pseudo layer from modeling_pipeline.md. Scope cuts
+to keep it v1-sized:
 
-Parallel resistors sharing the same node pair: only the effective parallel R
-is observable from temperature data. Series resistors between the same two
-zones: only the sum is observable.
+- **Atoms = current `rc_model` nodes.** No rewrite of `physics.py`; pseudos
+  overlay the existing `expand()` output, referencing rc node ids.
+- **No Belief objects.** Priors are `(nominal, sigma_log)` pairs composed at
+  view-build time from element data (materials, geometry).
+- **No transform ops** (refine/coarsen/tie) and no agent — only `free` /
+  `fixed` modes on each pseudo.
 
-**Design decisions:**
+Tasks:
 
-- Keep individual element params with their own priors. The prior encodes
-  construction knowledge (material, thickness) and can resolve elements when
-  priors are sufficiently different.
-- `group_params()` in `identifiability.py` already handles parallel grouping:
-  collapses to one scale multiplier, freezes the nominal ratio.
-- **To add:** same grouping logic for series resistors — detect chains where
-  only the sum is identifiable, collapse to one multiplier.
-- Do not reparametrize to effective values by default; let tight priors
-  separate individual elements when the information is there.
+- [ ] `solver/pseudos.py` — `Pseudo` dataclass (id, kind, atoms, combine,
+      prior, mode, posterior) and the five combine rules: `series_sum`,
+      `parallel_sum`, `parallel_inv_sum`, `chain`, `identity`. Pure
+      functions `phi → atom values` with prior-derived weights (φ = prior
+      ⇒ atoms = their nominals).
+- [ ] `solver/view.py` — `build_default_view(rc_model, expansion_map) → View`,
+      deterministic, one depth for v1:
+      - opaque element → one `RC_chain(n)` pseudo, 2 φ (R_total, C_total);
+        **Rse / Rsi folded into the chain's series weights** — fixed share,
+        not free φ (kills today's series-identifiability trap structurally);
+      - glazing / air_exchange → `Req`; parallel R between the same node
+        pair → one shared `Req` (replaces `identifiability.group_params`);
+      - room → `Ceq`; boundaries / sources → `identity`, mode `fixed`.
+- [ ] Rework `solver/fit.py`: `build_forward(view, ...)` takes the View;
+      the residual closure maps log-φ → atom values → patched model →
+      assemble → simulate. Delete `_patch_model`'s label conventions and
+      `fit_config["params"]`; retire `identifiability.group_params` (its
+      logic moves into `build_default_view`).
+- [ ] Posteriors land on the pseudos (`value ± sigma_log`), not on node
+      fields.
 
-### Initial state (T₀) for forward simulation
+**Test:** unit tests per combine rule (round-trip φ ↔ atoms, prior
+consistency); `build_default_view` on the fixture houses asserts pseudo
+count, coverage (every fittable atom covered exactly once), and Rse/Rsi
+folding. The Step 1 round-trip re-run through the φ path recovers the same
+ground truth — that test is then switched over permanently.
 
-~~`y0_uniform` — single uniform temperature for all mass nodes, exposed in the UI
-as a radio (`auto` / `uniform` + numeric input), sent to `/simulate/run` and `/fit/run`.~~ ✓ done
+---
 
-Still to do:
+## Step 3 — Data model + API adaptation
 
-- **Burn-in / warm-up** — prepend a warm-up window (e.g. 24–48 h) before the study
-  range, discard it, use the final state as T₀. Cheap, no extra solver. Length should
-  be a few multiples of the dominant time constant (wall RC). Simplest to implement.
-  Add `mode: "burnin"` with `burnin_days: int` (default 2).
-- **Periodic steady-state** — assume the system is periodic over the study range;
-  iterate: run one period, feed final state back as T₀, repeat until convergence.
-- **Per-node T₀** — show one input per mass node (labels from `rcModel`), pre-filled
-  with the uniform value, so the user can override individual nodes.
+The study persists the View; results are posteriors on pseudos.
 
-### Other
+- [ ] Study schema: replace `fit.params` config with an embedded `view`:
+      list of pseudos (id, kind, atom ids, combine, prior, mode) +
+      `fit.posteriors` keyed by pseudo id. Bump `schema_version`; write a
+      one-shot migration for existing house files (or accept dropping old
+      fit configs — decide, document).
+- [ ] `model_hash` staleness extends to the view: if the house changed,
+      the persisted view's atom refs may dangle → study flagged stale, view
+      rebuilt on demand.
+- [ ] API:
+      - `POST /houses/{name}/studies/{id}/view` — (re)build the default
+        view, persist it, return it;
+      - `GET .../view` — current view with stale flag;
+      - `PUT .../view` — update modes / prior overrides only (structure is
+        always the default build for v1);
+      - `/fit/run` takes the persisted view; rejects if stale.
+- [ ] `/fit/preview-groups` removed (subsumed by the view).
 
-- **Material library extension** — `brique_creuse`, `stone_rubble`,
-  `lime_plaster`, `wood_floor`, `tile_clay`, `concrete_slab`.
-- **Materials panel** (left-nav) — browser/editor for the library.
-- **Copy elements between houses** — select elements from one house, paste
-  into another.
-- **House UI v2** — 2D floor-plan canvas.
-- **LLM-assisted model builder** — house description → LLM → initial house.
-- **MCMC corner plot** — marginal histograms per param.
+**Test:** API-level tests — create study → build view → flip a pseudo to
+`fixed` → fit → posteriors persisted under pseudo ids; edit house →
+view flagged stale → rebuild regenerates consistent atom refs. Migration
+test on a copy of a real house file.
+
+---
+
+## Step 4 — UI adaptation: FitPanel becomes the φ-table
+
+- [ ] FitPanel rewritten as the φ-space table, one row per pseudo:
+      label (from realizing element), kind badge, prior (nominal ± σ_log,
+      human units), mode toggle (free/fixed), posterior ± σ after fit,
+      prior→posterior shift indicator.
+- [ ] Remove the node-field param table and its grouping preview UI.
+- [ ] "Rebuild view" button when the study is stale (calls `POST .../view`).
+- [ ] Simulation tab unchanged except: post-fit forward sim uses pseudo
+      posteriors (φ → atoms) instead of `param_overrides` node patches.
+
+**Test:** manual UI pass on a fixture house — build view, freeze a pseudo,
+fit, see posteriors in the table; stale → rebuild flow works. Keep it to
+one afternoon of polish; looks are post-v1.
+
+---
+
+## Step 5 — CSV data source: drop the InfluxDB requirement
+
+Independent of Steps 2–4; can be done in parallel.
+
+- [ ] Extract a minimal datasource interface from `api/influx.py`:
+      `list_signals()` and `get_series(signal, start, end)`.
+- [ ] CSV source: `data/datasets/*.csv` (first column timestamp). Signal
+      naming: `csv/<file>/<column>`.
+- [ ] `GET /signals` merges sources; `GET /series` dispatches on prefix.
+      Influx registered only when `MINIHA_INFLUX_*` env vars are set.
+- [ ] No upload UI for v1 — dropping a file into `data/datasets/` is
+      enough (document it).
+
+**Test:** with no Influx env vars, the API starts, `GET /signals` lists CSV
+columns, a study wired to CSV signals runs end-to-end. Unit tests for
+parsing, 15-min resampling, range slicing.
+
+---
+
+## Step 6 — Bundled example house + dataset
+
+The demo content, in the new study/view format.
+
+- [ ] Generate (or download once via Open-Meteo archive) ~3 weeks of
+      outdoor temperature + solar, plus a synthetic indoor temperature
+      produced by the simulator from known params → commit as
+      `data/datasets/example_winter.csv`.
+- [ ] Commit `data/houses/example.json`: one room, two walls (one insulated,
+      one not), one window, outdoor boundary; one fit study with its
+      default view pre-built, pointing at the CSV signals.
+- [ ] Because the indoor series is synthetic, the fit has a known right
+      answer — the demo is also a self-check.
+
+**Test:** `POST /fit/run` on the bundled study converges and recovers the
+generating parameters (API-level test).
+
+---
+
+## Step 7 — Fit converges from untouched defaults
+
+Most of old "workable fitting" is now structural (pseudo priors composed
+from elements, Rse/Rsi folded, parallel grouping in the view). What's left:
+
+- [ ] **Initial state burn-in**: `mode: "burnin"` (prepend N days, default 2,
+      discard) on `/simulate/run` and `/fit/run`; default for fits.
+- [ ] Verify composed priors are sane on the fixtures: zone `Ceq` from
+      volume × 1200 J/m³K × furniture factor; chain priors from the layer
+      stack (already in `wall_chains`).
+- [ ] NLS first; MCMC stays available but is not on the demo path.
+
+**Test:** the Step 6 fit converges with default fit config — asserted by
+the Step 6 API test. Unit test for burn-in (result independent of T₀ guess).
+
+---
+
+## Step 8 — Results readable on the house (the payoff screen)
+
+Minimal `attribute()`: posterior on pseudos → element-level properties.
+Well-defined now because each pseudo records which element it realizes.
+
+- [ ] Back-map per pseudo: `RC_chain` posterior → element effective λ
+      (single dominant layer) or U-value `1/(R·A)`, with σ; `Req` →
+      U-value; `Ceq` → effective capacitance.
+- [ ] Per-element badges in HousePanel after a fit: `U = 1.4 ± 0.3`,
+      color-coded by posterior shift vs prior (confirms / contradicts the
+      description).
+
+**Test:** unit test for the back-mapping (incl. chain and shared-Req
+fan-out); manual UI check that the example fit's badges match the known
+generating params.
+
+---
+
+## Step 9 — Demo path & docs, release
+
+- [ ] README quickstart rewritten around the no-Influx path: clone → sync →
+      build → open example → Fit. Influx setup moves to a separate section.
+- [ ] Update project_description.md: pseudo/view sections replace the
+      node-field fit description.
+- [ ] Empty states in the UI: no houses → "open the example"; study with no
+      signals → point at `data/datasets/`.
+- [ ] `CHANGELOG.md` entry; tag `v1.0`.
+
+**Test:** the acceptance scenario at the top of this file, executed by
+someone (or a fresh agent session) following only the README, in under
+10 minutes.
+
+---
+
+## Explicitly post-v1
+
+Parked so v1 stays minimal — tracked in [roadmap.md](roadmap.md):
+
+- Beliefs (confidence-typed quantities), domain layer, `attribute()` writing
+  insights back as element priors, agent loop + trace
+  ([modeling_pipeline.md](modeling_pipeline.md))
+- View transforms: refine / coarsen / resolve / tie; multiple view depths
+- SystemTemplate / compiled-rules hot path
+  ([implementation.md](implementation.md)) — only if profiling demands it
+- Merge Run into Fit; energy view; full results-by-element projection (M5)
+- UI rework (DaisyUI, burger menu), floor-plan canvas, better RC graph viz
+- Parquet/duckdb result persistence; rename house → model; slug filenames
+- CSV upload UI; Open-Meteo live source; MCMC corner plot; cross-study
+  learning
