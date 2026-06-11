@@ -49,8 +49,9 @@ which has since been edited (UUIDs changed).
 
 - [ ] Add a `dev` dependency group to `pyproject.toml` (`pytest`).
 - [ ] Recreate the test fixtures (`chambre_1r1c.json`, `chambre_2r2c.json`,
-      `chambre_v1.json`) as **committed files** under `solver/tests/fixtures/`
-      — test data lives with the tests, not in the mutable `data/` dir.
+      `chambre_v1.json`) as **committed files** under
+      `thermogram/solver/tests/fixtures/` — test data lives with the tests,
+      not in the mutable `data/` dir.
 - [ ] Point `test_physics.py` at a committed fixture copy of `maison_test`,
       never at live user data.
 - [ ] Fix whatever still fails after that (11 failures predate the fixture

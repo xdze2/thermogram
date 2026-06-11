@@ -8,7 +8,7 @@ import pytest
 from thermogram.solver.physics import expand, model_hash
 from thermogram.solver.assemble import assemble
 
-DATA = Path(__file__).parents[2] / "data"
+DATA = Path(__file__).parents[3] / "data"
 
 with open(DATA / "houses" / "maison_test.json") as f:
     HOUSE = json.load(f)

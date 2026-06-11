@@ -8,7 +8,7 @@ import pytest
 
 from thermogram.solver.assemble import assemble
 
-DATA = Path(__file__).parents[2] / "data" / "examples"
+DATA = Path(__file__).parents[3] / "data" / "examples"
 
 
 def load(name: str) -> dict:

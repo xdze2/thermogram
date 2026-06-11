@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_MATERIALS_DIR = Path(__file__).parents[1] / "data" / "materials"
+_MATERIALS_DIR = Path(__file__).parents[2] / "data" / "materials"
 
 
 def load_material_library() -> dict[str, dict]:

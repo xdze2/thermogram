@@ -11,7 +11,7 @@ import pytest
 from thermogram.solver.identifiability import group_params
 from thermogram.solver.fit import build_forward, fit_nls, expand_groups
 
-DATA = Path(__file__).parents[2] / "data" / "examples"
+DATA = Path(__file__).parents[3] / "data" / "examples"
 
 
 def load(name: str) -> dict:

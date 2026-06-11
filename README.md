@@ -73,17 +73,18 @@ thermogram/
   data/
     houses/          one .json per house (elements + embedded studies)
     materials/       material library (brick, concrete, rock wool, …)
-  solver/
-    physics.py       expand(house) → (rc_model, expansion_map)
-    assemble.py      rc_model → AssembledSystem (A, B matrices)
-    simulate.py      simulate_ivp + simulate_zoh
-    fit.py           build_forward + fit_nls + fit_mcmc
-    identifiability.py   group_params — correlated parameter analysis
-    tests/
-  api/
-    main.py          FastAPI app
-    influx.py        InfluxDB fetch + resample
-    config.py        env config
+  thermogram/        python package
+    solver/
+      physics.py     expand(house) → (rc_model, expansion_map)
+      assemble.py    rc_model → AssembledSystem (A, B matrices)
+      simulate.py    simulate_ivp + simulate_zoh
+      fit.py         build_forward + fit_nls + fit_mcmc
+      identifiability.py   group_params — correlated parameter analysis
+      tests/
+    api/
+      main.py        FastAPI app
+      influx.py      InfluxDB fetch + resample
+      config.py      env config
   ui/
     src/
 ```

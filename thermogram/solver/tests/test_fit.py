@@ -17,7 +17,7 @@ from thermogram.solver.assemble import assemble
 from thermogram.solver.fit import _patch_model, build_forward, fit_nls, FitResult
 from thermogram.solver.simulate import simulate_zoh
 
-DATA = Path(__file__).parents[2] / "data" / "examples"
+DATA = Path(__file__).parents[3] / "data" / "examples"
 
 
 def load(name: str) -> dict:

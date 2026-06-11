@@ -25,9 +25,10 @@ from ..solver.fit import build_forward, fit_nls, fit_mcmc
 from ..solver.identifiability import group_params
 from ..solver.physics import expand, model_hash
 
-DATA_DIR   = Path(__file__).parent.parent / "data"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR   = _REPO_ROOT / "data"
 HOUSES_DIR = DATA_DIR / "houses"
-UI_DIR     = Path(__file__).parent.parent / "ui" / "build"
+UI_DIR     = _REPO_ROOT / "ui" / "build"
 
 HOUSES_DIR.mkdir(parents=True, exist_ok=True)
 

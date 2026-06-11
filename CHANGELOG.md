@@ -1,5 +1,12 @@
 # Changelog
 
+- **2026-06** — Package layout — `api/` and `solver/` moved into a real `thermogram/`
+  package dir; editable install no longer relies on a `.pth` pointing at the repo's
+  parent dir; `Path(__file__)` lookups (data, materials, ui/build, test fixtures)
+  adjusted; run/test commands unchanged except test path
+  (`uv run pytest thermogram/solver/tests`). Docs: `todo.md` rewritten as the
+  step-by-step v1 plan (pseudo-layer φ-space on the critical path); `CLAUDE.md` added.
+
 - **2026-06** — Working fit (M6 partial) — `house_name` + `study_id` context on `/fit/run`;
   `param_overrides` on `/simulate/run` patches RC model before solve for post-fit charts;
   `y0_uniform` propagated to both `/fit/run` and post-fit `/simulate/run`; FitPanel uses
