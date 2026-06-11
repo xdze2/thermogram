@@ -13,6 +13,7 @@
 - better RC graph viz
 - Merge Fit and run, remove run, always do a fit (y0 only for instance)
 - Proof read the code
+- Persistent results stored: Parquet files, duckdb?
 
 ---
 
