@@ -50,6 +50,6 @@ npm run dev        # http://localhost:5173
 
 ## Docs
 
-- **[project_description.md](project_description.md)** — current state, architecture,
+- **[project_description.md](docs/project_description.md)** — current state, architecture,
   data model, API surface, design decisions
-- **[todo.md](todo.md)** — open work and changelog
+- **[todo.md](docs/todo.md)** — open work and changelog
