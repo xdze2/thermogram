@@ -3,7 +3,7 @@
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
 
-	const API = 'http://localhost:8001';
+	const API = '';
 
 	let {
 		house_name,

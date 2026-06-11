@@ -13,7 +13,7 @@
   }
 
   // ── signals autocomplete ──────────────────────────────────────────────────
-  const API = 'http://localhost:8001';
+  const API = '';
   let signals = $state([]);
 
   onMount(async () => {

@@ -14,6 +14,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .influx import fetch_series, list_signals
@@ -25,6 +27,7 @@ from ..solver.physics import expand, model_hash
 
 DATA_DIR   = Path(__file__).parent.parent / "data"
 HOUSES_DIR = DATA_DIR / "houses"
+UI_DIR     = Path(__file__).parent.parent / "ui" / "build"
 
 HOUSES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -569,3 +572,9 @@ def get_series(
         "t": [ts.isoformat() for ts in s.index],
         "values": [None if v != v else float(v) for v in s],
     }
+
+
+# ── static UI (must be last) ──────────────────────────────────────────────────
+
+if UI_DIR.exists():
+    app.mount("/", StaticFiles(directory=UI_DIR, html=True), name="ui")

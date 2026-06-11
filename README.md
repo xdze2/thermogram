@@ -46,16 +46,20 @@ Simulation) on the right.
 ## Running
 
 ```bash
-# First time — install Python dependencies
+# First time
 uv sync
+cd ui && npm install && npm run build && cd ..
 
-# API — http://localhost:8001
+# Start — API + UI served at http://localhost:8001
 uv run uvicorn thermogram.api.main:app --reload --port 8001
+```
 
-# UI — http://localhost:5173
-cd ui
-npm install        # first time only
-npm run dev
+Rebuild the UI after frontend changes: `cd ui && npm run build`.
+
+For frontend development with hot reload, run both in parallel:
+```bash
+uv run uvicorn thermogram.api.main:app --reload --port 8001
+cd ui && npm run dev   # http://localhost:5173
 ```
 
 InfluxDB connection is configured via environment variables (see

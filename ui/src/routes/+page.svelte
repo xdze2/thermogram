@@ -9,7 +9,7 @@
 	import MaterialsPanel from '$lib/MaterialsPanel.svelte';
 	import RangeSelect from '$lib/RangeSelect.svelte';
 
-	const API = 'http://localhost:8001';
+	const API = '';
 
 	// ── navigation ────────────────────────────────────────────────────────────
 	// activeSection: 'materials' | 'houses' | 'house'

@@ -13,7 +13,7 @@
   let { selected, model, onpatch, onadd, ondelete, ondeleteedge } = $props();
 
   // ── signal autocomplete ───────────────────────────────────────────────────
-  const API = "http://localhost:8001";
+  const API = '';
   let signals = $state([]);
   let signalsError = $state(false);
 
