@@ -57,20 +57,20 @@ the user edits any house in `data/houses/`.
 
 ---
 
-## Step 1 — Synthetic round-trip on the current fit path
+## Step 1 — Synthetic round-trip on the current fit path ✅
 
 The scientific core as one automated test — and the safety net for the
 pseudo-layer refactor that follows.
 
-- [ ] Script/test: take a small example house (1 room, 1 chained wall,
+- [x] Script/test: take a small example house (1 room, 1 chained wall,
       outdoor boundary), `expand()`, simulate forward with **known**
       ground-truth params and synthetic weather (sinusoid + noise) →
       synthetic "measured" indoor temperature.
-- [ ] Perturb priors away from ground truth (×2 on R, ×0.5 on C), run
+- [x] Perturb priors away from ground truth (×2 on R, ×0.5 on C), run
       `fit_nls` on the synthetic observations.
-- [ ] Assert recovery: fitted `R_wall`, `C_wall` within tolerance (e.g. 10 %
-      or 2σ); reported σ consistent with the injected noise.
-- [ ] Keep as a pytest (mark `slow` if needed).
+- [x] Assert recovery: fitted `R_wall`, `C_wall` within tolerance (10 %);
+      reported σ consistent with the injected noise.
+- [x] Keep as a pytest (mark `roundtrip`).
 
 **Test:** `uv run pytest -m roundtrip` recovers ground-truth parameters
 through the *current* fit path.

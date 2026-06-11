@@ -20,3 +20,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["thermogram"]
+
+[tool.pytest.ini_options]
+markers = [
+    "roundtrip: synthetic round-trip recovery tests (may be slow)",
+]

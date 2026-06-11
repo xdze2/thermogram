@@ -1,5 +1,11 @@
 # Changelog
 
+- **2026-06** — Step 1: synthetic round-trip — `thermogram/solver/tests/test_roundtrip.py`
+  added; expands `maison_test.json`, forward-simulates 4 days with a sinusoidal outdoor
+  temperature and 0.05 °C noise, perturbs priors ×2 on R / ×0.5 on C, runs `fit_nls`,
+  and asserts recovery within 10 % for both `R_wall` and `C_wall`; `roundtrip` pytest
+  marker registered in `pyproject.toml`; 63/63 green.
+
 - **2026-06** — Step 0: green test baseline — `pytest` added as a `dev`
   dependency group; test fixtures (`chambre_1r1c.json`, `chambre_2r2c.json`,
   `chambre_v1.json`, `maison_test.json`) committed under
