@@ -437,7 +437,7 @@ def expand(house: dict) -> tuple[dict, dict[str, list[str]]]:
 
     Returns
     -------
-    atomic_model:   atomic node dict conforming to model.schema.json v0.3.
+    atomic_model:   atomic node dict conforming to models.AtomicModel (v0.3).
     expansion_map:  { house_uuid → [atomic_node_ids] }
     """
     materials = {**_MATERIAL_LIBRARY, **house.get("materials", {})}

@@ -37,8 +37,8 @@ static build from `ui/build/`, not the dev server.
 
 Python code lives in the `thermogram/` package (`thermogram/api/`,
 `thermogram/solver/`), installed editable via hatchling. Runtime data
-(`data/`), the frontend (`ui/`), and JSON schemas (`schema/`) sit at the
-repo root, **outside** the package — code reaches them via paths resolved
+(`data/`) and the frontend (`ui/`) sit at the repo root, **outside** the
+package — code reaches them via paths resolved
 relative to `__file__` (e.g. `DATA_DIR` in `api/main.py`,
 `_MATERIALS_DIR` in `solver/physics.py`). If you move a module, check its
 `Path(__file__).parents[n]` computations.

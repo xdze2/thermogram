@@ -77,6 +77,58 @@ through the *current* fit path.
 
 ---
 
+## Step 1.2 — Pydantic models as the single data contract
+
+Today nothing structurally defines the core types: the house, study, and
+atomic model cross the API as untyped `dict`, and the only real typing was
+three `*Request` envelopes in `api/main.py`. The hand-written JSON Schemas
+under `schema/` described those shapes but validated nowhere and had drifted
+(`solar_absorptance` vs `alpha_solar`, missing `studies` / `solar_signal` /
+room `role`, `schema_version` "0.2" vs the live "0.3"). They have been
+**dropped** in favour of Pydantic models.
+
+Done:
+
+- [x] `thermogram/models.py` — canonical models for all three layers:
+      domain/element (`House`, `Room`, the discriminated `Element` union,
+      `Material`/`MaterialEntry`, `Study`), atomic (`AtomicModel` with the
+      mass/boundary/resistance/source node union + `Edge`), and the lumped
+      φ-space (`LumpedElement`, `View`, `Prior`, `Posterior`) — the last
+      defined but **not yet wired** (it is the Step 2/3 contract).
+- [x] Modelled against what the code + real files actually use (not the old
+      schemas); `tests/test_models.py` pins them to every house / fixture /
+      material file and to live `expand()` output so they can't drift.
+- [x] Deleted `schema/*.json` and the dead `$schema` refs in
+      `data/materials/*.json`.
+
+Remaining — full adoption (this step's actual work):
+
+- [ ] Wire the API routes to the models instead of bare `dict`: `get_house`
+      / `put_house` / `create_house`, `create_study` / `put_study` /
+      `get_study`, and `post_house_expand` validate in/out against `House`,
+      `Study`, `AtomicModel`. FastAPI then validates request bodies and
+      generates the OpenAPI schema for free.
+- [ ] Fold the three existing `*Request` models (`SimulateRequest`,
+      `FitRequest`, `PreviewGroupsRequest`) onto the shared types — replace
+      their `atomic_model: dict` / `params: dict[str, dict]` escape hatches
+      with `AtomicModel` / typed params where they aren't superseded by the
+      view work in Step 3.
+- [ ] Boundary convention: routes accept/return models; the solver keeps
+      reading plain dicts. `expand()` and friends are fed via
+      `house.model_dump(by_alias=True, exclude_none=True)` and their output
+      re-validated as `AtomicModel`. Keep computed `_model_hash` / `_stale_*`
+      fields working (models `extra="allow"` them).
+- [ ] Generate the frontend's TypeScript types from the OpenAPI schema (or
+      from `model_json_schema()`) so `ui/` stops passing implicit `any` —
+      one shared contract across the stack. (Can trail into Step 4.)
+
+**Test:** API-level tests — posting a malformed house / study is rejected
+with a 422; a valid round-trip (`PUT` then `GET`) preserves every field;
+`/houses/{name}/expand` returns a payload that validates as `AtomicModel`.
+`tests/test_models.py` stays green on every committed data file.
+
+---
+
 ## Step 2 — Lumped model layer in the solver (φ-space)
 
 Minimal version of the lumped model layer from modeling_pipeline.md. Scope cuts
