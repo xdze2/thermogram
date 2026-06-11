@@ -1,5 +1,11 @@
 # Changelog
 
+- **2026-06** — Step 0: green test baseline — `pytest` added as a `dev`
+  dependency group; test fixtures (`chambre_1r1c.json`, `chambre_2r2c.json`,
+  `chambre_v1.json`, `maison_test.json`) committed under
+  `thermogram/solver/tests/fixtures/`; all five test files redirected away
+  from `data/` to the committed fixtures; `uv run pytest` is 62/62 green.
+
 - **2026-06** — Package layout — `api/` and `solver/` moved into a real `thermogram/`
   package dir; editable install no longer relies on a `.pth` pointing at the repo's
   parent dir; `Path(__file__)` lookups (data, materials, ui/build, test fixtures)

@@ -17,11 +17,11 @@ from thermogram.solver.assemble import assemble
 from thermogram.solver.fit import _patch_model, build_forward, fit_nls, FitResult
 from thermogram.solver.simulate import simulate_zoh
 
-DATA = Path(__file__).parents[3] / "data" / "examples"
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def load(name: str) -> dict:
-    with open(DATA / name) as f:
+    with open(FIXTURES / name) as f:
         return json.load(f)
 
 

@@ -40,22 +40,17 @@ Steps are ordered; each is independently testable and leaves the app working.
 
 ---
 
-## Step 0 — Green baseline (broken today)
+## Step 0 — Green baseline ✅
 
-The test suite currently fails: `data/examples/*.json` fixtures were lost
-when the data dir moved out of the code tree, `pytest` is not a declared
-dependency, and `test_physics.py` reads the live `data/houses/maison_test.json`
-which has since been edited (UUIDs changed).
-
-- [ ] Add a `dev` dependency group to `pyproject.toml` (`pytest`).
-- [ ] Recreate the test fixtures (`chambre_1r1c.json`, `chambre_2r2c.json`,
+- [x] Add a `dev` dependency group to `pyproject.toml` (`pytest`).
+- [x] Recreate the test fixtures (`chambre_1r1c.json`, `chambre_2r2c.json`,
       `chambre_v1.json`) as **committed files** under
       `thermogram/solver/tests/fixtures/` — test data lives with the tests,
       not in the mutable `data/` dir.
-- [ ] Point `test_physics.py` at a committed fixture copy of `maison_test`,
+- [x] Point `test_physics.py` at a committed fixture copy of `maison_test`,
       never at live user data.
-- [ ] Fix whatever still fails after that (11 failures predate the fixture
-      loss — triage them).
+- [x] Fix whatever still fails after that (no pre-existing failures remained
+      once fixtures were in place — 62/62 green).
 
 **Test:** `uv run pytest` is green on a fresh clone, and stays green after
 the user edits any house in `data/houses/`.

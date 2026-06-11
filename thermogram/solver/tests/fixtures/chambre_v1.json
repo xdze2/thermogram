@@ -1,0 +1,43 @@
+{
+  "schema_version": "0.3",
+  "id": "chambre_v1",
+  "name": "chambre_v1",
+  "nodes": [
+    {"id": "chambre",        "kind": "mass",       "label": "Chambre",            "C": 9000000.0},
+    {"id": "mur_SE",         "kind": "mass",       "label": "Mur SE [wall]",      "C": 810000.0},
+    {"id": "exterior",       "kind": "boundary",   "label": "Extérieur",          "T_source": "exterior"},
+    {"id": "R_roof",         "kind": "resistance", "label": "Toit (R)",           "R": 0.2354},
+    {"id": "R_walls_ins",    "kind": "resistance", "label": "Murs ins (R)",       "R": 0.0738},
+    {"id": "R_win_SE",       "kind": "resistance", "label": "Fenêtre SE (R)",     "R": 0.2381},
+    {"id": "R_win_NE",       "kind": "resistance", "label": "Fenêtre NE (R)",     "R": 0.5952},
+    {"id": "R_wall_SE_ext",  "kind": "resistance", "label": "Mur SE ext (Rse)",   "R": 0.0040},
+    {"id": "R_wall_SE_int",  "kind": "resistance", "label": "Mur SE int (Rsi)",   "R": 0.0130},
+    {"id": "apport_win_SE",  "kind": "source",     "label": "Apport solaire SE",  "signal": "apport_win_SE",  "gain": 1.0},
+    {"id": "apport_win_NE",  "kind": "source",     "label": "Apport solaire NE",  "signal": "apport_win_NE",  "gain": 1.0}
+  ],
+  "edges": [
+    {"from": "exterior",      "to": "R_roof"},
+    {"from": "R_roof",        "to": "chambre"},
+    {"from": "exterior",      "to": "R_walls_ins"},
+    {"from": "R_walls_ins",   "to": "chambre"},
+    {"from": "exterior",      "to": "R_win_SE"},
+    {"from": "R_win_SE",      "to": "chambre"},
+    {"from": "exterior",      "to": "R_win_NE"},
+    {"from": "R_win_NE",      "to": "chambre"},
+    {"from": "exterior",      "to": "R_wall_SE_ext"},
+    {"from": "R_wall_SE_ext", "to": "mur_SE"},
+    {"from": "mur_SE",        "to": "R_wall_SE_int"},
+    {"from": "R_wall_SE_int", "to": "chambre"},
+    {"from": "apport_win_SE", "to": "chambre"},
+    {"from": "apport_win_NE", "to": "chambre"}
+  ],
+  "wall_chains": {
+    "Mur SE": {
+      "mass_ids": ["mur_SE"],
+      "r_ids": [],
+      "chain_n": 1,
+      "R_wall": 0.1300,
+      "C_wall": 810000.0
+    }
+  }
+}

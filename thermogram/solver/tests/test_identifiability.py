@@ -11,11 +11,11 @@ import pytest
 from thermogram.solver.identifiability import group_params
 from thermogram.solver.fit import build_forward, fit_nls, expand_groups
 
-DATA = Path(__file__).parents[3] / "data" / "examples"
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def load(name: str) -> dict:
-    with open(DATA / name) as f:
+    with open(FIXTURES / name) as f:
         return json.load(f)
 
 

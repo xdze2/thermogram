@@ -8,9 +8,9 @@ import pytest
 from thermogram.solver.physics import expand, model_hash
 from thermogram.solver.assemble import assemble
 
-DATA = Path(__file__).parents[3] / "data"
+FIXTURES = Path(__file__).parent / "fixtures"
 
-with open(DATA / "houses" / "maison_test.json") as f:
+with open(FIXTURES / "maison_test.json") as f:
     HOUSE = json.load(f)
 
 # Convenience: UUIDs from maison_test.json

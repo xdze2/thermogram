@@ -1,0 +1,66 @@
+{
+  "name": "maison_test",
+  "label": "Chambre test",
+  "schema_version": "0.3",
+  "rooms": [
+    {
+      "id": "a1b2c3d4-0001-0000-0000-000000000001",
+      "label": "Chambre",
+      "role": "mass",
+      "a": 4,
+      "b": 5,
+      "c": 3,
+      "furniture_factor": 1.5
+    }
+  ],
+  "elements": [
+    {
+      "id": "a1b2c3d4-0001-0000-0000-000000000002",
+      "kind": "outdoor",
+      "role": "boundary",
+      "label": "Extérieur",
+      "obs_signal": "open_meteo_historic/temperature_2m?location=home",
+      "solar_signal": "open_meteo_historic/shortwave_radiation?location=home"
+    },
+    {
+      "id": "a1b2c3d4-0001-0000-0000-000000000004",
+      "kind": "opaque",
+      "label": "Wall SE",
+      "between": [
+        "a1b2c3d4-0001-0000-0000-000000000001",
+        "a1b2c3d4-0001-0000-0000-000000000002"
+      ],
+      "a": 5,
+      "b": 3,
+      "orientation": "S",
+      "tilt": 90,
+      "layers": [
+        {
+          "material": "brick_full",
+          "thickness": 0.3
+        }
+      ],
+      "solar_absorptance": 0.5
+    },
+    {
+      "id": "a1b2c3d4-0001-0000-0000-000000000005",
+      "kind": "opaque",
+      "label": "Wall NE",
+      "between": [
+        "a1b2c3d4-0001-0000-0000-000000000001",
+        "a1b2c3d4-0001-0000-0000-000000000002"
+      ],
+      "a": 4,
+      "b": 3,
+      "orientation": "N",
+      "tilt": 90,
+      "layers": [
+        {
+          "material": "glass_wool",
+          "thickness": 0.15
+        }
+      ],
+      "no_mass": true
+    }
+  ]
+}

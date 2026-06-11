@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.3",
+  "id": "chambre_1r1c",
+  "name": "chambre_1r1c",
+  "nodes": [
+    {"id": "chambre",             "kind": "mass",       "label": "Chambre",          "C": 8640000.0},
+    {"id": "exterior",            "kind": "boundary",   "label": "Extérieur",        "T_source": "exterior"},
+    {"id": "mur_sud",             "kind": "resistance", "label": "Mur Sud (R)",      "R": 0.034},
+    {"id": "apport_fenetre_sud",  "kind": "source",     "label": "Apport solaire",   "signal": "apport_fenetre_sud", "gain": 1.0}
+  ],
+  "edges": [
+    {"from": "exterior",           "to": "mur_sud"},
+    {"from": "mur_sud",            "to": "chambre"},
+    {"from": "apport_fenetre_sud", "to": "chambre"}
+  ],
+  "wall_chains": {}
+}
