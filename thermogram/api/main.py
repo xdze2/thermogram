@@ -145,13 +145,13 @@ def create_house(body: dict) -> dict:
 
 @app.post("/houses/{name}/expand")
 def post_house_expand(name: str) -> dict:
-    """Expand the house into an RC model (preview, no persist)."""
+    """Expand the house into an atomic model (preview, no persist)."""
     house = _load_house(name)
     try:
-        rc_model, expansion_map = expand(house)
+        atomic_model, expansion_map = expand(house)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"model": rc_model, "expansion_map": expansion_map}
+    return {"model": atomic_model, "expansion_map": expansion_map}
 
 
 # ── studies (embedded in house) ───────────────────────────────────────────────
@@ -169,10 +169,10 @@ def create_study(name: str, body: dict) -> dict:
 
     # Pre-populate inputs and observations from house element signals
     try:
-        rc_model, _ = expand(house)
+        atomic_model, _ = expand(house)
         auto_inputs: dict[str, str] = {}
         auto_observations: dict[str, str] = {}
-        for node in rc_model.get("nodes", []):
+        for node in atomic_model.get("nodes", []):
             if node["kind"] == "boundary":
                 t_src = node.get("T_source")
                 if isinstance(t_src, str):
@@ -269,23 +269,23 @@ def post_simulate_run(req: SimulateRequest) -> dict:
 
     house = _load_house(req.house_name)
     try:
-        rc_model, _ = expand(house)
+        atomic_model, _ = expand(house)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
 
     if req.param_overrides:
         nodes_patched = []
-        for n in rc_model.get("nodes", []):
+        for n in atomic_model.get("nodes", []):
             n = dict(n)
             for field in ("R", "C", "gain"):
                 key = f"{n['id']}.{field}"
                 if key in req.param_overrides:
                     n[field] = req.param_overrides[key]
             nodes_patched.append(n)
-        rc_model = {**rc_model, "nodes": nodes_patched}
+        atomic_model = {**atomic_model, "nodes": nodes_patched}
 
     try:
-        system = assemble(rc_model)
+        system = assemble(atomic_model)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Model assembly error: {e}") from e
 
@@ -301,7 +301,7 @@ def post_simulate_run(req: SimulateRequest) -> dict:
 
     # Auto-fetch signals for source nodes (e.g. solar gains from glazing with SHGC)
     # that are not already covered by req.inputs.
-    nodes_by_id = {n["id"]: n for n in rc_model.get("nodes", [])}
+    nodes_by_id = {n["id"]: n for n in atomic_model.get("nodes", [])}
     for src_id in system.source_ids:
         if src_id in inputs:
             continue
@@ -386,21 +386,21 @@ def post_simulate_run(req: SimulateRequest) -> dict:
             "message": result.message,
         },
         "run_record": run_record,
-        "rc_model": rc_model,
+        "atomic_model": atomic_model,
     }
 
 
 # ── fit ───────────────────────────────────────────────────────────────────────
 
 class PreviewGroupsRequest(BaseModel):
-    model: dict
+    atomic_model: dict
     param_keys: list[str]
 
 
 @app.post("/fit/preview-groups")
 def post_fit_preview_groups(req: PreviewGroupsRequest) -> list[list[str]]:
     try:
-        return group_params(req.model, req.param_keys)
+        return group_params(req.atomic_model, req.param_keys)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -426,7 +426,7 @@ def post_fit_run(req: FitRequest) -> dict:
 
     house = _load_house(req.house_name)
     try:
-        rc_model, _ = expand(house)
+        atomic_model, _ = expand(house)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
 
@@ -459,12 +459,12 @@ def post_fit_run(req: FitRequest) -> dict:
     import datetime as _dt
     _t0_sec = _dt.datetime.fromisoformat(req.start).timestamp()
     _t1_sec = _dt.datetime.fromisoformat(req.end).timestamp()
-    _rc_nodes_by_id = {n["id"]: n for n in rc_model.get("nodes", [])}
-    _fit_system = assemble(rc_model)
+    _atomic_nodes_by_id = {n["id"]: n for n in atomic_model.get("nodes", [])}
+    _fit_system = assemble(atomic_model)
     for b_id in _fit_system.boundary_ids:
         if b_id in inputs:
             continue
-        node = _rc_nodes_by_id.get(b_id, {})
+        node = _atomic_nodes_by_id.get(b_id, {})
         t_src = node.get("T_source")
         if isinstance(t_src, (int, float)):
             t_arr = np.array([_t0_sec, _t1_sec])
@@ -479,12 +479,12 @@ def post_fit_run(req: FitRequest) -> dict:
 
     y0 = None
     if req.y0_uniform is not None:
-        system = assemble(rc_model)
+        system = assemble(atomic_model)
         y0 = np.full(len(system.mass_ids), req.y0_uniform)
 
     try:
         forward_fn, log_p0, param_keys, groups = build_forward(
-            rc_model, inputs, observations, fit_config,
+            atomic_model, inputs, observations, fit_config,
             req.start, req.end, req.dt_minutes,
             y0=y0,
         )
@@ -539,7 +539,7 @@ def post_fit_run(req: FitRequest) -> dict:
             break
     _save_house(req.house_name, house)
     response["fit_record"] = fit_record
-    response["rc_model"] = rc_model
+    response["atomic_model"] = atomic_model
 
     return response
 

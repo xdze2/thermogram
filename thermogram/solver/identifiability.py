@@ -24,13 +24,13 @@ from __future__ import annotations
 from collections import defaultdict
 
 
-def group_params(model: dict, param_keys: list[str]) -> list[list[str]]:
+def group_params(atomic_model: dict, param_keys: list[str]) -> list[list[str]]:
     """Group unidentifiable resistance parameters from topology.
 
     Parameters
     ----------
-    model:
-        Model dict (nodes + edges).
+    atomic_model:
+        Atomic model dict (nodes + edges).
     param_keys:
         List of param keys in 'node_id.field' format that are *free* for
         fitting.  Only keys whose node is a resistance and whose field is 'R'
@@ -45,11 +45,11 @@ def group_params(model: dict, param_keys: list[str]) -> list[list[str]]:
         The order of groups matches the order of the first key in each group
         as it appears in param_keys.
     """
-    nodes = {n["id"]: n for n in model["nodes"]}
+    nodes = {n["id"]: n for n in atomic_model["nodes"]}
 
     # Build adjacency (undirected)
     neighbours: dict[str, list[str]] = defaultdict(list)
-    for edge in model["edges"]:
+    for edge in atomic_model["edges"]:
         a, b = edge["from"], edge["to"]
         neighbours[a].append(b)
         neighbours[b].append(a)

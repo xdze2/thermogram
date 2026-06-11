@@ -169,7 +169,7 @@
 	let inpPowerContainer = $state(null);
 	let inpPowerChart     = null;
 
-	const rcNodes = $derived(simResult?.rc_model?.nodes ?? []);
+	const rcNodes = $derived(simResult?.atomic_model?.nodes ?? []);
 	const nodeKindMap   = $derived(
 		Object.fromEntries(rcNodes.map((n) => [n.id, n.kind]))
 	);

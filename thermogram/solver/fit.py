@@ -65,15 +65,15 @@ def _parse_key(key: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def _patch_model(model: dict, params: dict[str, float]) -> dict:
-    """Return a deep copy of model with param values applied.
+def _patch_model(atomic_model: dict, params: dict[str, float]) -> dict:
+    """Return a deep copy of atomic_model with param values applied.
 
     Supports two key formats:
     - "node_id.field"         — patch a single node field directly
     - "wall_label.R" / ".C"  — fan out to all lump nodes in a chained wall
       (wall_chains entry maps label → {mass_ids, r_ids, chain_n})
     """
-    m = copy.deepcopy(model)
+    m = copy.deepcopy(atomic_model)
     nodes_by_id = {n["id"]: n for n in m["nodes"]}
     wall_chains = m.get("wall_chains", {})
 
@@ -92,7 +92,7 @@ def _patch_model(model: dict, params: dict[str, float]) -> dict:
         elif node_id in nodes_by_id:
             nodes_by_id[node_id][field_name] = value
         else:
-            raise ValueError(f"Node '{node_id}' not found in model")
+            raise ValueError(f"Node '{node_id}' not found in atomic_model")
     return m
 
 
@@ -101,7 +101,7 @@ def _patch_model(model: dict, params: dict[str, float]) -> dict:
 # ---------------------------------------------------------------------------
 
 def build_forward(
-    model: dict,
+    atomic_model: dict,
     inputs: dict[str, tuple[np.ndarray, np.ndarray]],
     observations: dict[str, tuple[np.ndarray, np.ndarray]],
     fit_config: dict,
@@ -127,8 +127,8 @@ def build_forward(
 
     Parameters
     ----------
-    model:
-        Model dict (topology stays fixed; only the param fields are patched).
+    atomic_model:
+        Atomic model dict (topology stays fixed; only the param fields are patched).
     inputs:
         {node_id: (t_sec, values)} for boundary/source nodes.
     observations:
@@ -168,7 +168,7 @@ def build_forward(
     all_param_keys = list(params_cfg.keys())
 
     # Auto-group parallel resistors
-    groups = group_params(model, all_param_keys)
+    groups = group_params(atomic_model, all_param_keys)
     # One representative key per group (first element)
     group_keys = [g[0] for g in groups]
     # Nominal for each group = nominal of representative key
@@ -199,7 +199,7 @@ def build_forward(
             multiplier = np.exp(log_val) / params_cfg[group[0]]["nominal"]
             for key in group:
                 params[key] = params_cfg[key]["nominal"] * multiplier
-        patched = _patch_model(model, params)
+        patched = _patch_model(atomic_model, params)
         system = assemble(patched)
         result = simulate_zoh(system, inputs, start, end, dt_minutes=dt_minutes, y0=y0)
 

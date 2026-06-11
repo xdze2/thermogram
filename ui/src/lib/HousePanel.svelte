@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import SignalPicker from '$lib/SignalPicker.svelte';
 
-  let { house, onchange, customMaterials = {}, rcModel = null, dirty = false, saveLoading = false, saveError = null, onsave = null, ondelete = null } = $props();
+  let { house, onchange, customMaterials = {}, atomicModel = null, dirty = false, saveLoading = false, saveError = null, onsave = null, ondelete = null } = $props();
 
   let addMenuOpen = $state(false);
 
@@ -47,7 +47,7 @@
   const rooms      = $derived(house?.rooms    ?? []);
   const elements   = $derived(house?.elements ?? []);
   const materials  = $derived({ ...BUILTIN_MATERIALS, ...(customMaterials ?? {}), ...(house?.materials ?? {}) });
-  const wallChains = $derived(rcModel?.wall_chains ?? {});
+  const wallChains = $derived(atomicModel?.wall_chains ?? {});
 
   // All zone options: rooms + boundary elements (outdoor, ground)
   const zoneOptions = $derived([

@@ -46,7 +46,7 @@
 			house              = await res.json();
 			houseName          = name;
 			houseSavedSnapshot = JSON.stringify(house);
-			loadRcModel();
+			loadAtomicModel();
 		} catch (e) {
 			alert(`Failed to load house: ${e.message}`);
 		}
@@ -104,7 +104,7 @@
 			houseName = null;
 			house = null;
 			selectedStudyId = null;
-			rcModel = null;
+			atomicModel = null;
 			activeSection = 'houses';
 			await loadHousesList();
 		} catch (e) {
@@ -143,36 +143,36 @@
 	// ── studies (embedded in house) ───────────────────────────────────────────
 	const studies = $derived(house?.studies ?? []);
 
-	// ── RC model (house-level, derived from expand) ──────────────────────────
-	let rcModel = $state(null);
-	let rcModelLoading = $state(false);
-	let rcModelError = $state(null);
+	// ── atomic model (house-level, derived from expand) ─────────────────────
+	let atomicModel = $state(null);
+	let atomicModelLoading = $state(false);
+	let atomicModelError = $state(null);
 
-	async function loadRcModel() {
-		if (!houseName) { rcModel = null; return; }
-		rcModelLoading = true;
-		rcModelError = null;
+	async function loadAtomicModel() {
+		if (!houseName) { atomicModel = null; return; }
+		atomicModelLoading = true;
+		atomicModelError = null;
 		try {
 			const res = await fetch(`${API}/houses/${houseName}/expand`, { method: 'POST' });
 			if (res.ok) {
-				rcModel = (await res.json()).model;
+				atomicModel = (await res.json()).model;
 			} else {
 				const body = await res.json().catch(() => ({}));
-				rcModelError = body.detail ?? `expand failed (${res.status})`;
+				atomicModelError = body.detail ?? `expand failed (${res.status})`;
 			}
 		} catch (e) {
-			rcModelError = e.message;
+			atomicModelError = e.message;
 		} finally {
-			rcModelLoading = false;
+			atomicModelLoading = false;
 		}
 	}
 
 	// B — debounced auto-refresh when house state changes
-	let _rcDebounceTimer = null;
+	let _atomicModelDebounceTimer = null;
 	$effect(() => {
 		JSON.stringify(house); // track house deeply
-		if (_rcDebounceTimer) clearTimeout(_rcDebounceTimer);
-		_rcDebounceTimer = setTimeout(() => { loadRcModel(); }, 500);
+		if (_atomicModelDebounceTimer) clearTimeout(_atomicModelDebounceTimer);
+		_atomicModelDebounceTimer = setTimeout(() => { loadAtomicModel(); }, 500);
 	});
 
 	// ── current study state ───────────────────────────────────────────────────
@@ -344,13 +344,13 @@
 			const res = await fetch(`${API}/fit/preview-groups`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ model: currentModel, param_keys: keys }),
+				body: JSON.stringify({ atomic_model: currentModel, param_keys: keys }),
 			});
 			if (res.ok) paramGroups = await res.json();
 		} catch { /* silently ignore */ }
 	}
 
-	$effect(() => { refreshGroups(rcModel); });
+	$effect(() => { refreshGroups(atomicModel); });
 
 	onMount(async () => {
 		await loadHousesList();
@@ -378,7 +378,7 @@
 			<!-- house sub-nav -->
 			{#if activeSection === 'house' && houseName}
 				<div class="nav-divider"></div>
-				<button class="nav-item nav-back" onclick={() => { houseName = null; house = null; selectedStudyId = null; rcModel = null; activeSection = 'houses'; }}>← all houses</button>
+				<button class="nav-item nav-back" onclick={() => { houseName = null; house = null; selectedStudyId = null; atomicModel = null; activeSection = 'houses'; }}>← all houses</button>
 			{/if}
 		</div>
 	</nav>
@@ -441,7 +441,7 @@
 						{house}
 						onchange={(h) => (house = { ...h, _model_hash: house._model_hash, studies: $state.snapshot(house.studies) })}
 						{customMaterials}
-						{rcModel}
+						{atomicModel}
 						dirty={houseDirty}
 						saveLoading={houseSaveLoading}
 						saveError={houseSaveError}
@@ -451,7 +451,7 @@
 				</div>
 				<div class="study-pane">
 					<div class="study-pane-tabs">
-						<button class="sim-tab" class:active={simPaneTab === 'rc'}         onclick={() => { simPaneTab = 'rc'; loadRcModel(); }}>RC Graph</button>
+						<button class="sim-tab" class:active={simPaneTab === 'rc'}         onclick={() => { simPaneTab = 'rc'; loadAtomicModel(); }}>RC Graph</button>
 						<button class="sim-tab" class:active={simPaneTab === 'studies'}    onclick={() => (simPaneTab = 'studies')}>Studies</button>
 						<button class="sim-tab" class:active={simPaneTab === 'sim'}
 							class:disabled={!selectedStudyId}
@@ -460,24 +460,24 @@
 					</div>
 
 					{#if simPaneTab === 'rc'}
-						{#if rcModel}
+						{#if atomicModel}
 							<div class="sim-pane-body">
 								<div class="rc-graph-toolbar">
-									<button class="rc-refresh-btn" onclick={loadRcModel} disabled={rcModelLoading} title="Refresh RC graph">
-										{rcModelLoading ? '…' : '⟳'}
+									<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading} title="Refresh RC graph">
+										{atomicModelLoading ? '…' : '⟳'}
 									</button>
 								</div>
-								<GraphView model={rcModel} selected={null} onselect={() => {}} onaddedge={() => {}} groups={paramGroups} />
+								<GraphView model={atomicModel} selected={null} onselect={() => {}} onaddedge={() => {}} groups={paramGroups} />
 							</div>
 						{:else}
 							<div class="study-pane-empty">
-								{#if rcModelError}
-									<span class="rc-model-error">{rcModelError}</span>
+								{#if atomicModelError}
+									<span class="rc-model-error">{atomicModelError}</span>
 								{:else}
-									<span>no RC model</span>
+									<span>no atomic model</span>
 								{/if}
-								<button class="rc-refresh-btn" onclick={loadRcModel} disabled={rcModelLoading}>
-									{rcModelLoading ? 'loading…' : '⟳ refresh'}
+								<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading}>
+									{atomicModelLoading ? 'loading…' : '⟳ refresh'}
 								</button>
 							</div>
 						{/if}
@@ -626,7 +626,7 @@
 									<FitPanel
 										house_name={houseName}
 										study_id={selectedStudyId}
-										model={rcModel}
+										model={atomicModel}
 										inputs={simInputs}
 										range={simRange}
 										observations={simObservations}

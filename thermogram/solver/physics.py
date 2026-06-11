@@ -1,6 +1,6 @@
-"""House model → RC network expansion.
+"""House model → atomic model expansion.
 
-expand(house) → (model_dict, expansion_map)
+expand(house) → (atomic_model_dict, expansion_map)
 
 Each room/element carries a `role` field:
   - "mass"     : temperature is unknown, solved for (default for rooms)
@@ -9,8 +9,8 @@ Each room/element carries a `role` field:
 
 outdoor/ground elements are always boundary nodes regardless of role.
 
-expansion_map: { house_uuid → list[rc_node_id] }
-  Maps each house room/element UUID to the RC node ids it produced.
+expansion_map: { house_uuid → list[atomic_node_id] }
+  Maps each house room/element UUID to the atomic node ids it produced.
 """
 
 from __future__ import annotations
@@ -427,7 +427,7 @@ def _expand_air_exchange(
 
 
 def expand(house: dict) -> tuple[dict, dict[str, list[str]]]:
-    """Expand a house model dict into an RC network model dict + expansion_map.
+    """Expand a house model dict into an atomic model dict + expansion_map.
 
     Each room/element's `role` field controls node type:
       - "mass"     → mass node (temperature solved)
@@ -437,8 +437,8 @@ def expand(house: dict) -> tuple[dict, dict[str, list[str]]]:
 
     Returns
     -------
-    model:          RC network dict conforming to model.schema.json v0.3.
-    expansion_map:  { house_uuid → [rc_node_ids] }
+    atomic_model:   atomic node dict conforming to model.schema.json v0.3.
+    expansion_map:  { house_uuid → [atomic_node_ids] }
     """
     materials = {**_MATERIAL_LIBRARY, **house.get("materials", {})}
 
@@ -506,14 +506,14 @@ def expand(house: dict) -> tuple[dict, dict[str, list[str]]]:
             )
             builder.add_edge(src_id, zone_id)
 
-    model_id = f"expanded_{_uuid.uuid4().hex[:8]}"
-    model = {
+    atomic_model_id = f"expanded_{_uuid.uuid4().hex[:8]}"
+    atomic_model = {
         "schema_version": "0.3",
-        "id": model_id,
+        "id": atomic_model_id,
         "name": house.get("label", "Expanded model"),
         "nodes": builder.nodes,
         "edges": builder.edges,
         "wall_chains": builder.wall_chains,
     }
 
-    return model, builder.expansion_map
+    return atomic_model, builder.expansion_map

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12",
-  "$id": "thermogram/model",
-  "title": "ThermalRCModel",
-  "description": "A lumped thermal RC network. All physical elements are nodes; edges are plain wires (no attributes). Assembles to C·dT/dt = -L·T + B·u(t).",
+  "$id": "thermogram/atomic_model",
+  "title": "ThermalAtomicModel",
+  "description": "Atomic layer: a lumped thermal RC network. All physical elements are nodes; edges are plain wires (no attributes). Assembles to C·dT/dt = -L·T + B·u(t).",
   "type": "object",
   "required": ["schema_version", "id", "name", "nodes", "edges"],
   "additionalProperties": false,

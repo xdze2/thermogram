@@ -4,7 +4,7 @@ How a noisy, partial physical description of a house becomes a fittable model
 — and how the fit feeds back to refine the description.
 
 This is a **design document**. The current code implements early pieces of it
-(notably the layer-1 element list and a degenerate version of the atom/pseudo
+(notably the layer-1 element list and a degenerate version of the atomic/lumped
 split); the goal here is to spell out the target architecture, the data
 objects, and the operations that connect them.
 
@@ -34,7 +34,7 @@ the loop calls.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│ DOMAIN layer  — what the user / agent reasons in                   │
+│ DOMAIN MODEL  — what the user / agent reasons in                   │
 │                                                                     │
 │   envelope: opaque, glazing, infiltration, ground                  │
 │   internal: air, mass, air↔mass coupling                           │
@@ -43,14 +43,14 @@ the loop calls.
 │   boundaries: T_outdoor, T_ground, T_neighbor                      │
 │                                                                     │
 │   Domain elements describe ROLES, not quantities. They are not     │
-│   directly fittable — they are realized by pseudo elements.        │
+│   directly fittable — they are realized by lumped elements.        │
 └────────────────────────────────────────────────────────────────────┘
                               │
-                              │  a View picks pseudo elements
+                              │  a View picks lumped elements
                               │  that realize the domain
                               ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│ PSEUDO layer  — the φ-space, what the fit operates on              │
+│ LUMPED MODEL  — the φ-space, what the fit operates on              │
 │                                                                     │
 │   Req            (lossless aggregation of series/parallel R)       │
 │   Ceq            (lossless aggregation of parallel C)              │
@@ -58,36 +58,36 @@ the loop calls.
 │   T_boundary     (driven node, atom exposed directly)              │
 │   Q_source       (injected power, atom exposed directly)           │
 │                                                                     │
-│   Each pseudo carries:                                              │
-│     - a Belief (prior, composed from atom Beliefs)                  │
+│   Each lumped element carries:                                      │
+│     - a Belief (prior, composed from atomic Beliefs)                │
 │     - a mode: free / fixed / tied                                   │
 │     - an optional Modulator (gain(t), schedule(t))                  │
 │     - provenance: which atoms it covers, which domain it realizes  │
 └────────────────────────────────────────────────────────────────────┘
                               │
-                              │  pseudos expand to atoms via combine rules
+                              │  lumped elements expand to atoms via combine rules
                               ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│ ATOMIC layer  — what the solver assembles                          │
+│ ATOMIC MODEL  — what the solver assembles                          │
 │                                                                     │
 │   R, C, T(t), Q(t)                                                  │
 │   Pure math. No physics meaning, no priors.                        │
 │   Atoms may carry an optional modulator(t) attached at the         │
-│   pseudo level (e.g. shutter gain on a window R).                   │
+│   lumped level (e.g. shutter gain on a window R).                   │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 The crucial points:
 
 - **Atoms** are what the solver sees. Building A and B matrices, simulating,
-  computing residuals — all atom-level.
-- **Pseudos** are what the fit sees. The φ-vector, priors, posteriors,
-  correlations — all pseudo-level. This is the identifiability boundary.
+  computing residuals — all at the atomic model level.
+- **Lumped elements** are what the fit sees. The φ-vector, priors, posteriors,
+  correlations — all at the lumped model level. This is the identifiability boundary.
 - **Domain elements** are what the user and the agent talk in terms of.
   "Refine the south wall" is a domain-level statement; it produces a
-  pseudo-level change which the fit then sees.
+  lumped-model change which the fit then sees.
 
-A **View** (defined below) is a choice of pseudos that, together, realize the
+A **View** (defined below) is a choice of lumped elements that, together, realize the
 domain model at a chosen abstraction level. The same domain description can
 be viewed many ways.
 
@@ -113,7 +113,7 @@ class Belief:
 - `estimated` ⇒ wide prior.
 - `guessed` (e.g. "old brick, probably") ⇒ very wide prior, easily updated.
 
-Priors at the pseudo layer are **composed** from these Beliefs at view-build
+Priors at the lumped layer are **composed** from these Beliefs at view-build
 time. The user never writes a prior on `R_envelope` directly — they declare
 beliefs about thickness, λ, area, and the composition rules produce the
 aggregate prior with appropriately propagated uncertainty.
@@ -162,23 +162,23 @@ Atoms are derived from Elements by a deterministic per-element function
 (`build_atoms`). One wall with N layers produces 2 surface R atoms + N layer
 R atoms + N internal C atoms (or 0 C atoms if `no_mass`).
 
-### Pseudo — the φ-space
+### Lumped element — the φ-space
 
 ```python
 @dataclass
-class Pseudo:
+class LumpedElement:
     id: str
     kind: Literal["Req", "Ceq", "RC_chain", "T_boundary", "Q_source"]
     # kind-specific structure:
     n: int | None                    # only for RC_chain (chain length)
     # Provenance:
-    atoms: list[AtomId]              # which atoms this pseudo aggregates
-    combine: CombineRule             # how atoms compose into the pseudo value(s)
+    atoms: list[AtomId]              # which atoms this lump aggregates
+    combine: CombineRule             # how atoms compose into the lump value(s)
     realizes: DomainRef              # which domain element this realizes
     # Fit-facing:
     prior: Belief                    # composed from atom value Beliefs
     mode: Literal["free", "fixed", "tied"]
-    tied_to: PseudoId | None
+    tied_to: LumpedElementId | None
     modulator: Modulator | None      # inherited from atoms or from domain
     # Filled after fit:
     posterior: Belief | None
@@ -192,11 +192,11 @@ CombineRule = Literal[
 ]
 ```
 
-The `combine` rule answers: given the pseudo's posterior value(s), what are
+The `combine` rule answers: given the lumped element's posterior value(s), what are
 the atom values? For `RC_chain(n)`, the rule takes two parameters (R_total,
 C_total) and produces 2n+1 atoms (n+1 R's alternating with n C's).
 
-Note that `RC_chain(n)` is **one pseudo with two free quantities** (R_total
+Note that `RC_chain(n)` is **one lumped element with two free quantities** (R_total
 and C_total). Increasing n changes dynamics fidelity without adding fit
 parameters.
 
@@ -236,16 +236,16 @@ the level the agent reasons in.
 @dataclass
 class View:
     id: str
-    scope: list[ElementId]           # which elements participate
-    pseudos: list[Pseudo]            # the φ-space — what fit() sees
+    scope: list[ElementId]                    # which elements participate
+    lumped: list[LumpedElement]               # the φ-space — what fit() sees
     # Derived indexes:
-    by_domain: dict[DomainRef, list[PseudoId]]
-    by_atom:   dict[AtomId, PseudoId]
+    by_domain: dict[DomainRef, list[LumpedElementId]]
+    by_atom:   dict[AtomId, LumpedElementId]
 ```
 
-A View is a choice of pseudos that **covers every active atom exactly once**.
-Coarse view: few pseudos, each covering many atoms (e.g. one `Req` for the
-whole envelope). Fine view: many pseudos, each covering few atoms (one
+A View is a choice of lumped elements that **covers every active atom exactly once**.
+Coarse view: few lumped elements, each covering many atoms (e.g. one `Req` for the
+whole envelope). Fine view: many lumped elements, each covering few atoms (one
 `Req` + `Ceq` per wall, possibly an `RC_chain` for heavy walls).
 
 The View is what gets persisted with a Study. The atoms and the underlying
@@ -258,13 +258,13 @@ Elements are not persisted in the View — they are recomputed.
 class Study:
     id: str
     house_ref: str
-    view: View
+    view: View                          # lumped model at chosen abstraction
     window: TimeRange
-    inputs: dict[str, SignalRef]     # T_outdoor(t), Q_heating(t), ...
+    inputs: dict[str, SignalRef]        # T_outdoor(t), Q_heating(t), ...
     observations: dict[str, SignalRef]  # T_indoor(t), ...
     fit_config: FitConfig
     result: FitResult | None
-    insights: list[Insight]          # what each fit told us about Elements
+    insights: list[Insight]             # what each fit told us about Elements
 ```
 
 ### Insight — the loop back
@@ -282,7 +282,7 @@ class BeliefUpdate:
     quantity: str                    # "thickness", "lambda", "R_total", ...
     prior: Belief
     posterior: Belief
-    via: PseudoId                    # which φ produced this
+    via: LumpedElementId             # which φ produced this
     accepted: bool | None            # None = pending user review
 ```
 
@@ -307,14 +307,14 @@ def build_domain(house: House) -> list[DomainElement]:
     Deterministic; groups elements by their physical role."""
 
 def fit(view: View, study: Study) -> FitResult:
-    """φ-space fit. Reads pseudo priors, runs solver via atom expansion,
-    returns posteriors on the free pseudos plus residuals and diagnostics
+    """φ-space fit. Reads lumped element priors, runs solver via atom expansion,
+    returns posteriors on the free lumped elements plus residuals and diagnostics
     (AIC, correlation matrix, Jacobian)."""
 
 def attribute(result: FitResult, view: View) -> Insight:
-    """Posterior on pseudos → proposed BeliefUpdates on Elements.
+    """Posterior on lumped elements → proposed BeliefUpdates on Elements.
 
-    For each pseudo, distribute the posterior across its atoms (via the
+    For each lumped element, distribute the posterior across its atoms (via the
     combine rule's inverse) and onward across the atoms' source-element
     beliefs, weighted by each Belief's prior confidence ('known' Beliefs
     absorb nothing; 'guessed' Beliefs absorb most of the update)."""
@@ -324,20 +324,20 @@ def attribute(result: FitResult, view: View) -> Insight:
 
 ```python
 def propose_view(domain: list[DomainElement], depth: ViewDepth) -> View:
-    """Pick pseudos to realize the domain at a chosen coarseness.
+    """Pick lumped elements to realize the domain at a chosen coarseness.
     depth='coarse' → one Req per zone envelope, one Ceq per zone.
     depth='fine'   → one Req+Ceq per element, RC_chain on heavy walls.
     Intermediate depths possible."""
 
 def transform_view(view: View, op: ViewOp) -> View:
     """Apply one structural change. ViewOps:
-      - refine(pseudo_id):  split one pseudo into several finer ones
-      - coarsen(group):      merge several pseudos into one
-      - resolve(pseudo_id):  for RC_chain, increase n (more dynamics fidelity,
-                             no new φ's)
-      - fix(pseudo_id):      change mode to fixed at prior value
-      - free(pseudo_id):     change mode to free
-      - tie(a, b):           tie two pseudos to share one φ
+      - refine(lump_id):   split one lumped element into several finer ones
+      - coarsen(group):    merge several lumped elements into one
+      - resolve(lump_id):  for RC_chain, increase n (more dynamics fidelity,
+                           no new φ's)
+      - fix(lump_id):      change mode to fixed at prior value
+      - free(lump_id):     change mode to free
+      - tie(a, b):         tie two lumped elements to share one φ
     """
 ```
 
@@ -361,12 +361,12 @@ def transform_view(view: View, op: ViewOp) -> View:
                             │ propose_view(depth=coarse)                │
                             ▼                                          │
    ┌─────────────────────────────────────────────────────────┐         │
-   │ View (pseudos, priors, mode)                             │◄──┐    │
+   │ View (lumped elements, priors, mode)                     │◄──┐    │
    └────────────────────────┬────────────────────────────────┘   │    │
                             │ fit                                 │    │
                             ▼                                     │    │
    ┌─────────────────────────────────────────────────────────┐   │    │
-   │ FitResult: posterior on pseudos, residuals, diagnostics  │   │    │
+   │ FitResult: posterior on lumped elements, residuals, diag. │   │    │
    └────────────────────────┬────────────────────────────────┘   │    │
                             │                                     │    │
               ┌─────────────┴─────────────┐                       │    │
@@ -463,11 +463,11 @@ determining.
 solver/
   beliefs.py          # Belief, composition, prior propagation
   elements.py         # Element schema, house loader
-  atoms.py            # build_atoms — per-element atom expansion
-  domain.py           # build_domain — element list → domain elements
-  pseudos.py          # Pseudo, combine rules, RC_chain math
+  atoms.py            # build_atoms — per-element atom expansion (→ atomic_model)
+  domain.py           # build_domain — element list → domain model
+  lumps.py            # LumpedElement, combine rules, RC_chain math
   view.py             # View, propose_view, transform_view
-  assemble.py         # atoms → AssembledSystem (A, B matrices)
+  assemble.py         # atomic_model → AssembledSystem (A, B matrices)
   simulate.py         # solver — simulate_ivp, simulate_zoh
   fit.py              # fit(view, study) — wraps scipy + prior residuals
   attribute.py        # attribute — posterior → BeliefUpdates
@@ -476,9 +476,9 @@ agent/
   loop.py             # the agent loop, trace recording
 ```
 
-Four new modules (`beliefs.py`, `atoms.py`, `domain.py`, `pseudos.py`,
+Four new modules (`beliefs.py`, `atoms.py`, `domain.py`, `lumps.py`,
 `view.py`, `attribute.py`) and an `agent/` subpackage. The existing
-`physics.py` is replaced by the explicit atom/pseudo/view split.
+`physics.py` is replaced by the explicit atom/lumped/view split.
 
 ---
 
@@ -488,10 +488,10 @@ Three panes, mapped to the three layers:
 
 - **House editor** (domain + elements): the user edits Elements and their
   Beliefs. Confidence is set via a four-way control per declared quantity.
-- **View editor** (pseudo): the φ-space table — name, kind, prior,
+- **View editor** (lumped): the φ-space table — name, kind, prior,
   posterior, mode, modulator. Refine/coarsen/resolve/tie buttons on each
   row. Underneath, the reduced graph drawn with edges labeled by their
-  controlling pseudo.
+  controlling lumped element.
 - **Study runner** (fit + insight): launch fits, inspect residuals, review
   proposed BeliefUpdates, accept/reject each one, see the agent trace.
 
@@ -503,7 +503,7 @@ The atoms layer has no UI — it's an implementation detail of the solver.
 
 1. **Chain depth `n` per study, or per element?** Likely per study: a
    daily-resolution study needs n=1; a 15-minute study may need n=5. The
-   View carries `n` per `RC_chain` pseudo.
+   View carries `n` per `RC_chain` lumped element.
 2. **Attribution weighting.** How exactly does a posterior on `R_envelope`
    distribute across its atoms' source beliefs? Naive: by relative prior
    variance. Better: by partial-derivative-weighted variance. This is the
@@ -513,8 +513,8 @@ The atoms layer has no UI — it's an implementation detail of the solver.
    inform the next study's prior on brick λ in another room. The
    `Belief.source` field supports this; the policy for when to auto-merge
    vs. require user confirmation is undecided.
-4. **Modulators on aggregated pseudos.** A `Req` covering five wall layers
+4. **Modulators on aggregated lumped elements.** A `Req` covering five wall layers
    that all share a shutter modulator inherits cleanly. A `Req` covering
    mixed-modulator atoms (some shuttered, some not) doesn't — likely the
-   view should refuse to form such a pseudo, forcing the user/agent to
+   view should refuse to form such a lumped element, forcing the user/agent to
    keep them split.

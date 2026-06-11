@@ -29,14 +29,14 @@ class AssembledSystem:
     source_ids: list[str]
 
 
-def assemble(model: dict) -> AssembledSystem:
-    """Assemble a thermogram model dict into state-space matrices."""
-    nodes = {n["id"]: n for n in model["nodes"]}
+def assemble(atomic_model: dict) -> AssembledSystem:
+    """Assemble an atomic model dict into state-space matrices."""
+    nodes = {n["id"]: n for n in atomic_model["nodes"]}
 
     # Build adjacency for resistance nodes as undirected graph
     # neighbours[node_id] = list of neighbour node_ids (via raw edges)
     neighbours: dict[str, list[str]] = {nid: [] for nid in nodes}
-    for edge in model["edges"]:
+    for edge in atomic_model["edges"]:
         a, b = edge["from"], edge["to"]
         neighbours[a].append(b)
         neighbours[b].append(a)
@@ -128,7 +128,7 @@ def assemble(model: dict) -> AssembledSystem:
             B_boundary[i, k] += G / C_i
 
     # Source → mass injections (from raw edges, not conductances)
-    for edge in model["edges"]:
+    for edge in atomic_model["edges"]:
         src_id, tgt_id = edge["from"], edge["to"]
         if nodes[src_id]["kind"] == "source" and nodes[tgt_id]["kind"] == "mass":
             i = mi[tgt_id]

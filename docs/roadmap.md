@@ -6,7 +6,7 @@
 - help message, in app documentation (element text description)
 - rename json with slug
 - Workable fitting
-  - Clean parameters choice -> pseudo graph layer!!
+  - Clean parameters choice -> lumped model layer!!
   - Mapping back to elements
 - Energy view
 - y0: fit, or estimate (bake)
