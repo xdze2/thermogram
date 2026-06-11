@@ -126,7 +126,7 @@ returns a payload that validates as `AtomicModel`.
 
 ---
 
-## Step 2 — Lumped model layer in the solver (φ-space)
+## Step 2 — Lumped model layer in the solver (φ-space) ✅
 
 Minimal version of the lumped model layer from modeling_pipeline.md. Scope cuts
 to keep it v1-sized:
@@ -138,34 +138,36 @@ to keep it v1-sized:
 - **No transform ops** (refine/coarsen/tie) and no agent — only `free` /
   `fixed` modes on each lumped element.
 
-Tasks:
-
-- [ ] `solver/lumps.py` — `LumpedElement` dataclass (id, kind, atoms, combine,
-      prior, mode, posterior) and the five combine rules: `series_sum`,
-      `parallel_sum`, `parallel_inv_sum`, `chain`, `identity`. Pure
-      functions `phi → atom values` with prior-derived weights (φ = prior
-      ⇒ atoms = their nominals).
-- [ ] `solver/view.py` — `build_default_view(atomic_model, expansion_map) → View`,
-      deterministic, one depth for v1:
-      - opaque element → one `RC_chain(n)` lumped element, 2 φ (R_total, C_total);
-        **Rse / Rsi folded into the chain's series weights** — fixed share,
+- [x] `solver/lumps.py` — five combine rules as pure functions (`series_sum`,
+      `parallel_sum`, `parallel_inv_sum`, `chain`, `identity`), `expand_lumped`
+      dispatcher, `apply_atom_values` (deep-copy patcher), prior composition
+      helpers, and `ChainAtoms` dataclass. φ = prior ⇒ atoms = their nominals.
+- [x] `solver/view.py` — `build_default_view(atomic_model, expansion_map) → View`,
+      deterministic, one depth:
+      - opaque with mass → one `RC_chain` lump; Rse/Rsi in `lump.atoms`
+        (provenance) but excluded from `ChainAtoms.r_atom_ids` — fixed share,
         not free φ (kills today's series-identifiability trap structurally);
-      - glazing / air_exchange → `Req`; parallel R between the same node
-        pair → one shared `Req` (replaces `identifiability.group_params`);
+      - opaque no_mass → `Req` (series_sum);
+      - glazing / air_exchange → `Req`; parallel R between same node pair →
+        one shared `Req` (`parallel_inv_sum`), replacing `group_params`;
       - room → `Ceq`; boundaries / sources → `identity`, mode `fixed`.
-- [ ] Rework `solver/fit.py`: `build_forward(view, ...)` takes the View;
-      the residual closure maps log-φ → atom values → patched atomic model →
-      assemble → simulate. Delete `_patch_model`'s label conventions and
-      `fit_config["params"]`; retire `identifiability.group_params` (its
-      logic moves into `build_default_view`).
-- [ ] Posteriors land on the lumped elements (`value ± sigma_log`), not on
-      atomic node fields.
+      Also exports `chain_atoms_for_lump` and `get_chain_priors`.
+- [x] `solver/fit.py` — added `build_forward_from_view` + `fit_nls_view` +
+      `ViewFitResult`. Residual closure maps log-φ → atom values (via combine
+      rules) → `apply_atom_values` → `assemble` → `simulate_zoh`. Posteriors
+      keyed by lumped element id (`lump_id + "_R"` / `"_C"` for chains). Legacy
+      `build_forward` / `_patch_model` kept for the API until Step 3.
 
-**Test:** unit tests per combine rule (round-trip φ ↔ atoms, prior
-consistency); `build_default_view` on the fixture houses asserts lumped element
-count, coverage (every fittable atom covered exactly once), and Rse/Rsi
-folding. The Step 1 round-trip re-run through the φ path recovers the same
-ground truth — that test is then switched over permanently.
+Implementation note: φ_R for an RC_chain is the **sum of interior R-node
+nominals** (not `R_wall` from `wall_chains`), because `expand()` creates N−1
+interior R nodes at `R_wall/N` each. This makes φ = prior reproduce the
+original atomic model exactly.
+
+**Test:** `uv run pytest` is green (140/140). Unit tests per combine rule in
+`test_lumps.py` (29 tests); `build_default_view` on all fixture houses in
+`test_view.py` (18 tests) — coverage, Rse/Rsi folding, chain prior positivity.
+`test_roundtrip_phi_path` (marked `roundtrip`) recovers ground-truth R and C
+through the φ path; legacy `test_roundtrip_wall_R_and_C` kept as regression guard.
 
 ---
 

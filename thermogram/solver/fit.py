@@ -1,9 +1,15 @@
 """Parameter estimation for thermogram — NLS and MCMC.
 
-Param keys use the uniform format  node_id.field_name, e.g.:
-  "R_ext.R"                 → resistance node R_ext, field R
-  "chambre.C"               → mass node chambre, field C
-  "apport_fenetre_sud.gain" → source node apport_fenetre_sud, field gain
+Two entry points:
+
+build_forward_from_view(view, atomic_model, ...)
+    The new φ-space path (Step 2).  Takes a View of LumpedElements; the
+    residual closure maps log-φ → atom values (via combine rules) → patched
+    atomic model → assemble → simulate.  Posteriors land on lumped element ids.
+
+build_forward(atomic_model, ...)
+    Legacy path: param keys in 'node_id.field_name' format.  Kept for the
+    API and tests that haven't switched to Views yet.
 
 All optimisation is done in log-space so parameters stay positive.
 """
@@ -409,4 +415,278 @@ def fit_mcmc(
         samples=samples,
         acceptance_rate=acceptance_rate,
         elapsed_s=elapsed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# φ-space forward model (Step 2) — build_forward_from_view
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ViewFitResult:
+    """fit_nls / fit_mcmc result in φ-space: posteriors keyed by lumped element id."""
+    method: str
+    # φ-space posteriors: lump_id → (fitted_value, sigma)
+    # For RC_chain: lump_id → (R_fitted, C_fitted); sigma keyed as lump_id+"_R" / "_C"
+    phi_fitted: dict[str, float]      # lump_id (+ "_R"/"_C" for chains) → value
+    phi_std: dict[str, float]         # same keys → 1-sigma
+    phi_nominal: dict[str, float]     # same keys → prior nominal
+    cost: float
+    success: bool
+    message: str
+    elapsed_s: float
+    n_evals: int
+    # Ordered list of φ keys matching the log_params vector
+    phi_keys: list[str]
+
+
+def build_forward_from_view(
+    view,                                              # thermogram.models.View
+    atomic_model: dict,
+    expansion_map: dict[str, list[str]],
+    inputs: dict[str, tuple[np.ndarray, np.ndarray]],
+    observations: dict[str, tuple[np.ndarray, np.ndarray]],
+    obs_sigma: float = 0.5,
+    start: str = "1970-01-01T00:00:00",
+    end: str = "1970-01-01T00:00:00",
+    dt_minutes: int = 15,
+    y0: np.ndarray | None = None,
+) -> tuple[
+    Callable[[np.ndarray], np.ndarray],
+    np.ndarray,
+    list[str],
+]:
+    """Build a φ-space forward function from a View.
+
+    Free lumped elements become entries in the log-φ vector.  RC_chain
+    elements contribute *two* entries (R_total, C_total) with keys
+    ``lump_id + "_R"`` and ``lump_id + "_C"``.
+
+    Fixed lumped elements are held at their prior nominal (not in the vector).
+
+    Parameters
+    ----------
+    view:           View of LumpedElements.
+    atomic_model:   Atomic model dict from expand().
+    expansion_map:  {elem_uuid: [atom_ids]} from expand().
+    inputs:         {atom_node_id: (t_sec, values)}.
+    observations:   {mass_node_id: (t_sec, values)}.
+    obs_sigma:      Observation noise std [°C].
+    start, end:     ISO-8601 simulation window.
+    dt_minutes:     ZOH time step.
+    y0:             Initial temperatures per mass node; None ⇒ first boundary value.
+
+    Returns
+    -------
+    forward_fn:   Callable(log_phi_vec) → residuals.
+    log_phi0:     Initial log-φ vector (log of prior nominals).
+    phi_keys:     List of φ key strings, one-to-one with log_phi_vec entries.
+    """
+    import datetime
+    from scipy.interpolate import interp1d
+    from thermogram.solver.lumps import (
+        ChainAtoms,
+        apply_atom_values,
+        expand_lumped,
+    )
+    from thermogram.solver.view import chain_atoms_for_lump, get_chain_priors
+
+    # --- Build ordered φ key list and nominal vector ---
+    phi_keys: list[str] = []
+    log_phi0_list: list[float] = []
+
+    # Per-lump metadata needed inside the closure
+    lump_meta: list[dict] = []  # one entry per free lump
+
+    for lump in view.lumped:
+        if lump.mode == "fixed":
+            continue
+        if lump.kind == "RC_chain":
+            R_nom, C_nom = get_chain_priors(lump, atomic_model, expansion_map)
+            phi_keys.append(lump.id + "_R")
+            phi_keys.append(lump.id + "_C")
+            log_phi0_list.append(np.log(R_nom))
+            log_phi0_list.append(np.log(C_nom))
+            ca = chain_atoms_for_lump(lump, atomic_model, expansion_map)
+            lump_meta.append({
+                "lump": lump,
+                "kind": "chain",
+                "key_R": lump.id + "_R",
+                "key_C": lump.id + "_C",
+                "R_nom": R_nom,
+                "C_nom": C_nom,
+                "sigma_log_R": lump.prior.sigma_log,
+                "sigma_log_C": lump.prior.sigma_log,
+                "chain_atoms": ca,
+            })
+        else:
+            phi_keys.append(lump.id)
+            log_phi0_list.append(np.log(lump.prior.nominal))
+            # Collect atom nominals for weighted combine rules
+            nodes_by_id = {n["id"]: n for n in atomic_model["nodes"]}
+            field_map = {"mass": "C", "resistance": "R", "source": "gain"}
+            atom_noms = []
+            for aid in lump.atoms:
+                node = nodes_by_id.get(aid, {})
+                fname = field_map.get(node.get("kind", ""), None)
+                atom_noms.append(node[fname] if fname else 1.0)
+            lump_meta.append({
+                "lump": lump,
+                "kind": "scalar",
+                "key": lump.id,
+                "nominal": lump.prior.nominal,
+                "sigma_log": lump.prior.sigma_log,
+                "atom_noms": atom_noms,
+            })
+
+    log_phi0 = np.array(log_phi0_list)
+
+    # --- Fixed-lump atom values (constant for all iterations) ---
+    fixed_atom_values: dict[str, float] = {}
+    nodes_by_id = {n["id"]: n for n in atomic_model["nodes"]}
+    field_map_fixed = {"mass": "C", "resistance": "R", "source": "gain", "boundary": "T_source"}
+    for lump in view.lumped:
+        if lump.mode != "fixed":
+            continue
+        # Use prior nominal as the fixed value for numeric fields.
+        # Boundary nodes with signal T_source are not patched (already in model).
+        for aid in lump.atoms:
+            node = nodes_by_id.get(aid, {})
+            fname = field_map_fixed.get(node.get("kind", ""), None)
+            if fname and fname != "T_source" and isinstance(node.get(fname), (int, float)):
+                fixed_atom_values[aid] = float(node[fname])
+
+    # --- Observation interpolators ---
+    t0_ts = datetime.datetime.fromisoformat(start).timestamp()
+    t1_ts = datetime.datetime.fromisoformat(end).timestamp()
+    dt = dt_minutes * 60.0
+    t_grid = np.arange(t0_ts, t1_ts, dt)
+
+    obs_on_grid: dict[str, np.ndarray] = {}
+    for mass_id, (t_obs, vals_obs) in observations.items():
+        fn = interp1d(
+            t_obs, vals_obs,
+            kind="linear", bounds_error=False,
+            fill_value=(vals_obs[0], vals_obs[-1]),
+        )
+        obs_on_grid[mass_id] = fn(t_grid)
+    obs_ids = list(obs_on_grid.keys())
+
+    # --- Prior residuals metadata ---
+    # Collected in the same order as phi_keys
+    prior_nominals = np.array([np.exp(v) for v in log_phi0])
+    prior_sigma_logs: list[float] = []
+    for meta in lump_meta:
+        if meta["kind"] == "chain":
+            prior_sigma_logs.append(meta["sigma_log_R"])
+            prior_sigma_logs.append(meta["sigma_log_C"])
+        else:
+            prior_sigma_logs.append(meta["sigma_log"])
+    prior_sigma_logs_arr = np.array(prior_sigma_logs)
+
+    # --- Forward closure ---
+    def forward_fn(log_phi_vec: np.ndarray) -> np.ndarray:
+        # Build {atom_id: value} from free lumps
+        atom_values: dict[str, float] = dict(fixed_atom_values)
+
+        idx = 0
+        for meta in lump_meta:
+            lump = meta["lump"]
+            if meta["kind"] == "chain":
+                phi_R = float(np.exp(log_phi_vec[idx]))
+                phi_C = float(np.exp(log_phi_vec[idx + 1]))
+                idx += 2
+                av = expand_lumped(lump, (phi_R, phi_C), chain_atoms=meta["chain_atoms"])
+            else:
+                phi = float(np.exp(log_phi_vec[idx]))
+                idx += 1
+                av = expand_lumped(lump, phi, atom_nominals=meta["atom_noms"])
+            atom_values.update(av)
+
+        patched = apply_atom_values(atomic_model, atom_values)
+        system = assemble(patched)
+        result = simulate_zoh(system, inputs, start, end, dt_minutes=dt_minutes, y0=y0)
+
+        residuals = []
+        for mass_id in obs_ids:
+            T_pred = result.temps[mass_id]
+            T_obs = obs_on_grid[mass_id]
+            n = min(len(T_pred), len(T_obs))
+            residuals.append((T_pred[:n] - T_obs[:n]) / obs_sigma)
+        return np.concatenate(residuals)
+
+    return forward_fn, log_phi0, phi_keys
+
+
+def fit_nls_view(
+    forward_fn: Callable[[np.ndarray], np.ndarray],
+    log_phi0: np.ndarray,
+    phi_keys: list[str],
+    view,                           # thermogram.models.View
+    atomic_model: dict,
+    expansion_map: dict[str, list[str]],
+) -> "ViewFitResult":
+    """NLS fit in φ-space; posteriors keyed by lumped element id.
+
+    Wraps fit_nls and maps the result back to ViewFitResult with the
+    phi_fitted / phi_std keyed by lump id (+ "_R"/"_C" for chains).
+    """
+    from scipy.optimize import least_squares
+    from thermogram.solver.view import get_chain_priors
+
+    # Reconstruct prior nominals and sigma_logs in phi_keys order
+    phi_nominal: dict[str, float] = {}
+    phi_sigma_log: dict[str, float] = {}
+    for lump in view.lumped:
+        if lump.mode == "fixed":
+            continue
+        if lump.kind == "RC_chain":
+            R_nom, C_nom = get_chain_priors(lump, atomic_model, expansion_map)
+            phi_nominal[lump.id + "_R"] = R_nom
+            phi_nominal[lump.id + "_C"] = C_nom
+            phi_sigma_log[lump.id + "_R"] = lump.prior.sigma_log
+            phi_sigma_log[lump.id + "_C"] = lump.prior.sigma_log
+        else:
+            phi_nominal[lump.id] = lump.prior.nominal
+            phi_sigma_log[lump.id] = lump.prior.sigma_log
+
+    log_nominals = np.array([np.log(phi_nominal[k]) for k in phi_keys])
+    sigma_logs = np.array([phi_sigma_log[k] for k in phi_keys])
+
+    def residuals_with_prior(log_p: np.ndarray) -> np.ndarray:
+        data_res = forward_fn(log_p)
+        prior_res = (log_p - log_nominals) / sigma_logs
+        return np.concatenate([data_res, prior_res])
+
+    t0 = time.perf_counter()
+    result = least_squares(
+        residuals_with_prior, log_phi0,
+        method="lm", ftol=1e-8, xtol=1e-8, gtol=1e-8,
+    )
+    elapsed = time.perf_counter() - t0
+
+    phi_fitted = {k: float(np.exp(v)) for k, v in zip(phi_keys, result.x)}
+
+    try:
+        J = result.jac
+        n_res, n_par = len(result.fun), len(phi_keys)
+        dof = max(n_res - n_par, 1)
+        s_sq = 2.0 * result.cost / dof
+        cov = np.linalg.pinv(J.T @ J) * s_sq
+        std_log = np.sqrt(np.diag(cov))
+        phi_std = {k: float(np.exp(v) * s) for k, v, s in zip(phi_keys, result.x, std_log)}
+    except Exception:
+        phi_std = {k: float("nan") for k in phi_keys}
+
+    return ViewFitResult(
+        method="nls",
+        phi_fitted=phi_fitted,
+        phi_std=phi_std,
+        phi_nominal=phi_nominal,
+        cost=float(result.cost),
+        success=result.success,
+        message=result.message,
+        elapsed_s=elapsed,
+        n_evals=result.nfev,
+        phi_keys=phi_keys,
     )
