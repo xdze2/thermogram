@@ -22,10 +22,10 @@ from pydantic import BaseModel, ValidationError
 from .influx import fetch_series, list_signals
 from ..solver.assemble import assemble
 from ..solver.simulate import simulate_ivp, simulate_zoh
-from ..solver.fit import build_forward, fit_nls, fit_mcmc
-from ..solver.identifiability import group_params
+from ..solver.fit import build_forward_from_view, fit_nls_view
 from ..solver.physics import expand, model_hash
-from ..models import AtomicModel, House, Study
+from ..solver.view import build_default_view
+from ..models import AtomicModel, House, Study, View
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR   = _REPO_ROOT / "data"
@@ -82,11 +82,13 @@ def _compute_model_hash(house: dict) -> str:
 
 
 def _attach_study_stale_flags(study: dict, current_hash: str) -> None:
-    """Inject _stale_run and _stale_fit flags onto a raw study dict (mutates in place)."""
+    """Inject _stale_run, _stale_fit, _stale_view flags onto a raw study dict (mutates in place)."""
     run = study.get("run")
     fit = study.get("fit")
+    view = study.get("view")
     study["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
     study["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
+    study["_stale_view"] = bool(view and view.get("model_hash") and view["model_hash"] != current_hash)
 
 
 def _attach_stale_flags(house_raw: dict) -> dict:
@@ -413,20 +415,83 @@ def post_simulate_run(req: SimulateRequest) -> dict:
 
 # ── fit ───────────────────────────────────────────────────────────────────────
 
-class PreviewGroupsRequest(BaseModel):
-    atomic_model: AtomicModel
-    param_keys: list[str]
+def _get_study_raw(house_raw: dict, study_id: str) -> dict:
+    for s in house_raw.get("studies", []):
+        if s["id"] == study_id:
+            return s
+    raise HTTPException(status_code=404, detail=f"Study '{study_id}' not found")
 
 
-@app.post("/fit/preview-groups")
-def post_fit_preview_groups(req: PreviewGroupsRequest) -> list[list[str]]:
+@app.post("/houses/{name}/studies/{study_id}/view")
+def post_study_view(name: str, study_id: str) -> dict:
+    """(Re)build the default view for the study, persist it, return it."""
+    house_raw = _load_house_raw(name)
+    house = _validate_house(house_raw)
+    study_raw = _get_study_raw(house_raw, study_id)
+
     try:
-        return group_params(
-            req.atomic_model.model_dump(by_alias=True, exclude_none=True),
-            req.param_keys,
+        atomic_model_raw, expansion_map = expand(
+            house.model_dump(by_alias=True, exclude_none=True)
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
+
+    try:
+        view = build_default_view(atomic_model_raw, expansion_map)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"View build error: {e}") from e
+
+    current_hash = _compute_model_hash(house_raw)
+    view_raw = view.model_dump(by_alias=True, exclude_none=True)
+    view_raw["model_hash"] = current_hash
+    study_raw["view"] = view_raw
+    _save_house(name, house_raw)
+    return {**view_raw, "_stale_view": False}
+
+
+@app.get("/houses/{name}/studies/{study_id}/view")
+def get_study_view(name: str, study_id: str) -> dict:
+    """Return the persisted view with a stale flag, or 404 if no view yet."""
+    house_raw = _load_house_raw(name)
+    current_hash = _compute_model_hash(house_raw)
+    study_raw = _get_study_raw(house_raw, study_id)
+    view_raw = study_raw.get("view")
+    if not view_raw:
+        raise HTTPException(status_code=404, detail="No view built for this study yet")
+    stale = bool(view_raw.get("model_hash") and view_raw["model_hash"] != current_hash)
+    return {**view_raw, "_stale_view": stale}
+
+
+class ViewUpdateRequest(BaseModel):
+    """Partial update: only modes and prior overrides may be changed."""
+    lumped: list[dict]
+
+
+@app.put("/houses/{name}/studies/{study_id}/view")
+def put_study_view(name: str, study_id: str, body: ViewUpdateRequest) -> dict:
+    """Update mode / prior overrides on existing view lumped elements.
+
+    Only ``mode``, ``prior``, and ``prior_C`` are applied; topology is immutable.
+    """
+    house_raw = _load_house_raw(name)
+    study_raw = _get_study_raw(house_raw, study_id)
+    view_raw = study_raw.get("view")
+    if not view_raw:
+        raise HTTPException(status_code=404, detail="No view built yet; POST first")
+
+    patch_by_id = {item["id"]: item for item in body.lumped if "id" in item}
+    for lump in view_raw.get("lumped", []):
+        patch = patch_by_id.get(lump.get("id"))
+        if patch is None:
+            continue
+        for field in ("mode", "prior", "prior_C"):
+            if field in patch:
+                lump[field] = patch[field]
+
+    _save_house(name, house_raw)
+    current_hash = _compute_model_hash(house_raw)
+    stale = bool(view_raw.get("model_hash") and view_raw["model_hash"] != current_hash)
+    return {**view_raw, "_stale_view": stale}
 
 
 class FitRequest(BaseModel):
@@ -436,22 +501,42 @@ class FitRequest(BaseModel):
     end: str
     inputs: dict[str, str]
     observations: dict[str, str]
-    params: dict[str, dict]
     obs_sigma: float = 0.5
-    method: str = "nls"
     dt_minutes: int = 15
     y0_uniform: float | None = None
 
 
 @app.post("/fit/run")
 def post_fit_run(req: FitRequest) -> dict:
-    """Expand the house, fetch inputs + observations from InfluxDB, run NLS or MCMC fit, persist result."""
+    """Expand the house, fetch signals, run NLS fit via the persisted φ-view.
+
+    The study must have a built, non-stale view (POST .../view first).
+    """
     import numpy as np
 
     house_raw = _load_house_raw(req.house_name)
     house = _validate_house(house_raw)
+    study_raw = _get_study_raw(house_raw, req.study_id)
+
+    view_raw = study_raw.get("view")
+    if not view_raw:
+        raise HTTPException(
+            status_code=400,
+            detail="No view built for this study. POST /houses/{name}/studies/{id}/view first.",
+        )
+    current_hash = _compute_model_hash(house_raw)
+    if view_raw.get("model_hash") and view_raw["model_hash"] != current_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="View is stale (house was edited). Rebuild it with POST .../view.",
+        )
     try:
-        atomic_model, _ = expand(house.model_dump(by_alias=True, exclude_none=True))
+        view = View.model_validate(view_raw)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid persisted view: {e}") from e
+
+    try:
+        atomic_model, expansion_map = expand(house.model_dump(by_alias=True, exclude_none=True))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
 
@@ -483,89 +568,88 @@ def post_fit_run(req: FitRequest) -> dict:
     import datetime as _dt
     _t0_sec = _dt.datetime.fromisoformat(req.start).timestamp()
     _t1_sec = _dt.datetime.fromisoformat(req.end).timestamp()
-    _atomic_nodes_by_id = {n["id"]: n for n in atomic_model.get("nodes", [])}
-    _fit_system = assemble(atomic_model)
-    for b_id in _fit_system.boundary_ids:
+    _nodes_by_id = {n["id"]: n for n in atomic_model.get("nodes", [])}
+    _sys = assemble(atomic_model)
+    for b_id in _sys.boundary_ids:
         if b_id in inputs:
             continue
-        node = _atomic_nodes_by_id.get(b_id, {})
+        node = _nodes_by_id.get(b_id, {})
         t_src = node.get("T_source")
         if isinstance(t_src, (int, float)):
-            t_arr = np.array([_t0_sec, _t1_sec])
-            v_arr = np.array([float(t_src), float(t_src)])
-            inputs[b_id] = (t_arr, v_arr)
-
-    fit_config = {
-        "params":    req.params,
-        "obs_sigma": req.obs_sigma,
-        "method":    req.method,
-    }
+            inputs[b_id] = (
+                np.array([_t0_sec, _t1_sec]),
+                np.array([float(t_src), float(t_src)]),
+            )
 
     y0 = None
     if req.y0_uniform is not None:
-        system = assemble(atomic_model)
-        y0 = np.full(len(system.mass_ids), req.y0_uniform)
+        y0 = np.full(len(_sys.mass_ids), req.y0_uniform)
 
     try:
-        forward_fn, log_p0, param_keys, groups = build_forward(
-            atomic_model, inputs, observations, fit_config,
-            req.start, req.end, req.dt_minutes,
+        forward_fn, log_phi0, phi_keys = build_forward_from_view(
+            view, atomic_model, expansion_map,
+            inputs, observations,
+            obs_sigma=req.obs_sigma,
+            start=req.start, end=req.end,
+            dt_minutes=req.dt_minutes,
             y0=y0,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Model error: {e}") from e
+        raise HTTPException(status_code=400, detail=f"Forward model error: {e}") from e
 
     try:
-        if req.method == "mcmc":
-            result = fit_mcmc(forward_fn, log_p0, param_keys, fit_config, groups=groups)
-            response = {
-                "method":          result.method,
-                "params_nominal":  result.params_nominal,
-                "params_mean":     result.params_mean,
-                "params_std":      result.params_std,
-                "acceptance_rate": result.acceptance_rate,
-                "elapsed_s":       result.elapsed_s,
-                "param_groups":    groups,
-            }
-        else:
-            result = fit_nls(forward_fn, log_p0, param_keys, fit_config, groups=groups)
-            response = {
-                "method":          result.method,
-                "params_nominal":  result.params_nominal,
-                "params_fitted":   result.params_fitted,
-                "params_std":      result.params_std,
-                "cost":            result.cost,
-                "success":         result.success,
-                "message":         result.message,
-                "elapsed_s":       result.elapsed_s,
-                "n_evals":         result.n_evals,
-                "param_groups":    groups,
-            }
+        result = fit_nls_view(forward_fn, log_phi0, phi_keys, view, atomic_model, expansion_map)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fit error: {e}") from e
 
-    current_hash = _compute_model_hash(house_raw)
+    # Persist posteriors onto the view lumped elements
+    for lump in view_raw.get("lumped", []):
+        lid = lump.get("id", "")
+        if lump.get("kind") == "RC_chain":
+            key_R, key_C = lid + "_R", lid + "_C"
+            if key_R in result.phi_fitted:
+                lump["posterior"] = {
+                    "value": result.phi_fitted[key_R],
+                    "sigma_log": result.phi_std.get(key_R, float("nan")),
+                }
+            if key_C in result.phi_fitted:
+                lump["posterior_C"] = {
+                    "value": result.phi_fitted[key_C],
+                    "sigma_log": result.phi_std.get(key_C, float("nan")),
+                }
+        elif lid in result.phi_fitted:
+            lump["posterior"] = {
+                "value": result.phi_fitted[lid],
+                "sigma_log": result.phi_std.get(lid, float("nan")),
+            }
+
     timestamp = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
     fit_record = {
-        "model_hash":    current_hash,
-        "timestamp":     timestamp,
+        "model_hash": current_hash,
+        "timestamp":  timestamp,
         "settings": {
-            "method":     req.method,
+            "method":     "nls",
             "start":      req.start,
             "end":        req.end,
             "dt_minutes": req.dt_minutes,
         },
-        "result_params": response.get("params_fitted") or response.get("params_mean"),
     }
-    for study in house_raw.get("studies", []):
-        if study["id"] == req.study_id:
-            study["fit"] = fit_record
-            break
+    study_raw["fit"] = fit_record
     _save_house(req.house_name, house_raw)
-    response["fit_record"] = fit_record
-    response["atomic_model"] = atomic_model
 
-    return response
+    return {
+        "method":       result.method,
+        "phi_fitted":   result.phi_fitted,
+        "phi_std":      result.phi_std,
+        "phi_nominal":  result.phi_nominal,
+        "cost":         result.cost,
+        "success":      result.success,
+        "message":      result.message,
+        "elapsed_s":    result.elapsed_s,
+        "n_evals":      result.n_evals,
+        "fit_record":   fit_record,
+        "atomic_model": atomic_model,
+    }
 
 
 # ── signals / series ──────────────────────────────────────────────────────────

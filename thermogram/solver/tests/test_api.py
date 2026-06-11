@@ -173,3 +173,120 @@ def test_list_houses_after_create(client, valid_house_payload):
     assert r.status_code == 200
     names = [h["name"] for h in r.json()]
     assert "h_list" in names
+
+
+# ── view routes ───────────────────────────────────────────────────────────────
+
+@pytest.fixture()
+def house_with_study(client, valid_house_payload):
+    """House 'vh' with one study; returns (house_name, study_id)."""
+    client.put("/houses/vh", json=valid_house_payload)
+    r = client.post("/houses/vh/studies", json={"label": "s1", "type": "fit"})
+    assert r.status_code == 200
+    return "vh", r.json()["id"]
+
+
+def test_post_view_builds_and_returns(client, house_with_study):
+    name, sid = house_with_study
+    r = client.post(f"/houses/{name}/studies/{sid}/view")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "lumped" in data
+    assert len(data["lumped"]) > 0
+    assert data["_stale_view"] is False
+    assert "model_hash" in data
+
+
+def test_get_view_returns_fresh(client, house_with_study):
+    name, sid = house_with_study
+    client.post(f"/houses/{name}/studies/{sid}/view")
+    r = client.get(f"/houses/{name}/studies/{sid}/view")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "lumped" in data
+    assert data["_stale_view"] is False
+
+
+def test_get_view_404_before_build(client, house_with_study):
+    name, sid = house_with_study
+    r = client.get(f"/houses/{name}/studies/{sid}/view")
+    assert r.status_code == 404
+
+
+def test_put_view_updates_mode(client, house_with_study):
+    name, sid = house_with_study
+    r = client.post(f"/houses/{name}/studies/{sid}/view")
+    lumped = r.json()["lumped"]
+    # Find a free lump and flip it to fixed
+    free_lumps = [l for l in lumped if l.get("mode") == "free"]
+    assert free_lumps, "Expected at least one free lump in maison_test"
+    target_id = free_lumps[0]["id"]
+
+    r2 = client.put(
+        f"/houses/{name}/studies/{sid}/view",
+        json={"lumped": [{"id": target_id, "mode": "fixed"}]},
+    )
+    assert r2.status_code == 200, r2.text
+
+    r3 = client.get(f"/houses/{name}/studies/{sid}/view")
+    updated = {l["id"]: l for l in r3.json()["lumped"]}
+    assert updated[target_id]["mode"] == "fixed"
+
+
+def test_view_stale_after_house_edit(client, house_with_study):
+    name, sid = house_with_study
+    client.post(f"/houses/{name}/studies/{sid}/view")
+
+    # Read back the current house (includes studies with the view)
+    house_data = client.get(f"/houses/{name}").json()
+    # Change a room label — enough to shift model_hash
+    if house_data.get("rooms"):
+        house_data["rooms"][0]["label"] = "edited_label_xyz"
+    client.put(f"/houses/{name}", json=house_data)
+
+    r = client.get(f"/houses/{name}/studies/{sid}/view")
+    assert r.status_code == 200
+    assert r.json()["_stale_view"] is True
+
+
+def test_fit_run_rejects_missing_view(client, house_with_study):
+    name, sid = house_with_study
+    payload = {
+        "house_name": name,
+        "study_id": sid,
+        "start": "2024-01-01T00:00:00",
+        "end": "2024-01-02T00:00:00",
+        "inputs": {},
+        "observations": {},
+    }
+    r = client.post("/fit/run", json=payload)
+    assert r.status_code == 400
+    assert "view" in r.json()["detail"].lower()
+
+
+def test_fit_run_rejects_stale_view(client, house_with_study):
+    name, sid = house_with_study
+    client.post(f"/houses/{name}/studies/{sid}/view")
+
+    house_data = client.get(f"/houses/{name}").json()
+    if house_data.get("rooms"):
+        house_data["rooms"][0]["label"] = "edited_xyz"
+    client.put(f"/houses/{name}", json=house_data)
+
+    payload = {
+        "house_name": name,
+        "study_id": sid,
+        "start": "2024-01-01T00:00:00",
+        "end": "2024-01-02T00:00:00",
+        "inputs": {},
+        "observations": {},
+    }
+    r = client.post("/fit/run", json=payload)
+    assert r.status_code == 409
+    assert "stale" in r.json()["detail"].lower()
+
+
+def test_preview_groups_removed(client):
+    """The old /fit/preview-groups endpoint must not exist."""
+    r = client.post("/fit/preview-groups", json={"atomic_model": {}, "param_keys": []})
+    assert r.status_code == 404 or r.status_code == 405
