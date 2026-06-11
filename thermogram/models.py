@@ -347,10 +347,18 @@ class LumpedElement(BaseModel):
     combine: CombineRule
     n: int | None = Field(default=None, ge=1, description="Chain length, RC_chain only.")
     prior: Prior
+    prior_C: Prior | None = Field(
+        default=None,
+        description="C_total prior for RC_chain lumps; prior holds R_total.",
+    )
     mode: FitMode = "free"
     tied_to: str | None = None
     realizes: str | None = Field(default=None, description="Element id this realizes.")
     posterior: Posterior | None = None
+    posterior_C: Posterior | None = Field(
+        default=None,
+        description="C_total posterior for RC_chain lumps; posterior holds R_total.",
+    )
 
 
 class View(BaseModel):

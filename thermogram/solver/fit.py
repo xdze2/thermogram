@@ -516,7 +516,7 @@ def build_forward_from_view(
                 "R_nom": R_nom,
                 "C_nom": C_nom,
                 "sigma_log_R": lump.prior.sigma_log,
-                "sigma_log_C": lump.prior.sigma_log,
+                "sigma_log_C": lump.prior_C.sigma_log if lump.prior_C is not None else lump.prior.sigma_log,
                 "chain_atoms": ca,
             })
         else:
@@ -645,7 +645,7 @@ def fit_nls_view(
             phi_nominal[lump.id + "_R"] = R_nom
             phi_nominal[lump.id + "_C"] = C_nom
             phi_sigma_log[lump.id + "_R"] = lump.prior.sigma_log
-            phi_sigma_log[lump.id + "_C"] = lump.prior.sigma_log
+            phi_sigma_log[lump.id + "_C"] = lump.prior_C.sigma_log if lump.prior_C is not None else lump.prior.sigma_log
         else:
             phi_nominal[lump.id] = lump.prior.nominal
             phi_sigma_log[lump.id] = lump.prior.sigma_log

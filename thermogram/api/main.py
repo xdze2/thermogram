@@ -81,15 +81,20 @@ def _compute_model_hash(house: dict) -> str:
     return model_hash(elements)
 
 
+def _attach_study_stale_flags(study: dict, current_hash: str) -> None:
+    """Inject _stale_run and _stale_fit flags onto a raw study dict (mutates in place)."""
+    run = study.get("run")
+    fit = study.get("fit")
+    study["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
+    study["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
+
+
 def _attach_stale_flags(house_raw: dict) -> dict:
     """Inject _model_hash and _stale_* flags onto a raw house dict (mutates and returns)."""
     current_hash = _compute_model_hash(house_raw)
     house_raw["_model_hash"] = current_hash
     for study in house_raw.get("studies", []):
-        run = study.get("run")
-        fit = study.get("fit")
-        study["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
-        study["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
+        _attach_study_stale_flags(study, current_hash)
     return house_raw
 
 
@@ -236,10 +241,7 @@ def get_study(name: str, study_id: str) -> Study:
     current_hash = _compute_model_hash(house_raw)
     for s in house_raw.get("studies", []):
         if s["id"] == study_id:
-            run = s.get("run")
-            fit = s.get("fit")
-            s["_stale_run"] = bool(run and run.get("model_hash") and run["model_hash"] != current_hash)
-            s["_stale_fit"] = bool(fit and fit.get("model_hash") and fit["model_hash"] != current_hash)
+            _attach_study_stale_flags(s, current_hash)
             return _validate_study(s)
     raise HTTPException(status_code=404, detail=f"Study '{study_id}' not found in house '{name}'")
 

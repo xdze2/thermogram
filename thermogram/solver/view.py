@@ -76,6 +76,11 @@ def _endpoint_pair(
     return (min(a, b), max(a, b))
 
 
+def _single_prior(nominal: float, sigma_log: float = 0.5) -> "Prior":
+    from thermogram.models import Prior
+    return Prior(nominal=nominal, sigma_log=sigma_log)
+
+
 def build_default_view(
     atomic_model: dict,
     expansion_map: dict[str, list[str]],
@@ -137,12 +142,9 @@ def build_default_view(
     covered: set[str] = set()
     lumped: list[LumpedElement] = []
 
-    # --- Rse/Rsi tracking: these are folded into RC_chain and not separately lumped ---
+    # Rse/Rsi ids are identified per-element in the loop below and collected here
+    # so that step 5 (boundary/source sweep) skips them.
     rse_rsi_ids: set[str] = set()
-    for chain in wall_chains.values():
-        # Expand the element's atoms from the expansion_map
-        # Rse/Rsi are resistance nodes whose label ends in "(Rse)" or "(Rsi)"
-        pass  # Identified below per element
 
     # --- 1. Opaque elements with mass (RC_chain) ---
     for elem_uuid, chain in uuid_to_chain.items():
@@ -167,16 +169,15 @@ def build_default_view(
         lump = LumpedElement(
             id=lump_id,
             kind="RC_chain",
-            label=None,  # view.py doesn't know the house element label
+            label=None,
             atoms=atom_ids,
             combine="chain",
             n=chain["chain_n"],
-            prior=prior_R,      # Prior for R_total (C prior stored as lump.posterior placeholder)
+            prior=prior_R,
+            prior_C=prior_C,
             mode="free",
             realizes=elem_uuid,
         )
-        # Attach C prior as a custom attribute via model's extra="forbid" — instead,
-        # we store both priors as a tuple in the metadata dict below.
         lumped.append(lump)
         covered.update(atom_ids)
 
@@ -226,7 +227,7 @@ def build_default_view(
 
         r_noms = [nodes[rid]["R"] for rid in r_ids]
         if len(r_ids) == 1:
-            prior = compose_series_sum_single(r_noms[0], sigma_log=_SIGMA_LOG_FREE)
+            prior = _single_prior(r_noms[0], sigma_log=_SIGMA_LOG_FREE)
             combine: CombineRule = "series_sum"
         else:
             prior = compose_parallel_inv_prior(r_noms, sigma_log=_SIGMA_LOG_FREE)
@@ -384,12 +385,3 @@ def get_chain_priors(
     R_nom = sum(nodes[rid]["R"] for rid in ca.r_atom_ids)
     C_nom = sum(nodes[mid]["C"] for mid in ca.c_atom_ids)
     return R_nom, C_nom
-
-
-# ---------------------------------------------------------------------------
-# Small helper missing from lumps.py (single-atom series)
-# ---------------------------------------------------------------------------
-
-def compose_series_sum_single(nominal: float, sigma_log: float = 0.5) -> "Prior":
-    from thermogram.models import Prior
-    return Prior(nominal=nominal, sigma_log=sigma_log)
