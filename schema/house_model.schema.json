@@ -1,0 +1,361 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12",
+  "$id": "thermogram/house_model",
+  "title": "HouseModel",
+  "description": "Physics-layer description of a building. Expands to an RC network via solver/physics.py.",
+  "type": "object",
+  "required": ["schema_version", "rooms", "elements"],
+  "additionalProperties": false,
+  "properties": {
+
+    "schema_version": { "type": "string", "const": "0.2" },
+    "label": { "type": "string", "examples": ["Maison test"] },
+    "notes": { "type": "string" },
+
+    "materials": {
+      "type": "object",
+      "description": "Shared material library for this house model. Keys are material ids referenced in opaque element layers.",
+      "additionalProperties": {
+        "$ref": "#/$defs/material_entry"
+      },
+      "examples": [
+        { "brick_full": { "lambda": 0.8, "rho": 1800, "cp": 840 } }
+      ]
+    },
+
+    "rooms": {
+      "type": "array",
+      "description": "Thermal zones — rooms or spaces treated as a single air mass.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/room" }
+    },
+
+    "elements": {
+      "type": "array",
+      "description": "Building envelope and exchange elements connecting rooms or rooms to boundary zones.",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/opaque_element" },
+          { "$ref": "#/$defs/glazing_element" },
+          { "$ref": "#/$defs/air_exchange_element" },
+          { "$ref": "#/$defs/outdoor_element" },
+          { "$ref": "#/$defs/ground_element" }
+        ]
+      }
+    }
+
+  },
+
+  "$defs": {
+
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "RFC 4122 UUID v4."
+    },
+
+    "material_entry": {
+      "type": "object",
+      "description": "Physical thermal constants for a homogeneous building material.",
+      "required": ["lambda", "rho", "cp"],
+      "additionalProperties": false,
+      "properties": {
+        "lambda": {
+          "type": "number",
+          "description": "Thermal conductivity [W/(m·K)].",
+          "exclusiveMinimum": 0,
+          "examples": [0.8, 1.7, 0.04]
+        },
+        "rho": {
+          "type": "number",
+          "description": "Density [kg/m³].",
+          "exclusiveMinimum": 0,
+          "examples": [1800, 2200, 30]
+        },
+        "cp": {
+          "type": "number",
+          "description": "Specific heat capacity [J/(kg·K)].",
+          "exclusiveMinimum": 0,
+          "examples": [840, 900, 1000]
+        },
+        "source": {
+          "type": "string",
+          "description": "Reference for the values.",
+          "examples": ["ISO 10456:2007", "CSTB", "measured"]
+        },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "room": {
+      "type": "object",
+      "description": "A thermal zone treated as a single well-mixed air mass.",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id":    { "$ref": "#/$defs/uuid" },
+        "label": { "type": "string", "examples": ["Chambre", "Salon", "Cuisine"] },
+        "a": {
+          "type": "number",
+          "description": "Room width [m].",
+          "exclusiveMinimum": 0,
+          "examples": [4.0, 5.0]
+        },
+        "b": {
+          "type": "number",
+          "description": "Room depth [m].",
+          "exclusiveMinimum": 0,
+          "examples": [4.0, 6.0]
+        },
+        "c": {
+          "type": "number",
+          "description": "Ceiling height [m].",
+          "exclusiveMinimum": 0,
+          "examples": [2.5, 3.0]
+        },
+        "furniture_factor": {
+          "type": "number",
+          "description": "Multiplier on the air capacitance to account for furniture thermal mass. 1.0 = air only, typical range 2–5.",
+          "minimum": 1.0,
+          "default": 2.5,
+          "examples": [2.5, 4.0]
+        },
+        "input_signal": {
+          "type": "string",
+          "description": "InfluxDB signal for a heat source / internal gain in this room [W]. Format: measurement/field?tag=val.",
+          "examples": ["zigbee2mqtt/power?name=radiateur_chambre"]
+        },
+        "obs_signal": {
+          "type": "string",
+          "description": "InfluxDB signal for a measured indoor temperature in this room [°C]. Used as observation for fitting.",
+          "examples": ["zigbee2mqtt/temperature?name=salon"]
+        }
+      }
+    },
+
+    "layer": {
+      "type": "object",
+      "description": "A single homogeneous layer in an opaque wall/roof/floor stack.",
+      "required": ["material", "thickness"],
+      "additionalProperties": false,
+      "properties": {
+        "material": {
+          "type": "string",
+          "description": "Material id — must match a key in the top-level materials dict.",
+          "examples": ["brick_full", "stone_calcaire", "mineral_wool"]
+        },
+        "thickness": {
+          "type": "number",
+          "description": "Layer thickness [m].",
+          "exclusiveMinimum": 0,
+          "examples": [0.20, 0.08, 0.04]
+        }
+      }
+    },
+
+    "opaque_element": {
+      "type": "object",
+      "description": "Opaque building element: wall, roof, or floor. Modelled as a layered RC stack.",
+      "required": ["id", "kind", "label", "between", "a", "b", "layers"],
+      "additionalProperties": false,
+      "properties": {
+        "id":    { "$ref": "#/$defs/uuid" },
+        "kind":  { "type": "string", "const": "opaque" },
+        "label": { "type": "string", "examples": ["Mur SE", "Toit nord", "Plancher"] },
+        "between": {
+          "type": "array",
+          "description": "The two zone UUIDs this element separates. Order: [interior, exterior].",
+          "items": { "$ref": "#/$defs/uuid" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "a": {
+          "type": "number",
+          "description": "First dimension [m]. For walls: width. For floors/roofs: width.",
+          "exclusiveMinimum": 0,
+          "examples": [3.5, 5.0]
+        },
+        "b": {
+          "type": "number",
+          "description": "Second dimension [m]. For walls: height. For floors/roofs: depth.",
+          "exclusiveMinimum": 0,
+          "examples": [2.5, 4.0]
+        },
+        "orientation": {
+          "type": "string",
+          "description": "Cardinal or intercardinal orientation for solar irradiance lookup.",
+          "enum": ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+          "examples": ["SE", "S"]
+        },
+        "tilt": {
+          "type": "number",
+          "description": "Surface tilt from horizontal [°]. 0 = horizontal (roof/floor), 90 = vertical (wall).",
+          "minimum": 0,
+          "maximum": 90,
+          "default": 90,
+          "examples": [90, 30, 0]
+        },
+        "layers": {
+          "type": "array",
+          "description": "Material layers from interior to exterior.",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/layer" }
+        },
+        "h_i": {
+          "type": "number",
+          "description": "Interior convective heat transfer coefficient [W/(m²·K)]. Default per ISO 6946.",
+          "exclusiveMinimum": 0,
+          "default": 7.7,
+          "examples": [7.7]
+        },
+        "h_e": {
+          "type": "number",
+          "description": "Exterior convective heat transfer coefficient [W/(m²·K)]. Default per ISO 6946.",
+          "exclusiveMinimum": 0,
+          "default": 25.0,
+          "examples": [25.0, 8.0]
+        },
+        "alpha_solar": {
+          "type": "number",
+          "description": "Solar absorptance of the exterior surface [dimensionless, 0–1].",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.6,
+          "examples": [0.6, 0.4, 0.9]
+        },
+        "no_mass": {
+          "type": "boolean",
+          "description": "If true, approximate the wall as a pure resistor (no thermal mass). Useful for lightweight partitions.",
+          "default": false
+        }
+      }
+    },
+
+    "glazing_element": {
+      "type": "object",
+      "description": "Transparent element: window or skylight. Modelled as a single U-value + SHGC.",
+      "required": ["id", "kind", "label", "between", "a", "b", "U", "SHGC"],
+      "additionalProperties": false,
+      "properties": {
+        "id":    { "$ref": "#/$defs/uuid" },
+        "kind":  { "type": "string", "const": "glazing" },
+        "label": { "type": "string", "examples": ["Fenêtre SE", "Velux nord"] },
+        "between": {
+          "type": "array",
+          "description": "The two zone UUIDs this element separates. Order: [interior, exterior].",
+          "items": { "$ref": "#/$defs/uuid" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "a": {
+          "type": "number",
+          "description": "Width [m].",
+          "exclusiveMinimum": 0,
+          "examples": [1.2, 2.0]
+        },
+        "b": {
+          "type": "number",
+          "description": "Height [m].",
+          "exclusiveMinimum": 0,
+          "examples": [1.4, 1.5]
+        },
+        "U": {
+          "type": "number",
+          "description": "Overall heat transfer coefficient [W/(m²·K)].",
+          "exclusiveMinimum": 0,
+          "examples": [1.1, 2.8, 5.8]
+        },
+        "SHGC": {
+          "type": "number",
+          "description": "Solar heat gain coefficient [dimensionless, 0–1]. Fraction of incident solar irradiance transmitted as heat.",
+          "minimum": 0,
+          "maximum": 1,
+          "examples": [0.67, 0.35]
+        },
+        "orientation": {
+          "type": "string",
+          "description": "Cardinal or intercardinal orientation for solar irradiance lookup.",
+          "enum": ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+          "examples": ["SE", "S"]
+        },
+        "tilt": {
+          "type": "number",
+          "description": "Surface tilt from horizontal [°]. 90 = vertical window, 0 = horizontal skylight.",
+          "minimum": 0,
+          "maximum": 90,
+          "default": 90,
+          "examples": [90, 0]
+        }
+      }
+    },
+
+    "air_exchange_element": {
+      "type": "object",
+      "description": "Air exchange: infiltration, natural ventilation, or mechanical ventilation (no heat recovery).",
+      "required": ["id", "kind", "label", "between", "ach"],
+      "additionalProperties": false,
+      "properties": {
+        "id":    { "$ref": "#/$defs/uuid" },
+        "kind":  { "type": "string", "const": "air_exchange" },
+        "label": { "type": "string", "examples": ["Infiltrations chambre", "VMC salon"] },
+        "between": {
+          "type": "array",
+          "description": "The two zone UUIDs exchanging air. Typically [room, outdoor].",
+          "items": { "$ref": "#/$defs/uuid" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "ach": {
+          "type": "number",
+          "description": "Air change rate [h⁻¹].",
+          "exclusiveMinimum": 0,
+          "examples": [0.4, 1.5]
+        }
+      }
+    },
+
+    "outdoor_element": {
+      "type": "object",
+      "description": "Outdoor boundary zone. Holds location and weather source. Referenced by other elements via UUID in their between field.",
+      "required": ["id", "kind", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id":    { "$ref": "#/$defs/uuid" },
+        "kind":  { "type": "string", "const": "outdoor" },
+        "label": { "type": "string", "examples": ["Extérieur", "Lyon"] },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lat": { "type": "number", "examples": [45.76] },
+            "lon": { "type": "number", "examples": [4.83] },
+            "label": { "type": "string", "examples": ["Lyon"] }
+          }
+        },
+        "weather_source": {
+          "type": "string",
+          "enum": ["open_meteo"],
+          "examples": ["open_meteo"]
+        },
+        "obs_signal": {
+          "type": "string",
+          "description": "InfluxDB signal for a measured outdoor temperature [°C]. Overrides weather_source T° when set.",
+          "examples": ["open_meteo/temperature_2m"]
+        }
+      }
+    },
+
+    "ground_element": {
+      "type": "object",
+      "description": "Ground boundary zone. Holds ground temperature model parameters.",
+      "required": ["id", "kind", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id":    { "$ref": "#/$defs/uuid" },
+        "kind":  { "type": "string", "const": "ground" },
+        "label": { "type": "string", "examples": ["Sol"] }
+      }
+    }
+
+  }
+}

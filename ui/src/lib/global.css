@@ -1,0 +1,22 @@
+*, *::before, *::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	font-family: 'Inter', system-ui, sans-serif;
+	font-size: 15px;
+	line-height: 1.5;
+	background: #0c1324;
+	color: #e2e8f0;
+	-webkit-font-smoothing: antialiased;
+}
+
+button {
+	font-family: inherit;
+	font-size: 15px;
+}
+
+input, select, textarea {
+	font-family: inherit;
+}

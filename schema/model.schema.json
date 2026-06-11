@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12",
+  "$id": "thermogram/model",
+  "title": "ThermalRCModel",
+  "description": "A lumped thermal RC network. All physical elements are nodes; edges are plain wires (no attributes). Assembles to C·dT/dt = -L·T + B·u(t).",
+  "type": "object",
+  "required": ["schema_version", "id", "name", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+
+    "schema_version": { "type": "string", "const": "0.3", "description": "Schema version — bump when making breaking changes." },
+    "id":   { "type": "string", "examples": ["chambre_1r1c"] },
+    "name": { "type": "string", "examples": ["Chambre — modèle 1R1C"] },
+    "notes": { "type": "string" },
+
+    "ui_hint": {
+      "type": "object",
+      "description": "Default simulation window shown in the UI. Not part of the RC topology — solver run parameters live separately.",
+      "additionalProperties": false,
+      "properties": {
+        "start":      { "type": "string", "format": "date", "examples": ["2026-07-01"] },
+        "end":        { "type": "string", "format": "date", "examples": ["2026-07-15"] },
+        "dt_minutes": { "type": "integer", "default": 15, "minimum": 1 }
+      }
+    },
+
+    "nodes": {
+      "type": "array",
+      "description": "All physical elements in the network. kind=mass: thermal capacitance (state variable). kind=boundary: fixed/prescribed temperature. kind=resistance: thermal resistance between two wired nodes. kind=source: heat injection into a wired mass node.",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+
+          {
+            "description": "Thermal mass — state variable node (capacitance C).",
+            "type": "object",
+            "required": ["id", "kind", "C"],
+            "additionalProperties": false,
+            "properties": {
+              "id":    { "type": "string", "examples": ["chambre", "mur_mass"] },
+              "kind":  { "type": "string", "const": "mass" },
+              "label": { "type": "string" },
+              "C": {
+                "description": "Thermal capacitance [J/K].",
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "ui_position": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                }
+              }
+            }
+          },
+
+          {
+            "description": "Boundary node — fixed/prescribed temperature, not integrated.",
+            "type": "object",
+            "required": ["id", "kind", "T_source"],
+            "additionalProperties": false,
+            "properties": {
+              "id":    { "type": "string", "examples": ["exterior", "sol_profond"] },
+              "kind":  { "type": "string", "const": "boundary" },
+              "label": { "type": "string" },
+              "T_source": {
+                "description": "Temperature forcing: a named input signal or a fixed value [°C].",
+                "oneOf": [
+                  { "type": "string", "examples": ["open_meteo/temperature_2m"] },
+                  { "type": "number", "examples": [12.0] }
+                ]
+              },
+              "ui_position": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                }
+              }
+            }
+          },
+
+          {
+            "description": "Thermal resistance — 2-terminal component, connected via edges to exactly two other nodes.",
+            "type": "object",
+            "required": ["id", "kind", "R"],
+            "additionalProperties": false,
+            "properties": {
+              "id":    { "type": "string", "examples": ["mur_sud", "plancher"] },
+              "kind":  { "type": "string", "const": "resistance" },
+              "label": { "type": "string" },
+              "R": {
+                "description": "Thermal resistance [K/W].",
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "ui_position": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                }
+              }
+            }
+          },
+
+          {
+            "description": "Heat source — injects Q = gain × signal(t) into a wired mass node.",
+            "type": "object",
+            "required": ["id", "kind", "signal", "gain"],
+            "additionalProperties": false,
+            "properties": {
+              "id":     { "type": "string", "examples": ["apport_fenetre_sud"] },
+              "kind":   { "type": "string", "const": "source" },
+              "label":  { "type": "string" },
+              "signal": { "type": "string", "description": "Named input signal.", "examples": ["poa/window_south", "occupancy_W"] },
+              "gain":   { "type": "number", "exclusiveMinimum": 0, "description": "Gain coefficient. Q = gain × signal.", "examples": [1.2, 8.0] },
+              "ui_position": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                }
+              }
+            }
+          }
+
+        ]
+      }
+    },
+
+    "edges": {
+      "type": "array",
+      "description": "Plain wires connecting nodes. No attributes — topology only. Resistance nodes must have exactly 2 edges; source nodes exactly 1 (to a mass).",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string", "description": "Source node id." },
+          "to":   { "type": "string", "description": "Target node id." }
+        }
+      }
+    }
+
+  }
+}
