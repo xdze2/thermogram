@@ -221,3 +221,92 @@ class TestDefaultViewChambreV1:
         ]
         chains = [l for l in self.view.lumped if l.kind == "RC_chain"]
         assert len(chains) == len(opaque_with_mass)
+
+
+# ---------------------------------------------------------------------------
+# Parallel resistance paths between the same node pair merge into one Req.
+#
+# Several no-mass walls + a window bridging the same room↔outdoor pair are
+# physically in parallel: only their summed conductance is identifiable from
+# the indoor temperature. The default view must collapse them into a single
+# parallel_inv_sum Req, not leave one Req per element (which is structurally
+# unidentifiable and wrecks the fit).
+# ---------------------------------------------------------------------------
+
+class TestParallelPathsMerge:
+    ROOM = "a1b2c3d4-0001-0000-0000-000000000001"
+    OUT = "a1b2c3d4-0001-0000-0000-000000000002"
+
+    def _house(self) -> dict:
+        return {
+            "schema_version": "0.3",
+            "name": "parallel_test",
+            "rooms": [{
+                "id": self.ROOM, "label": "Chambre", "role": "mass",
+                "a": 5, "b": 5, "c": 3,
+            }],
+            "materials": {
+                "brick": {"lambda": 0.8, "rho": 1800, "cp": 840},
+            },
+            "elements": [
+                {"id": self.OUT, "kind": "outdoor", "label": "Extérieur"},
+                {
+                    "id": "a1b2c3d4-0001-0000-0000-000000000010",
+                    "kind": "opaque", "label": "Wall NE",
+                    "between": [self.ROOM, self.OUT], "a": 4, "b": 2.5,
+                    "no_mass": True,
+                    "layers": [{"material": "brick", "thickness": 0.20}],
+                },
+                {
+                    "id": "a1b2c3d4-0001-0000-0000-000000000011",
+                    "kind": "opaque", "label": "Wall N",
+                    "between": [self.ROOM, self.OUT], "a": 3, "b": 2.5,
+                    "no_mass": True,
+                    "layers": [{"material": "brick", "thickness": 0.20}],
+                },
+                {
+                    "id": "a1b2c3d4-0001-0000-0000-000000000012",
+                    "kind": "glazing", "label": "win",
+                    "between": [self.ROOM, self.OUT], "a": 1.2, "b": 1.0,
+                    "U": 2.8,
+                },
+            ],
+        }
+
+    def setup_method(self):
+        house = self._house()
+        self.model, self.emap = expand(house)
+        labels = {self.ROOM: "Chambre", self.OUT: "Extérieur"}
+        for e in house["elements"]:
+            labels[e["id"]] = e["label"]
+        self.view = build_default_view(self.model, self.emap, labels)
+
+    def test_single_merged_req(self):
+        reqs = [l for l in self.view.lumped if l.kind == "Req"]
+        assert len(reqs) == 1, (
+            f"Expected the 2 no-mass walls + window to merge into 1 Req, "
+            f"got {len(reqs)}: {[l.label for l in reqs]}"
+        )
+
+    def test_merged_req_is_parallel_inv_sum(self):
+        req = next(l for l in self.view.lumped if l.kind == "Req")
+        assert req.combine == "parallel_inv_sum"
+        assert len(req.atoms) == 3
+
+    def test_merged_req_terminals(self):
+        req = next(l for l in self.view.lumped if l.kind == "Req")
+        assert {req.node_a, req.node_b} == {"Chambre", "Extérieur"}
+
+    def test_merged_label_lists_all_elements(self):
+        req = next(l for l in self.view.lumped if l.kind == "Req")
+        for name in ("Wall NE", "Wall N", "win"):
+            assert name in (req.label or ""), req.label
+
+    def test_merged_prior_equals_parallel_sum(self):
+        """The merged Req nominal is the parallel combination of the atom R's:
+        1 / Σ(1/R_i). This makes φ == prior reproduce the original conductance."""
+        req = next(l for l in self.view.lumped if l.kind == "Req")
+        nodes = {n["id"]: n for n in self.model["nodes"]}
+        r_atoms = [nodes[a]["R"] for a in req.atoms]
+        expected = 1.0 / sum(1.0 / r for r in r_atoms)
+        assert req.prior.nominal == pytest.approx(expected)

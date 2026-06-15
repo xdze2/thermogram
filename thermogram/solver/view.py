@@ -44,7 +44,6 @@ from thermogram.solver.lumps import (
     compose_chain_prior,
     compose_parallel_inv_prior,
     compose_parallel_sum_prior,
-    compose_series_prior,
 )
 
 # Default log-space sigma for free lumped elements
@@ -201,21 +200,24 @@ def build_default_view(
     # Simpler: build element_uuid → chain_info by matching r_ids / mass_ids to atoms.
     # wall_chains: { label: {mass_ids, r_ids, chain_n, R_wall, C_wall} }
 
-    # Map: element uuid → wall_chain entry (if any), split by mass/no-mass
+    # Map: element uuid → wall_chain entry, for opaque walls WITH mass only.
+    # No-mass walls (chain_n == 0) are deliberately NOT pulled out here: they are
+    # pure resistors and must fall into the endpoint-pair grouping in section 3,
+    # so that several no-mass walls (and glazing / air_exchange) bridging the same
+    # node pair collapse into one shared parallel_inv_sum Req. Pulling them out
+    # one-per-element (as a previous version did) left the parallel paths as
+    # separate, structurally unidentifiable Req's.
     uuid_to_chain: dict[str, dict] = {}        # opaque with mass (chain_n > 0)
-    uuid_to_nomass_chain: dict[str, dict] = {} # opaque no_mass (chain_n == 0)
 
     for label, chain in wall_chains.items():
-        is_nomass = chain.get("chain_n", 1) == 0
+        if chain.get("chain_n", 1) == 0:
+            continue  # no-mass → handled by section 3 grouping
         candidate_ids = chain.get("mass_ids", []) + chain.get("r_ids", [])
         if not candidate_ids:
             continue
         for aid in candidate_ids:
             if aid in atom_to_element:
-                if is_nomass:
-                    uuid_to_nomass_chain[atom_to_element[aid]] = chain
-                else:
-                    uuid_to_chain[atom_to_element[aid]] = chain
+                uuid_to_chain[atom_to_element[aid]] = chain
                 break
 
     # Track which atom ids have been assigned to a lumped element
@@ -264,32 +266,11 @@ def build_default_view(
         lumped.append(lump)
         covered.update(atom_ids)
 
-    # --- 2. No-mass opaque walls (pure Req, series_sum) ---
-    for elem_uuid, chain in uuid_to_nomass_chain.items():
-        r_ids = chain["r_ids"]
-        atom_ids = expansion_map.get(elem_uuid, [])
-        lump_id = f"req_{elem_uuid.replace('-', '')}"
-        r_noms = [nodes[rid]["R"] for rid in r_ids]
-        prior = compose_series_prior(r_noms, sigma_log=_SIGMA_LOG_FREE)
-        ep_a, ep_b = _resistive_endpoints(r_ids, nodes, neighbours)
-        lump = LumpedElement(
-            id=lump_id,
-            kind="Req",
-            label=resolve_label(elem_uuid, atom_ids),
-            atoms=r_ids,
-            combine="series_sum",
-            prior=prior,
-            mode="free",
-            realizes=elem_uuid,
-            node_a=ep_a,
-            node_b=ep_b,
-        )
-        lumped.append(lump)
-        covered.update(atom_ids)
-
-    # --- 3. Non-opaque resistance elements (glazing, air_exchange) ---
-    # Group by endpoint pair to merge parallel resistors into one Req.
-    # We look at resistance nodes not yet covered (not part of an opaque wall).
+    # --- 2. Parallel resistance paths (no-mass walls, glazing, air_exchange) ---
+    # Group every uncovered single resistance by its endpoint pair and merge
+    # resistors sharing a pair into one shared Req (parallel_inv_sum). This
+    # covers no-mass opaque walls, glazing and air_exchange uniformly — anything
+    # bridging the same two nodes is one identifiable conductance, not several.
     pair_to_r_atoms: dict[tuple[str, str], list[str]] = defaultdict(list)
     pair_to_elem_uuids: dict[tuple[str, str], list[str]] = defaultdict(list)
 
@@ -308,7 +289,9 @@ def build_default_view(
 
     for pair, r_ids in pair_to_r_atoms.items():
         elem_uuids = pair_to_elem_uuids[pair]
-        # Use first element uuid for provenance (or None if unknown)
+        # A merged parallel Req realizes several elements at once; `realizes`
+        # (single-valued provenance) only carries meaning when exactly one
+        # element backs the lump.
         realizes = elem_uuids[0] if len(elem_uuids) == 1 else None
         lump_id = f"req_{'_'.join(sorted(r_ids))}"
 
@@ -320,13 +303,24 @@ def build_default_view(
             prior = compose_parallel_inv_prior(r_noms, sigma_log=_SIGMA_LOG_FREE)
             combine = "parallel_inv_sum"
 
+        # Label: single element → its label; merged → join the element labels
+        # ("Wall NE + Wall N + win") so the user sees what was combined.
+        if len(elem_uuids) > 1:
+            parts = [
+                element_labels.get(uid) or resolve_label(uid, []) or uid[:8]
+                for uid in elem_uuids
+            ]
+            label = " + ".join(p for p in parts if p)
+        else:
+            label = resolve_label(realizes, r_ids)
+
         # All parallel resistors share the same endpoint pair (that is how they
         # were grouped), so any one of them gives the lump's terminals.
         ep_a, ep_b = (_node_label(pair[0], nodes), _node_label(pair[1], nodes))
         lump = LumpedElement(
             id=lump_id,
             kind="Req",
-            label=resolve_label(realizes, r_ids),
+            label=label,
             atoms=r_ids,
             combine=combine,
             prior=prior,
