@@ -198,20 +198,65 @@ when view missing or stale → `preview-groups` returns 404.
 
 ---
 
-## Step 4 — UI adaptation: FitPanel becomes the φ-table
+## Step 4 — UI adaptation: FitPanel becomes the φ-table ✅
 
-- [ ] FitPanel rewritten as the φ-space table, one row per lumped element:
-      label (from realizing element), kind badge, prior (nominal ± σ_log,
-      human units), mode toggle (free/fixed), posterior ± σ after fit,
+- [x] FitPanel rewritten as the φ-space table, one row per lumped element:
+      label (from realizing element), kind badge, prior (nominal ± σ_log),
+      mode toggle (free/fixed), posterior ± σ after fit,
       prior→posterior shift indicator.
-- [ ] Remove the node-field param table and its grouping preview UI.
-- [ ] "Rebuild view" button when the study is stale (calls `POST .../view`).
-- [ ] Simulation tab unchanged except: post-fit forward sim uses lumped element
-      posteriors (φ → atoms) instead of `param_overrides` node patches.
+- [x] Remove the node-field param table and its grouping preview UI.
+- [x] "Rebuild view" button when the study is stale (calls `POST .../view`).
+- [x] Post-fit forward sim uses fitted `atomic_model` returned by `/fit/run`
+      (via `param_overrides`) instead of the old node-field patches.
 
 **Test:** manual UI pass on a fixture house — build view, freeze a lumped element,
-fit, see posteriors in the table; stale → rebuild flow works. Keep it to
-one afternoon of polish; looks are post-v1.
+fit, see posteriors in the table; stale → rebuild flow works.
+
+---
+
+## Step 4.2 — Fit panel polish and usability fixes
+
+Issues surfaced during first real use of the Step 4 UI:
+
+- [ ] **Human-readable lump labels**: `build_default_view` sets `lump.label`
+      from `element.label` (or room label for `Ceq`); currently UUIDs show
+      because the label field is empty or not propagated. Fix in `solver/view.py`
+      and verify in the φ-table.
+- [ ] **RC_chain: one row, two columns** — Prior R and Prior C already have
+      separate columns in the table but the table has two rows for an RC_chain
+      lump (one per φ key). Collapse to a single row per lump; the R and C
+      values sit in their respective columns on that one row.
+- [ ] **Rename "view" → "lumped model"** in all UI labels, buttons, and
+      section headers (`FitPanel.svelte`). API routes keep their names; only
+      the displayed copy changes.
+- [ ] **Merge run + fit into one panel**: replace the "type: run / type: fit"
+      split with a single study panel that always shows the φ-table and a
+      "Run forward" button alongside "Run fit". Forward run uses the nominal
+      priors (or manual overrides) as `param_overrides`; fit overwrites them
+      with posteriors. This lets the user verify the prior and the fit in the
+      same place.
+- [ ] **Manual parameter override**: add an editable nominal field per lump
+      row (inline, only active when mode ≠ fixed) so the user can nudge
+      the starting point before fitting or run a forward sim with hand-tuned
+      values. Persisted via `PUT .../view` (prior.nominal update).
+- [ ] **Fit y₀ (initial state)**: add a free `T_init` lumped element of kind
+      `T_boundary` (or a dedicated `y0` kind) to the view; the forward closure
+      sets the initial temperature vector from it. Alternatively expose y₀ as
+      a single free scalar in the fit request body. Simpler path: add
+      `fit_y0: bool` to `FitRequest`; when true, append a `y0` parameter to
+      `log_phi0` and patch the forward closure to use it.
+- [ ] **Lumped-model graph**: a small SVG/canvas view of the lumped RC network
+      (one node per lump, edges from the `atoms` connectivity) shown alongside
+      the φ-table, so the user can see what they are fitting. Can reuse the
+      existing `GraphView` filtered to lumped-node granularity, or be a
+      dedicated lightweight component.
+- [ ] **Prior sanity**: verify that `build_default_view` produces priors close
+      enough to reality that NLS converges from them on a typical house. Check
+      against the Step 1 round-trip test; tighten or widen σ_log as needed.
+
+**Test:** the Step 1 round-trip (`uv run pytest -m roundtrip`) still passes
+after any solver changes. Manual UI pass: labels are human-readable, RC_chain
+is one row, forward run + fit work from the same panel, y₀ is fitted.
 
 ---
 

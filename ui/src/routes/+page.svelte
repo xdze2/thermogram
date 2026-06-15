@@ -327,31 +327,6 @@
 		}
 	}
 
-	// ── param groups (identifiability) ───────────────────────────────────────
-	let paramGroups = $state([]);
-
-	async function refreshGroups(currentModel) {
-		if (!currentModel) { paramGroups = []; return; }
-		const nodes = currentModel.nodes ?? [];
-		const keys = nodes.flatMap((n) => {
-			if (n.kind === 'resistance') return [`${n.id}.R`];
-			if (n.kind === 'mass')       return [`${n.id}.C`];
-			if (n.kind === 'source')     return [`${n.id}.gain`];
-			return [];
-		});
-		if (keys.length === 0) { paramGroups = []; return; }
-		try {
-			const res = await fetch(`${API}/fit/preview-groups`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ atomic_model: currentModel, param_keys: keys }),
-			});
-			if (res.ok) paramGroups = await res.json();
-		} catch { /* silently ignore */ }
-	}
-
-	$effect(() => { refreshGroups(atomicModel); });
-
 	onMount(async () => {
 		await loadHousesList();
 	});
@@ -470,7 +445,7 @@
 										{atomicModelLoading ? '…' : '⟳'}
 									</button>
 								</div>
-								<GraphView model={atomicModel} selected={null} onselect={() => {}} onaddedge={() => {}} groups={paramGroups} />
+								<GraphView model={atomicModel} selected={null} onselect={() => {}} onaddedge={() => {}} groups={[]} />
 							</div>
 						{:else}
 							<div class="study-pane-empty">
@@ -629,11 +604,9 @@
 									<FitPanel
 										house_name={houseName}
 										study_id={selectedStudyId}
-										model={atomicModel}
 										inputs={simInputs}
 										range={simRange}
 										observations={simObservations}
-										groups={paramGroups}
 										y0_uniform={simInitState.mode === 'uniform' ? simInitState.T : null}
 										onready={(fn) => (triggerRun = fn)}
 									/>

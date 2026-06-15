@@ -8,85 +8,117 @@
 	let {
 		house_name,
 		study_id,
-		model,
-		inputs       = {},   // node_id → signal name (from Inputs tab)
+		inputs       = {},
 		range        = { start: '', end: '' },
-		observations = {},   // mass_node_id → signal name (from Inputs tab observations)
-		groups       = [],   // list[list[str]] from /fit/preview-groups (all params)
-		y0_uniform   = null, // null → auto; or a number [°C] for uniform initial state
+		observations = {},
+		y0_uniform   = null,
 		onready      = /** @type {(fn: () => void) => void} */ (() => {}),
 	} = $props();
 
 	$effect(() => { onready(runFit); });
 
-	// Group colors — must match GraphView.svelte palette
-	const GROUP_COLORS = ['#f97316', '#22d3ee', '#a78bfa', '#4ade80', '#fb7185'];
+	// ── view state ────────────────────────────────────────────────────────────
+	let view         = $state(null);   // { lumped: [...], model_hash, _stale_view }
+	let viewLoading  = $state(false);
+	let viewError    = $state(null);
 
-	// param_key → { color, groupIndex, size }
-	const groupInfoMap = $derived.by(() => {
-		const map = {};
-		let colorIdx = 0;
-		for (const g of groups) {
-			if (g.length <= 1) { colorIdx; continue; }
-			const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
-			colorIdx++;
-			for (const key of g) map[key] = { color, size: g.length };
+	async function loadView() {
+		if (!house_name || !study_id) return;
+		viewLoading = true;
+		viewError   = null;
+		try {
+			const res = await fetch(`${API}/houses/${house_name}/studies/${study_id}/view`);
+			if (res.status === 404) { view = null; return; }
+			if (!res.ok) throw new Error(res.statusText);
+			view = await res.json();
+		} catch (e) {
+			viewError = e.message;
+		} finally {
+			viewLoading = false;
 		}
-		return map;
-	});
-
-	// ── params table ──────────────────────────────────────────────────────────
-	// Each row: { key: 'node_id.field', nominal: number, sigma_log: number }
-	let paramRows = $state([]);
-
-	// Re-populate when model changes (keep existing rows, add missing ones)
-	$effect(() => {
-		if (!model) return;
-		const nodes = model.nodes ?? [];
-		const existing = new Set(paramRows.map((r) => r.key));
-		const next = [...paramRows];
-
-		for (const n of nodes) {
-			if (n.kind === 'resistance' && !existing.has(`${n.id}.R`)) {
-				next.push({ key: `${n.id}.R`, nominal: n.R ?? 0.01, sigma_log: 0.5 });
-			} else if (n.kind === 'mass' && !existing.has(`${n.id}.C`)) {
-				next.push({ key: `${n.id}.C`, nominal: n.C ?? 1_000_000, sigma_log: 0.5 });
-			} else if (n.kind === 'source' && !existing.has(`${n.id}.gain`)) {
-				next.push({ key: `${n.id}.gain`, nominal: n.gain ?? 1.0, sigma_log: 0.5 });
-			}
-		}
-		// only update if something was actually added
-		if (next.length !== paramRows.length) paramRows = next;
-	});
-
-	function toggleParam(key) {
-		const idx = paramRows.findIndex((r) => r.key === key);
-		if (idx === -1) return;
-		paramRows = paramRows.map((r, i) =>
-			i === idx ? { ...r, fixed: !r.fixed } : r
-		);
 	}
 
-	function updateParam(key, field, raw) {
-		const value = field === 'key' ? raw : parseFloat(raw);
-		if (field !== 'key' && isNaN(value)) return;
-		paramRows = paramRows.map((r) => r.key === key ? { ...r, [field]: value } : r);
+	async function buildView() {
+		if (!house_name || !study_id) return;
+		viewLoading = true;
+		viewError   = null;
+		try {
+			const res = await fetch(`${API}/houses/${house_name}/studies/${study_id}/view`, {
+				method: 'POST',
+			});
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({ detail: res.statusText }));
+				throw new Error(typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail));
+			}
+			view = await res.json();
+		} catch (e) {
+			viewError = e.message;
+		} finally {
+			viewLoading = false;
+		}
+	}
+
+	// Load view when study changes
+	$effect(() => {
+		study_id;
+		house_name;
+		loadView();
+	});
+
+	// ── mode toggle ───────────────────────────────────────────────────────────
+	let modeUpdatePending = $state(false);
+
+	async function toggleMode(lumpId) {
+		if (!view || modeUpdatePending) return;
+		const lump = view.lumped.find((l) => l.id === lumpId);
+		if (!lump) return;
+		const newMode = lump.mode === 'free' ? 'fixed' : 'free';
+
+		// Optimistic local update
+		view = { ...view, lumped: view.lumped.map((l) => l.id === lumpId ? { ...l, mode: newMode } : l) };
+
+		modeUpdatePending = true;
+		try {
+			const res = await fetch(`${API}/houses/${house_name}/studies/${study_id}/view`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ lumped: view.lumped }),
+			});
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({ detail: res.statusText }));
+				throw new Error(typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail));
+			}
+			view = await res.json();
+		} catch (e) {
+			viewError = e.message;
+			// revert
+			await loadView();
+		} finally {
+			modeUpdatePending = false;
+		}
 	}
 
 	// ── fit config ────────────────────────────────────────────────────────────
 	let obsSigma = $state(0.5);
-	let method   = $state('nls');
 
 	// ── fit run ───────────────────────────────────────────────────────────────
 	let fitLoading = $state(false);
 	let fitError   = $state(null);
 	let fitResult  = $state(null);
 
+	const viewStale = $derived(view?._stale_view === true);
+	const hasView   = $derived(view && (view.lumped?.length ?? 0) > 0);
+	const hasFreeParams = $derived(
+		view?.lumped?.some((l) => l.mode === 'free') ?? false
+	);
+
 	const canRun = $derived(
 		!fitLoading &&
+		hasView &&
+		!viewStale &&
 		range.start && range.end &&
 		Object.values(observations).some((v) => v?.trim()) &&
-		paramRows.some((r) => !r.fixed)
+		hasFreeParams
 	);
 
 	async function runFit() {
@@ -98,11 +130,6 @@
 		inputSeries = null;
 		obsSeries   = null;
 
-		const freeParams = {};
-		for (const r of paramRows) {
-			if (!r.fixed) freeParams[r.key] = { nominal: r.nominal, sigma_log: r.sigma_log };
-		}
-
 		const body = {
 			house_name,
 			study_id,
@@ -112,9 +139,7 @@
 			observations: Object.fromEntries(
 				Object.entries(observations).filter(([, v]) => v?.trim())
 			),
-			params:       freeParams,
 			obs_sigma:    obsSigma,
-			method,
 			dt_minutes:   15,
 			...(y0_uniform != null ? { y0_uniform } : {}),
 		};
@@ -135,9 +160,11 @@
 			}
 			fitResult = await res.json();
 
-			// run forward simulation with fitted params to build charts
-			const fittedParams = fitResult.params_fitted ?? fitResult.params_mean ?? {};
-			const simRes = await runSimWithFittedParams(fittedParams);
+			// Reload view to get posteriors persisted by the API
+			await loadView();
+
+			// Forward sim using the fitted atomic_model returned by the API
+			const simRes = await runSimWithFittedModel(fitResult.atomic_model);
 			await loadChartsForResult(simRes);
 		} catch (e) {
 			fitError = e.message;
@@ -146,38 +173,36 @@
 		}
 	}
 
-	// ── param label helpers ───────────────────────────────────────────────────
-	const FIELD_UNITS = { R: 'm²K/W', C: 'J/K', gain: 'W/W' };
-	const FIELD_LABEL = { R: 'R', C: 'C', gain: 'gain' };
+	// ── formatting helpers ────────────────────────────────────────────────────
+	const KIND_COLORS = {
+		RC_chain:   '#22d3ee',
+		Req:        '#f97316',
+		Ceq:        '#a78bfa',
+		T_boundary: '#94a3b8',
+		Q_source:   '#4ade80',
+	};
 
-	const nodeLabels = $derived(
-		Object.fromEntries((model?.nodes ?? []).map((n) => [n.id, n.label ?? n.id]))
-	);
+	const KIND_UNITS = {
+		RC_chain:   ['m²K/W', 'J/K'],
+		Req:        ['m²K/W'],
+		Ceq:        ['J/K'],
+		T_boundary: ['°C'],
+		Q_source:   ['W'],
+	};
 
-	function fmtParamKey(key) {
-		const dot = key.lastIndexOf('.');
-		if (dot === -1) return key;
-		const nodeId = key.slice(0, dot);
-		const field  = key.slice(dot + 1);
-		const label  = nodeLabels[nodeId] ?? nodeId;
-		const unit   = FIELD_UNITS[field];
-		return unit ? `${label}  [${unit}]` : `${label}.${field}`;
-	}
-
-	// ── results table helpers ─────────────────────────────────────────────────
-	function fmtParam(v) {
-		if (v === null || v === undefined || isNaN(v)) return '—';
+	function fmtVal(v) {
+		if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return '—';
 		if (Math.abs(v) < 0.001 || Math.abs(v) >= 1e6) return v.toExponential(3);
 		return v.toPrecision(4);
 	}
 
-	function pctChange(fitted, nominal) {
-		if (!nominal) return '—';
+	function fmtShift(fitted, nominal) {
+		if (!nominal || fitted == null) return '';
 		const pct = ((fitted - nominal) / nominal) * 100;
-		return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+		return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%';
 	}
 
-	// ── post-fit simulation + series ──────────────────────────────────────────
+	// ── post-fit simulation ───────────────────────────────────────────────────
 	let simResult   = $state(null);
 	let inputSeries = $state(null);
 	let obsSeries   = $state(null);
@@ -189,7 +214,16 @@
 		return res.json();
 	}
 
-	async function runSimWithFittedParams(fittedParams) {
+	async function runSimWithFittedModel(fittedAtomicModel) {
+		// The fit API returns atomic_model with fitted values already applied.
+		// We need to run a forward sim — use param_overrides to carry the node values
+		// derived from the fitted model's nodes.
+		const nodeOverrides = {};
+		for (const n of (fittedAtomicModel?.nodes ?? [])) {
+			if (n.kind === 'resistance' && n.R != null) nodeOverrides[`${n.id}.R`] = n.R;
+			if (n.kind === 'mass'       && n.C != null) nodeOverrides[`${n.id}.C`] = n.C;
+			if (n.kind === 'source'     && n.gain != null) nodeOverrides[`${n.id}.gain`] = n.gain;
+		}
 		const body = {
 			house_name,
 			study_id,
@@ -197,7 +231,7 @@
 			end:             range.end,
 			inputs,
 			solver:          'zoh',
-			param_overrides: fittedParams,
+			param_overrides: nodeOverrides,
 			...(y0_uniform != null ? { y0_uniform } : {}),
 		};
 		const res = await fetch(`${API}/simulate/run`, {
@@ -215,6 +249,20 @@
 		}
 		return res.json();
 	}
+
+	const nodeKindMap = $derived.by(() => {
+		if (!fitResult?.atomic_model) return {};
+		return Object.fromEntries(
+			(fitResult.atomic_model.nodes ?? []).map((n) => [n.id, n.kind])
+		);
+	});
+
+	const nodeLabels = $derived.by(() => {
+		if (!fitResult?.atomic_model) return {};
+		return Object.fromEntries(
+			(fitResult.atomic_model.nodes ?? []).map((n) => [n.id, n.label ?? n.id])
+		);
+	});
 
 	async function loadChartsForResult(result) {
 		simResult = result;
@@ -296,7 +344,6 @@
 			});
 		});
 
-		// overlay boundary input temperatures
 		const bndEntries = inputSeries
 			? Object.entries(inputSeries).filter(([id]) => nodeKindMap[id] === 'boundary')
 			: [];
@@ -322,13 +369,9 @@
 		}, data);
 	}
 
-	// ── power inputs chart (source nodes) ────────────────────────────────────
+	// ── power inputs chart ────────────────────────────────────────────────────
 	let inpPowerContainer = $state(null);
 	let inpPowerChart     = null;
-
-	const nodeKindMap = $derived(
-		Object.fromEntries((model?.nodes ?? []).map((n) => [n.id, n.kind]))
-	);
 
 	function buildPowerChart() {
 		if (inpPowerChart) { inpPowerChart.destroy(); inpPowerChart = null; }
@@ -435,17 +478,6 @@
 <div class="fit-panel">
 	<!-- action bar -->
 	<div class="action-bar">
-		<div class="method-group">
-			<label class="radio-label">
-				<input type="radio" bind:group={method} value="nls" />
-				<span>NLS</span>
-			</label>
-			<label class="radio-label">
-				<input type="radio" bind:group={method} value="mcmc" />
-				<span>MCMC</span>
-			</label>
-		</div>
-
 		<label class="obs-sigma-label">
 			<span>obs σ (°C)</span>
 			<input type="number" bind:value={obsSigma} min="0.01" step="0.1" style="width:70px" />
@@ -457,58 +489,106 @@
 	</div>
 
 	<div class="body">
-		<!-- params section -->
+		<!-- view section -->
 		<section class="section">
-			<div class="section-header">Free parameters</div>
+			<div class="section-header">
+				<span>φ-space view</span>
+				{#if view && !viewStale}
+					<span class="hash-tag"># {view.model_hash?.slice(0, 8) ?? ''}</span>
+				{/if}
+				<button
+					class="view-btn"
+					class:stale={viewStale}
+					onclick={buildView}
+					disabled={viewLoading}
+					title={view ? 'Rebuild view from current model' : 'Build view'}
+				>
+					{viewLoading ? '…' : (view ? (viewStale ? '⚠ Rebuild view' : '⟳ Rebuild') : 'Build view')}
+				</button>
+			</div>
 
-			{#if paramRows.length === 0}
-				<p class="hint">No parameters found. Load a study first.</p>
-			{:else}
-				<table class="params-table">
+			{#if viewError}
+				<div class="error-box">{viewError}</div>
+			{/if}
+
+			{#if viewStale}
+				<div class="stale-banner">⚠ Model changed — view is stale. Rebuild before fitting.</div>
+			{/if}
+
+			{#if !view && !viewLoading}
+				<p class="hint">No view built yet. Click "Build view" to create the φ-space from the current model.</p>
+			{:else if view}
+				<table class="phi-table">
 					<thead>
 						<tr>
-							<th></th>
-							<th>Parameter</th>
-							<th></th>
-							<th>Nominal</th>
-							<th>σ log</th>
+							<th>Label</th>
+							<th>Kind</th>
+							<th>Prior R / Req</th>
+							<th>Prior C</th>
+							<th>Mode</th>
+							{#if fitResult}
+								<th>Posterior R / Req</th>
+								<th>Posterior C</th>
+							{/if}
 						</tr>
 					</thead>
 					<tbody>
-						{#each paramRows as row (row.key)}
-							{@const gi = groupInfoMap[row.key]}
-							<tr class:fixed={row.fixed}>
+						{#each view.lumped as lump (lump.id)}
+							{@const color = KIND_COLORS[lump.kind] ?? '#94a3b8'}
+							{@const hasPosterior = lump.posterior != null}
+							{@const shift = hasPosterior ? fmtShift(lump.posterior.value, lump.prior.nominal) : ''}
+							{@const shiftC = lump.posterior_C && lump.prior_C ? fmtShift(lump.posterior_C.value, lump.prior_C.nominal) : ''}
+							<tr class:fixed-row={lump.mode === 'fixed'}>
+								<td class="lump-label" title={lump.id}>{lump.label ?? lump.id}</td>
 								<td>
-									<input
-										type="checkbox"
-										checked={!row.fixed}
-										onchange={() => toggleParam(row.key)}
-									/>
+									<span class="kind-badge" style="border-color:{color};color:{color}">{lump.kind}</span>
 								</td>
-								<td class="param-key" title={row.key}>{fmtParamKey(row.key)}</td>
-								<td class="group-cell">
-									{#if gi}
-										<span class="group-dot" style="background:{gi.color}" title="Tied group — {gi.size} parallel paths"></span>
+								<td class="num">
+									{fmtVal(lump.prior.nominal)}
+									<span class="sigma">±{lump.prior.sigma_log.toFixed(2)}</span>
+								</td>
+								<td class="num">
+									{#if lump.prior_C}
+										{fmtVal(lump.prior_C.nominal)}
+										<span class="sigma">±{lump.prior_C.sigma_log.toFixed(2)}</span>
+									{:else}
+										<span class="muted">—</span>
 									{/if}
 								</td>
 								<td>
-									<input
-										type="number"
-										value={row.nominal}
-										step="any"
-										disabled={row.fixed}
-										onchange={(e) => updateParam(row.key, 'nominal', e.target.value)}
-									/>
+									<button
+										class="mode-btn"
+										class:mode-free={lump.mode === 'free'}
+										class:mode-fixed={lump.mode === 'fixed'}
+										onclick={() => toggleMode(lump.id)}
+										disabled={modeUpdatePending}
+										title="Toggle free/fixed"
+									>{lump.mode}</button>
 								</td>
-								<td>
-									<input
-										type="number"
-										value={row.sigma_log}
-										min="0.05" max="5" step="0.05"
-										disabled={row.fixed}
-										onchange={(e) => updateParam(row.key, 'sigma_log', e.target.value)}
-									/>
-								</td>
+								{#if fitResult}
+									<td class="num">
+										{#if hasPosterior}
+											<span class="posterior">{fmtVal(lump.posterior.value)}</span>
+											<span class="sigma">±{lump.posterior.sigma_log.toFixed(2)}</span>
+											{#if shift}
+												<span class="shift" class:shift-large={Math.abs(parseFloat(shift)) > 30}>{shift}</span>
+											{/if}
+										{:else}
+											<span class="muted">—</span>
+										{/if}
+									</td>
+									<td class="num">
+										{#if lump.posterior_C}
+											<span class="posterior">{fmtVal(lump.posterior_C.value)}</span>
+											<span class="sigma">±{lump.posterior_C.sigma_log.toFixed(2)}</span>
+											{#if shiftC}
+												<span class="shift" class:shift-large={Math.abs(parseFloat(shiftC)) > 30}>{shiftC}</span>
+											{/if}
+										{:else}
+											<span class="muted">—</span>
+										{/if}
+									</td>
+								{/if}
 							</tr>
 						{/each}
 					</tbody>
@@ -516,69 +596,28 @@
 			{/if}
 		</section>
 
-		<!-- results section -->
+		<!-- fit error -->
 		{#if fitError}
 			<div class="error-box">⚠ {fitError}</div>
 		{/if}
 
+		<!-- fit meta -->
 		{#if fitResult}
-			<section class="section">
-				<div class="section-header">
-					Results
-					<span class="result-meta">
-						{fitResult.method}
-						{#if fitResult.elapsed_s !== undefined}· {fitResult.elapsed_s.toFixed(1)} s{/if}
-						{#if fitResult.n_evals !== undefined}· {fitResult.n_evals} evals{/if}
-						{#if fitResult.success !== undefined}
-							<span class:ok={fitResult.success} class:fail={!fitResult.success}>
-								· {fitResult.success ? '✓' : '✗ ' + fitResult.message}
-							</span>
-						{/if}
-					</span>
-				</div>
+			<div class="result-meta-row">
+				<span class="result-meta">
+					{fitResult.method}
+					{#if fitResult.elapsed_s !== undefined}· {fitResult.elapsed_s.toFixed(1)} s{/if}
+					{#if fitResult.n_evals !== undefined}· {fitResult.n_evals} evals{/if}
+					{#if fitResult.cost !== undefined}· cost {fitResult.cost.toFixed(4)}{/if}
+					{#if fitResult.success !== undefined}
+						<span class:ok={fitResult.success} class:fail={!fitResult.success}>
+							· {fitResult.success ? '✓' : '✗ ' + fitResult.message}
+						</span>
+					{/if}
+				</span>
+			</div>
 
-				<table class="results-table">
-					<thead>
-						<tr>
-							<th>Parameter</th>
-							<th></th>
-							<th>Old (nominal)</th>
-							<th>New (fitted)</th>
-							<th>± σ</th>
-							<th>Δ</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each Object.keys(fitResult.params_nominal ?? fitResult.params_mean ?? {}) as key}
-							{@const nominal = fitResult.params_nominal?.[key]}
-							{@const fitted  = (fitResult.params_fitted ?? fitResult.params_mean)?.[key]}
-							{@const std     = fitResult.params_std?.[key]}
-							{@const gi      = groupInfoMap[key]}
-							<tr>
-								<td class="param-key" title={key}>{fmtParamKey(key)}</td>
-								<td class="group-cell">
-									{#if gi}
-										<span class="group-dot" style="background:{gi.color}" title="Tied — shared multiplier with {gi.size - 1} other path(s)"></span>
-									{/if}
-								</td>
-								<td class="num">{fmtParam(nominal)}</td>
-								<td class="num fitted">{fmtParam(fitted)}</td>
-								<td class="num std">± {fmtParam(std)}</td>
-								<td class="num change">{pctChange(fitted, nominal)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-
-				{#if fitResult.cost !== undefined}
-					<div class="cost-row">cost (½ RSS): {fitResult.cost.toFixed(4)}</div>
-				{/if}
-				{#if fitResult.acceptance_rate !== undefined}
-					<div class="cost-row">acceptance rate: {(fitResult.acceptance_rate * 100).toFixed(1)}%</div>
-				{/if}
-			</section>
-
-			<!-- charts — fitted simulation vs observed -->
+			<!-- charts -->
 			{#if simResult}
 				<section class="section">
 					<div class="section-header">
@@ -625,13 +664,6 @@
 		flex-shrink: 0;
 	}
 
-	.method-group { display: flex; gap: 14px; }
-
-	.radio-label {
-		display: flex; align-items: center; gap: 5px; cursor: pointer;
-	}
-	.radio-label span { font-size: 12px; color: #e2e8f0; }
-
 	.obs-sigma-label {
 		display: flex; align-items: center; gap: 6px;
 		font-size: 11px; text-transform: uppercase;
@@ -675,9 +707,17 @@
 		gap: 8px;
 	}
 
+	.hash-tag {
+		font-family: monospace;
+		font-weight: 400;
+		font-size: 10px;
+		color: #475569;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+
 	.hint { font-size: 12px; color: #94a3b8; margin: 0; }
 
-	input[type='text'],
 	input[type='number'] {
 		background: #0f172a;
 		color: #e2e8f0;
@@ -689,15 +729,46 @@
 		box-sizing: border-box;
 	}
 	input:focus { outline: none; border-color: #6366f1; }
-	input:disabled { opacity: 0.4; }
 
-	/* params table */
-	.params-table {
+	/* ── view button ── */
+	.view-btn {
+		background: #1e293b;
+		border: 1px solid #334155;
+		color: #64748b;
+		font-size: 10px;
+		font-weight: 600;
+		padding: 3px 10px;
+		border-radius: 4px;
+		cursor: pointer;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.view-btn:hover:not(:disabled) { background: #334155; color: #94a3b8; }
+	.view-btn:disabled { opacity: 0.4; cursor: default; }
+	.view-btn.stale {
+		border-color: #92400e;
+		color: #f59e0b;
+		background: #1c1100;
+	}
+	.view-btn.stale:hover:not(:disabled) { background: #291900; }
+
+	/* ── stale banner ── */
+	.stale-banner {
+		font-size: 12px;
+		color: #f59e0b;
+		background: #1c1100;
+		border: 1px solid #92400e;
+		border-radius: 4px;
+		padding: 8px 12px;
+	}
+
+	/* ── φ-table ── */
+	.phi-table {
 		width: 100%;
 		border-collapse: collapse;
 		font-size: 12px;
 	}
-	.params-table th {
+	.phi-table th {
 		text-align: left;
 		font-size: 10px;
 		text-transform: uppercase;
@@ -706,72 +777,92 @@
 		padding: 4px 8px 6px;
 		border-bottom: 1px solid #334155;
 	}
-	.params-table td { padding: 4px 8px; }
-	.params-table tr.fixed { opacity: 0.45; }
-	.params-table tr:hover:not(.fixed) { background: #1e293b33; }
+	.phi-table td { padding: 5px 8px; vertical-align: middle; }
+	.phi-table tr.fixed-row { opacity: 0.45; }
+	.phi-table tr:hover:not(.fixed-row) { background: #1e293b33; }
 
-	.params-table input[type='number'] { width: 110px; }
-	.params-table input[type='checkbox'] { cursor: pointer; accent-color: #6366f1; }
-
-	.param-key {
+	.lump-label {
 		font-size: 12px;
 		color: #e2e8f0;
-		max-width: 280px;
+		max-width: 200px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.group-cell {
-		width: 14px;
-		padding: 4px 2px;
-	}
-
-	.group-dot {
-		display: inline-block;
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		flex-shrink: 0;
-		cursor: help;
-	}
-
-	/* results table */
-	.results-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 12px;
-	}
-	.results-table th {
-		text-align: left;
-		font-size: 10px;
+	.kind-badge {
+		font-size: 9px;
+		font-weight: 700;
 		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: #94a3b8;
-		padding: 4px 8px 6px;
-		border-bottom: 1px solid #334155;
+		letter-spacing: 0.05em;
+		padding: 2px 5px;
+		border-radius: 3px;
+		border: 1px solid;
+		white-space: nowrap;
 	}
-	.results-table td { padding: 5px 8px; }
-	.results-table tr:nth-child(even) { background: #1e293b44; }
 
-	.num { font-family: monospace; color: #cbd5e1; }
-	.fitted { color: #38bdf8; font-weight: 600; }
-	.std { color: #94a3b8; }
-	.change { color: #a78bfa; }
+	.num {
+		font-family: monospace;
+		color: #cbd5e1;
+		white-space: nowrap;
+	}
 
+	.sigma {
+		font-size: 10px;
+		color: #475569;
+		margin-left: 3px;
+	}
+
+	.muted { color: #334155; }
+
+	.posterior { color: #38bdf8; font-weight: 600; }
+
+	.shift {
+		font-size: 10px;
+		color: #a78bfa;
+		margin-left: 4px;
+	}
+	.shift.shift-large { color: #f59e0b; }
+
+	/* ── mode button ── */
+	.mode-btn {
+		font-size: 10px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 2px 8px;
+		border-radius: 3px;
+		border: 1px solid #334155;
+		cursor: pointer;
+		background: none;
+		color: #64748b;
+		transition: background 0.1s, color 0.1s, border-color 0.1s;
+	}
+	.mode-btn.mode-free {
+		border-color: #22d3ee44;
+		color: #22d3ee;
+		background: #0c2a2e;
+	}
+	.mode-btn.mode-fixed {
+		border-color: #334155;
+		color: #475569;
+		background: none;
+	}
+	.mode-btn:hover:not(:disabled).mode-free  { background: #0e353a; }
+	.mode-btn:hover:not(:disabled).mode-fixed { background: #1e293b; color: #64748b; }
+	.mode-btn:disabled { opacity: 0.4; cursor: default; }
+
+	/* ── result meta ── */
+	.result-meta-row {
+		padding: 4px 0;
+	}
 	.result-meta {
 		font-size: 11px;
-		font-weight: 400;
-		text-transform: none;
-		letter-spacing: 0;
 		color: #64748b;
+		font-family: monospace;
 	}
 	.result-meta .ok   { color: #4ade80; }
 	.result-meta .fail { color: #f87171; }
-
-	.cost-row {
-		font-size: 11px;
-		font-family: monospace;
-		color: #64748b;
-		padding: 2px 8px;
-	}
 
 	.error-box {
 		background: #1c0a0a;
