@@ -276,6 +276,41 @@ parsing, 15-min resampling, range slicing.
 
 ---
 
+## Step 5.5 — Input data validation layer
+
+Motivated by a real bug: a unit error in the Influx timestamp conversion
+(`datetime64[us]` under pandas 3.0 cast as if it were `[ns]`) put the
+boundary signal ~56 years before the simulation window. Every grid point
+fell outside the signal range, `interp1d` clamped to a constant, and the
+forward sim flat-lined regardless of R, C, or solver. **It produced a
+plausible-looking wrong answer with no error.** `fetch_series` returning an
+empty Series on a missing signal is a second silent path to the same place.
+
+A validation layer between data fetch and the solver that rejects unusable
+inputs loudly, instead of letting them degrade into a constant.
+
+- [ ] Validate each fetched input/observation series before it reaches the
+      solver. Main criterion: **at least one point per hour** over the
+      requested `[start, end)` window (no gap longer than 1 h, and the
+      series actually spans the window — first point at/before `start`,
+      last point at/after `end − 1h`).
+- [ ] Additional sanity checks: series is non-empty; timestamps land inside
+      the requested window (catches the unit bug directly); no all-NaN; for
+      temperatures a loose physical range (e.g. −60..80 °C) flagged as a
+      warning, not a hard fail.
+- [ ] Surface failures as a structured 400 (per node_id → reason), the same
+      shape as the existing `errors` dict in `/simulate/run` and `/fit/run`,
+      so the UI can show which signal is bad and why.
+- [ ] Decide hard-fail vs warning per check (coverage = hard fail; physical
+      range = warning) and thread warnings through to the run/fit result.
+
+**Test:** unit tests on the validator — a >1 h gap fails; a window-spanning
+15-min series passes; out-of-window timestamps (the unit-bug case) fail;
+empty/all-NaN fails. API test: a study wired to a too-sparse signal returns
+400 with a readable per-signal reason instead of a flat-line result.
+
+---
+
 ## Step 6 — Bundled example house + dataset
 
 The demo content, in the new study/view format.

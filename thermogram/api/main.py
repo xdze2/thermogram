@@ -321,7 +321,7 @@ def post_simulate_run(req: SimulateRequest) -> dict:
     for node_id, signal_name in req.inputs.items():
         try:
             s = fetch_series(signal_name, req.start, req.end)
-            t_sec = s.index.astype("int64") / 1e9
+            t_sec = s.index.as_unit("ns").astype("int64") / 1e9
             inputs[node_id] = (t_sec.to_numpy(), s.to_numpy(dtype=float))
         except Exception as e:
             errors[node_id] = str(e)
@@ -335,7 +335,7 @@ def post_simulate_run(req: SimulateRequest) -> dict:
         if signal_name:
             try:
                 s = fetch_series(signal_name, req.start, req.end)
-                t_sec = s.index.astype("int64") / 1e9
+                t_sec = s.index.as_unit("ns").astype("int64") / 1e9
                 inputs[src_id] = (t_sec.to_numpy(), s.to_numpy(dtype=float))
             except Exception as e:
                 errors[src_id] = str(e)
@@ -555,7 +555,7 @@ def post_fit_run(req: FitRequest) -> dict:
     for node_id, signal_name in req.inputs.items():
         try:
             s = fetch_series(signal_name, req.start, req.end)
-            t_sec = s.index.astype("int64") / 1e9
+            t_sec = s.index.as_unit("ns").astype("int64") / 1e9
             inputs[node_id] = (t_sec.to_numpy(), s.to_numpy(dtype=float))
         except Exception as e:
             errors[node_id] = str(e)
@@ -564,7 +564,7 @@ def post_fit_run(req: FitRequest) -> dict:
     for node_id, signal_name in req.observations.items():
         try:
             s = fetch_series(signal_name, req.start, req.end)
-            t_sec = s.index.astype("int64") / 1e9
+            t_sec = s.index.as_unit("ns").astype("int64") / 1e9
             observations[node_id] = (t_sec.to_numpy(), s.to_numpy(dtype=float))
         except Exception as e:
             errors[node_id] = str(e)
