@@ -110,6 +110,68 @@
 		nominalDebounce = setTimeout(() => persistView(nextLumped), 400);
 	}
 
+	// ── input-data preview ───────────────────────────────────────────────────────
+	// Health check on the configured input + observation signals over the current
+	// range, before running. Catches missing / gappy / empty series loudly
+	// (the silent flat-line failure mode in todo Step 5.5).
+	let dataChecks  = $state(null);   // [{ id, role, signal, loading, error, meta }]
+	let dataLoading = $state(false);
+
+	const configuredSignals = $derived([
+		...Object.entries(inputs)
+			.filter(([, s]) => s?.trim())
+			.map(([id, signal]) => ({ id, role: 'input', signal })),
+		...Object.entries(observations)
+			.filter(([, s]) => s?.trim())
+			.map(([id, signal]) => ({ id, role: 'observation', signal })),
+	]);
+
+	function computeMeta(data) {
+		const values = data.values;
+		const valid  = values.filter((v) => v !== null);
+		if (valid.length === 0)
+			return { count: 0, total: values.length, gaps: 0, min: null, max: null, mean: null, empty: true };
+		let gaps = 0, inGap = false;
+		for (const v of values) {
+			if (v === null) { if (!inGap) { gaps++; inGap = true; } } else { inGap = false; }
+		}
+		const sum = valid.reduce((a, b) => a + b, 0);
+		return {
+			count: valid.length, total: values.length, gaps, empty: false,
+			min: Math.min(...valid), max: Math.max(...valid), mean: sum / valid.length,
+		};
+	}
+
+	async function fetchInputs() {
+		if (!range.start || !range.end || configuredSignals.length === 0) return;
+		dataLoading = true;
+		dataChecks = configuredSignals.map((s) => ({ ...s, loading: true, error: null, meta: null }));
+		await Promise.all(dataChecks.map(async (row, i) => {
+			try {
+				const data = await fetchSeries(row.signal, range.start, range.end);
+				dataChecks[i] = { ...row, loading: false, error: null, meta: computeMeta(data) };
+			} catch (e) {
+				dataChecks[i] = { ...row, loading: false, error: e.message, meta: null };
+			}
+		}));
+		dataChecks = [...dataChecks];
+		dataLoading = false;
+		lastCheckedSnapshot = JSON.stringify({ range, inputs, observations });
+	}
+
+	// Mark the preview stale (clear it) when the range or signal config changes.
+	let lastCheckedSnapshot = $state(null);
+	$effect(() => {
+		const snap = JSON.stringify({ range, inputs, observations });
+		if (dataChecks !== null && snap !== lastCheckedSnapshot) dataChecks = null;
+	});
+
+	const hasDataIssue = $derived(
+		(dataChecks ?? []).some((r) => r.error || r.meta?.empty || (r.meta?.gaps ?? 0) > 0)
+	);
+
+	const fmtMeta = (v) => (v === null || v === undefined ? '—' : v.toFixed(2));
+
 	// ── fit config ──────────────────────────────────────────────────────────────
 	let obsSigma = $state(0.5);
 	let fitY0    = $state(false);
@@ -292,6 +354,59 @@
 	</div>
 
 	<div class="body">
+		<!-- input-data section -->
+		<section class="section">
+			<div class="section-header">
+				<span>Input data</span>
+				{#if dataChecks && !hasDataIssue}<span class="data-ok">✓ ok</span>{/if}
+				{#if dataChecks && hasDataIssue}<span class="data-warn">⚠ check signals</span>{/if}
+				<button
+					class="view-btn"
+					onclick={fetchInputs}
+					disabled={dataLoading || configuredSignals.length === 0 || !range.start || !range.end}
+					title="Fetch the configured input and observation signals for the current range"
+				>
+					{dataLoading ? '…' : (dataChecks ? '⟳ Re-fetch' : 'Fetch inputs')}
+				</button>
+			</div>
+
+			{#if configuredSignals.length === 0}
+				<p class="hint">No signals assigned. Configure inputs/observations first.</p>
+			{:else if !dataChecks}
+				<p class="hint">{configuredSignals.length} signal{configuredSignals.length > 1 ? 's' : ''} configured. Click "Fetch inputs" to check coverage over {range.start || '…'} → {range.end || '…'}.</p>
+			{:else}
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Role</th><th>Signal</th><th>Samples</th><th>Gaps</th><th>Range (min / max / mean)</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each dataChecks as row (row.id + row.role)}
+							<tr class:bad-row={row.error || row.meta?.empty}>
+								<td><span class="role-badge role-{row.role}">{row.role}</span></td>
+								<td class="sig" title={row.signal}>{row.signal}</td>
+								{#if row.loading}
+									<td colspan="3" class="muted">loading…</td>
+								{:else if row.error}
+									<td colspan="3" class="data-err">⚠ {row.error}</td>
+								{:else if row.meta}
+									<td class="num">
+										{row.meta.count} / {row.meta.total}
+										{#if row.meta.empty}<span class="data-err"> empty</span>{/if}
+									</td>
+									<td class="num">
+										{#if row.meta.gaps > 0}<span class="gap-warn">{row.meta.gaps}</span>{:else}0{/if}
+									</td>
+									<td class="num">{fmtMeta(row.meta.min)} / {fmtMeta(row.meta.max)} / {fmtMeta(row.meta.mean)}</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</section>
+
 		<!-- lumped-model section -->
 		<section class="section">
 			<div class="section-header">
@@ -323,6 +438,7 @@
 						<tr>
 							<th>Label</th>
 							<th>Kind</th>
+							<th>Connection</th>
 							<th>Nominal R / Req</th>
 							<th>Nominal C</th>
 							<th>Mode</th>
@@ -342,6 +458,14 @@
 							<tr class:fixed-row={lump.mode === 'fixed'}>
 								<td class="lump-label" title={lump.id}>{lump.label ?? lump.id}</td>
 								<td><span class="kind-badge" style="border-color:{color};color:{color}">{lump.kind}</span></td>
+								<td class="conn">
+									{#if lump.node_a || lump.node_b}
+										<span class="node">{lump.node_a ?? '—'}</span>
+										{#if lump.node_b}<span class="conn-sep">↔</span><span class="node">{lump.node_b}</span>{/if}
+									{:else}
+										<span class="muted">—</span>
+									{/if}
+								</td>
 								<td class="num">
 									{#if editable}
 										<input
@@ -526,6 +650,13 @@
 		border: 1px solid; white-space: nowrap;
 	}
 
+	.conn { font-size: 11px; color: #cbd5e1; white-space: nowrap; }
+	.conn .node {
+		display: inline-block; max-width: 110px; overflow: hidden;
+		text-overflow: ellipsis; vertical-align: bottom;
+	}
+	.conn-sep { color: #475569; margin: 0 5px; }
+
 	.num { font-family: monospace; color: #cbd5e1; white-space: nowrap; }
 	.sigma { font-size: 10px; color: #475569; margin-left: 3px; }
 	.muted { color: #334155; }
@@ -555,4 +686,30 @@
 		background: #1c0a0a; border: 1px solid #7f1d1d; border-radius: 4px;
 		color: #f87171; padding: 12px 16px; font-size: 13px;
 	}
+
+	/* input-data table */
+	.data-ok   { font-size: 10px; color: #4ade80; text-transform: none; letter-spacing: 0; }
+	.data-warn { font-size: 10px; color: #f59e0b; text-transform: none; letter-spacing: 0; }
+
+	.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+	.data-table th {
+		text-align: left; font-size: 10px; text-transform: uppercase;
+		letter-spacing: 0.06em; color: #94a3b8;
+		padding: 4px 8px 6px; border-bottom: 1px solid #334155;
+	}
+	.data-table td { padding: 5px 8px; vertical-align: middle; }
+	.data-table tr.bad-row { background: #1c0a0a55; }
+	.data-table .sig {
+		font-family: monospace; color: #cbd5e1; max-width: 220px;
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	}
+	.data-err { color: #f87171; }
+	.gap-warn { color: #fbbf24; font-weight: 600; }
+
+	.role-badge {
+		font-size: 9px; font-weight: 700; text-transform: uppercase;
+		letter-spacing: 0.05em; padding: 2px 5px; border-radius: 3px; border: 1px solid;
+	}
+	.role-input       { color: #4ade80; border-color: #4ade8044; }
+	.role-observation { color: #818cf8; border-color: #818cf844; }
 </style>

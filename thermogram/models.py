@@ -354,6 +354,14 @@ class LumpedElement(BaseModel):
     mode: FitMode = "free"
     tied_to: str | None = None
     realizes: str | None = Field(default=None, description="Element id this realizes.")
+    node_a: str | None = Field(
+        default=None,
+        description="Label of one terminal node (UI provenance; derived at build).",
+    )
+    node_b: str | None = Field(
+        default=None,
+        description="Label of the other terminal node, if any (UI provenance).",
+    )
     posterior: Posterior | None = None
     posterior_C: Posterior | None = Field(
         default=None,

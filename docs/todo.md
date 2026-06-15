@@ -242,11 +242,18 @@ Issues surfaced during first real use of the Step 4 UI:
       the mass nodes in the forward closure; `fit_nls_view` returns
       `phi_fitted["y0"]` and the API surfaces it as `fitted_y0`. Covered by
       `test_roundtrip_phi_path_with_fit_y0`.
-- [ ] **Lumped-model graph**: a small SVG/canvas view of the lumped RC network
-      (one node per lump, edges from the `atoms` connectivity) shown alongside
-      the φ-table, so the user can see what they are fitting. Can reuse the
-      existing `GraphView` filtered to lumped-node granularity, or be a
-      dedicated lightweight component.
+- [x] **Lumped-model connectivity**: chose the text route over an SVG —
+      `build_default_view` now derives each lump's two terminals (`node_a` /
+      `node_b` on `LumpedElement`) by walking the resistance chain through the
+      element's own atoms to the room/boundary it bridges (`_terminal_pair` in
+      `view.py`), resolved to cleaned labels. The φ-table shows a "Connection"
+      column (`node_a ↔ node_b`). Persisted on the lump, survives `PUT .../view`
+      (the route patches in place). An SVG network view stays parked post-v1.
+- [x] **Input-data preview in FitPanel**: a "Fetch inputs" button checks every
+      configured input/observation signal over the current range (samples,
+      gaps, min/max/mean), flagging missing/empty/gappy series loudly — the
+      surface for the Step 5.5 validation work. Logic lifted from `InputsPanel`
+      (`computeMeta`, gap count); preview clears when range/signals change.
 - [ ] **Prior sanity**: verify that `build_default_view` produces priors close
       enough to reality that NLS converges from them on a typical house. Check
       against the Step 1 round-trip test; tighten or widen σ_log as needed.

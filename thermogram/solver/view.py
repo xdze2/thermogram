@@ -92,6 +92,57 @@ def _single_prior(nominal: float, sigma_log: float = 0.5) -> "Prior":
     return Prior(nominal=nominal, sigma_log=sigma_log)
 
 
+def _node_label(node_id: str, nodes: dict[str, dict]) -> str:
+    """Human-readable label for a node — its (cleaned) label, else its id."""
+    raw = nodes.get(node_id, {}).get("label")
+    return _clean_atom_label(raw) if raw else node_id
+
+
+def _terminal_pair(
+    atom_ids: list[str],
+    nodes: dict[str, dict],
+    neighbours: dict[str, list[str]],
+) -> tuple[str, str] | None:
+    """Find the two non-wall terminals an element bridges.
+
+    Walks outward from each resistance atom of the element, treating the
+    element's own resistance and mass atoms as interior (so an RC_chain's
+    internal lumps and its Rse/Rsi surface resistors are crossed) until it
+    reaches a node outside the element — the room / boundary it connects.
+    """
+    interior = set(atom_ids)
+    ends: set[str] = set()
+    for aid in atom_ids:
+        if nodes.get(aid, {}).get("kind") != "resistance":
+            continue
+        for start in neighbours[aid]:
+            prev, cur = aid, start
+            while cur in interior:
+                nexts = [n for n in neighbours[cur] if n != prev]
+                if len(nexts) != 1:
+                    cur = None
+                    break
+                prev, cur = cur, nexts[0]
+            if cur is not None:
+                ends.add(cur)
+    if len(ends) != 2:
+        return None
+    a, b = sorted(ends)
+    return (a, b)
+
+
+def _resistive_endpoints(
+    atom_ids: list[str],
+    nodes: dict[str, dict],
+    neighbours: dict[str, list[str]],
+) -> tuple[str | None, str | None]:
+    """The two terminal node labels of a resistive lump (Req / RC_chain)."""
+    pair = _terminal_pair(atom_ids, nodes, neighbours)
+    if pair is None:
+        return (None, None)
+    return (_node_label(pair[0], nodes), _node_label(pair[1], nodes))
+
+
 def build_default_view(
     atomic_model: dict,
     expansion_map: dict[str, list[str]],
@@ -195,6 +246,7 @@ def build_default_view(
             chain["R_wall"], chain["C_wall"], sigma_log=_SIGMA_LOG_FREE
         )
 
+        ep_a, ep_b = _resistive_endpoints(atom_ids, nodes, neighbours)
         lump = LumpedElement(
             id=lump_id,
             kind="RC_chain",
@@ -206,6 +258,8 @@ def build_default_view(
             prior_C=prior_C,
             mode="free",
             realizes=elem_uuid,
+            node_a=ep_a,
+            node_b=ep_b,
         )
         lumped.append(lump)
         covered.update(atom_ids)
@@ -217,6 +271,7 @@ def build_default_view(
         lump_id = f"req_{elem_uuid.replace('-', '')}"
         r_noms = [nodes[rid]["R"] for rid in r_ids]
         prior = compose_series_prior(r_noms, sigma_log=_SIGMA_LOG_FREE)
+        ep_a, ep_b = _resistive_endpoints(r_ids, nodes, neighbours)
         lump = LumpedElement(
             id=lump_id,
             kind="Req",
@@ -226,6 +281,8 @@ def build_default_view(
             prior=prior,
             mode="free",
             realizes=elem_uuid,
+            node_a=ep_a,
+            node_b=ep_b,
         )
         lumped.append(lump)
         covered.update(atom_ids)
@@ -263,6 +320,9 @@ def build_default_view(
             prior = compose_parallel_inv_prior(r_noms, sigma_log=_SIGMA_LOG_FREE)
             combine = "parallel_inv_sum"
 
+        # All parallel resistors share the same endpoint pair (that is how they
+        # were grouped), so any one of them gives the lump's terminals.
+        ep_a, ep_b = (_node_label(pair[0], nodes), _node_label(pair[1], nodes))
         lump = LumpedElement(
             id=lump_id,
             kind="Req",
@@ -272,6 +332,8 @@ def build_default_view(
             prior=prior,
             mode="free",
             realizes=realizes,
+            node_a=ep_a,
+            node_b=ep_b,
         )
         lumped.append(lump)
         covered.update(r_ids)
@@ -299,6 +361,8 @@ def build_default_view(
                 combine="parallel_sum",
                 prior=prior,
                 mode="free",
+                node_a=_node_label(nid, nodes),
+                node_b="ground",
             ))
             covered.add(nid)
 
@@ -315,6 +379,8 @@ def build_default_view(
             prior=prior,
             mode="free",
             realizes=elem_uuid,
+            node_a=_node_label(mass_ids[0], nodes) if mass_ids else None,
+            node_b="ground",
         )
         lumped.append(lump)
         covered.update(mass_ids)
@@ -338,6 +404,7 @@ def build_default_view(
                 prior=prior,
                 mode="fixed",
                 realizes=atom_to_element.get(nid),
+                node_a=_node_label(nid, nodes),
             ))
             covered.add(nid)
         elif node["kind"] == "source":
@@ -353,6 +420,7 @@ def build_default_view(
                 prior=prior,
                 mode="fixed",
                 realizes=atom_to_element.get(nid),
+                node_a=_node_label(nid, nodes),
             ))
             covered.add(nid)
 
