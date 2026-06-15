@@ -218,33 +218,30 @@ fit, see posteriors in the table; stale → rebuild flow works.
 
 Issues surfaced during first real use of the Step 4 UI:
 
-- [ ] **Human-readable lump labels**: `build_default_view` sets `lump.label`
-      from `element.label` (or room label for `Ceq`); currently UUIDs show
-      because the label field is empty or not propagated. Fix in `solver/view.py`
-      and verify in the φ-table.
-- [ ] **RC_chain: one row, two columns** — Prior R and Prior C already have
-      separate columns in the table but the table has two rows for an RC_chain
-      lump (one per φ key). Collapse to a single row per lump; the R and C
-      values sit in their respective columns on that one row.
-- [ ] **Rename "view" → "lumped model"** in all UI labels, buttons, and
-      section headers (`FitPanel.svelte`). API routes keep their names; only
-      the displayed copy changes.
-- [ ] **Merge run + fit into one panel**: replace the "type: run / type: fit"
-      split with a single study panel that always shows the φ-table and a
-      "Run forward" button alongside "Run fit". Forward run uses the nominal
-      priors (or manual overrides) as `param_overrides`; fit overwrites them
-      with posteriors. This lets the user verify the prior and the fit in the
-      same place.
-- [ ] **Manual parameter override**: add an editable nominal field per lump
-      row (inline, only active when mode ≠ fixed) so the user can nudge
-      the starting point before fitting or run a forward sim with hand-tuned
-      values. Persisted via `PUT .../view` (prior.nominal update).
-- [ ] **Fit y₀ (initial state)**: add a free `T_init` lumped element of kind
-      `T_boundary` (or a dedicated `y0` kind) to the view; the forward closure
-      sets the initial temperature vector from it. Alternatively expose y₀ as
-      a single free scalar in the fit request body. Simpler path: add
-      `fit_y0: bool` to `FitRequest`; when true, append a `y0` parameter to
-      `log_phi0` and patch the forward closure to use it.
+- [x] **Human-readable lump labels**: `build_default_view` now takes an
+      optional `element_labels` map (built in `post_study_view` from rooms +
+      elements) and resolves `lump.label` from it, falling back to a cleaned
+      atom label (strips the `(Rsi)`/`[inner]` suffixes) then the lump id.
+- [x] **RC_chain: one row, two columns** — the φ-table iterates one row per
+      lump with Nominal R / Nominal C in their own columns (verified on the
+      `maison_test` chain).
+- [x] **Rename "view" → "lumped model"** in the panel headers/buttons
+      (`FitPanel.svelte`). API routes unchanged.
+- [x] **Merge run + fit into one panel**: `study.type` no longer gates the UI.
+      `SimulationRun.svelte` retired; its charts extracted to the shared
+      `SimCharts.svelte`. The single study panel (`FitPanel.svelte`) shows the
+      φ-table with "Run forward" alongside "Run fit"; forward uses the
+      nominals (with overrides), fit overwrites with posteriors and re-runs the
+      forward sim from the fitted model. One "+ New study" button.
+- [x] **Manual parameter override**: editable nominal `<input>` per lump row
+      (active when mode ≠ fixed), debounced, persisted via `PUT .../view`
+      (`prior.nominal` / `prior_C.nominal`).
+- [x] **Fit y₀ (initial state)**: `fit_y0: bool` on `FitRequest`. When true,
+      `build_forward_from_view` appends one **linear** scalar to the parameter
+      vector (key `"y0"`, kept out of the φ-space), broadcast uniformly over
+      the mass nodes in the forward closure; `fit_nls_view` returns
+      `phi_fitted["y0"]` and the API surfaces it as `fitted_y0`. Covered by
+      `test_roundtrip_phi_path_with_fit_y0`.
 - [ ] **Lumped-model graph**: a small SVG/canvas view of the lumped RC network
       (one node per lump, edges from the `atoms` connectivity) shown alongside
       the φ-table, so the user can see what they are fitting. Can reuse the

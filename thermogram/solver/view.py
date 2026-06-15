@@ -29,6 +29,7 @@ into the chain) is covered by exactly one lumped element.
 
 from __future__ import annotations
 
+import re
 import uuid as _uuid
 from collections import defaultdict
 
@@ -53,6 +54,16 @@ _SIGMA_LOG_FIXED = 0.0
 
 def _node_map(atomic_model: dict) -> dict[str, dict]:
     return {n["id"]: n for n in atomic_model["nodes"]}
+
+
+# Provenance suffixes expand() appends to atom labels, e.g.
+# "Wall SE (Rsi)", "Wall SE (R0)", "Wall SE [inner]", "Wall SE [1]".
+_ATOM_SUFFIX_RE = re.compile(r"\s*(\([^)]*\)|\[[^\]]*\])\s*$")
+
+
+def _clean_atom_label(raw: str) -> str:
+    """Strip the trailing (..)/[..] provenance suffix from an atom label."""
+    return _ATOM_SUFFIX_RE.sub("", raw).strip() or raw
 
 
 def _endpoint_pair(
@@ -84,6 +95,7 @@ def _single_prior(nominal: float, sigma_log: float = 0.5) -> "Prior":
 def build_default_view(
     atomic_model: dict,
     expansion_map: dict[str, list[str]],
+    element_labels: dict[str, str] | None = None,
 ) -> View:
     """Build a default one-depth View from expand() output.
 
@@ -93,13 +105,30 @@ def build_default_view(
         The dict returned by ``expand(house)``.
     expansion_map:
         The ``{house_uuid: [atom_node_ids]}`` dict returned by ``expand()``.
+    element_labels:
+        Optional ``{element_uuid: label}`` map (rooms + elements) used to give
+        each lumped element a human-readable ``label``. Falls back to a cleaned
+        atom label, then to the lump id, when an element label is unavailable.
 
     Returns
     -------
     View with one LumpedElement per domain element.
     The returned View has a stable ``id`` (UUID4 hex).
     """
+    element_labels = element_labels or {}
     nodes = _node_map(atomic_model)
+
+    def resolve_label(realizes: str | None, atom_ids: list[str]) -> str | None:
+        """Human-readable label: element label → cleaned atom label → None."""
+        if realizes and element_labels.get(realizes):
+            return element_labels[realizes]
+        # Fall back to the first atom label, stripping the (Rsi)/(R0)/[inner]
+        # provenance suffixes that expand() appends.
+        for aid in atom_ids:
+            raw = nodes.get(aid, {}).get("label")
+            if raw:
+                return _clean_atom_label(raw)
+        return None
     wall_chains: dict[str, dict] = atomic_model.get("wall_chains", {})
 
     # Build undirected adjacency (for parallel-R detection on non-chain elements)
@@ -169,7 +198,7 @@ def build_default_view(
         lump = LumpedElement(
             id=lump_id,
             kind="RC_chain",
-            label=None,
+            label=resolve_label(elem_uuid, atom_ids),
             atoms=atom_ids,
             combine="chain",
             n=chain["chain_n"],
@@ -191,6 +220,7 @@ def build_default_view(
         lump = LumpedElement(
             id=lump_id,
             kind="Req",
+            label=resolve_label(elem_uuid, atom_ids),
             atoms=r_ids,
             combine="series_sum",
             prior=prior,
@@ -236,6 +266,7 @@ def build_default_view(
         lump = LumpedElement(
             id=lump_id,
             kind="Req",
+            label=resolve_label(realizes, r_ids),
             atoms=r_ids,
             combine=combine,
             prior=prior,
@@ -263,6 +294,7 @@ def build_default_view(
             lumped.append(LumpedElement(
                 id=lump_id,
                 kind="Ceq",
+                label=resolve_label(None, [nid]),
                 atoms=[nid],
                 combine="parallel_sum",
                 prior=prior,
@@ -277,6 +309,7 @@ def build_default_view(
         lump = LumpedElement(
             id=lump_id,
             kind="Ceq",
+            label=resolve_label(elem_uuid, mass_ids),
             atoms=mass_ids,
             combine="parallel_sum",
             prior=prior,
@@ -299,6 +332,7 @@ def build_default_view(
             lumped.append(LumpedElement(
                 id=lump_id,
                 kind="T_boundary",
+                label=resolve_label(atom_to_element.get(nid), [nid]),
                 atoms=[nid],
                 combine="identity",
                 prior=prior,
@@ -313,6 +347,7 @@ def build_default_view(
             lumped.append(LumpedElement(
                 id=lump_id,
                 kind="Q_source",
+                label=resolve_label(atom_to_element.get(nid), [nid]),
                 atoms=[nid],
                 combine="identity",
                 prior=prior,

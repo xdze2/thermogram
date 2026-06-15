@@ -3,7 +3,6 @@
 	import GraphView from '$lib/GraphView.svelte';
 	import PropertiesPanel from '$lib/PropertiesPanel.svelte';
 	import InputsPanel from '$lib/InputsPanel.svelte';
-	import SimulationRun from '$lib/SimulationRun.svelte';
 	import FitPanel from '$lib/FitPanel.svelte';
 	import HousePanel from '$lib/HousePanel.svelte';
 	import MaterialsPanel from '$lib/MaterialsPanel.svelte';
@@ -275,7 +274,6 @@
 	// ── simulation pane (house view) ─────────────────────────────────────────
 	let simPaneTab    = $state('rc'); // 'rc' | 'studies' | 'sim'
 	let rangeMode     = $state('duration'); // 'dates' | 'duration'
-	let triggerRun    = $state(/** @type {(() => void) | null} */ (null));
 	let durationDays  = $state(7);
 	let durationStart = $state('');
 
@@ -464,19 +462,16 @@
 						<div class="studies-tab-content">
 							<div class="studies-tab-header">
 								{#if createStudyError}<div class="home-error">{createStudyError}</div>{/if}
-								<!-- new study picker -->
+								<!-- new study -->
 								<div class="new-study-wrap">
-									<button class="home-new-btn" onclick={() => createStudy('run')} disabled={createStudyLoading}>
-										{createStudyLoading ? 'Creating…' : '+ Run'}
-									</button>
-									<button class="home-new-btn home-new-fit" onclick={() => createStudy('fit')} disabled={createStudyLoading}>
-										+ Fit
+									<button class="home-new-btn" onclick={() => createStudy()} disabled={createStudyLoading}>
+										{createStudyLoading ? 'Creating…' : '+ New study'}
 									</button>
 								</div>
 							</div>
 
 							{#if studies.length === 0}
-								<div class="studies-empty">No studies yet. Click "+ Run" or "+ Fit" to create one.</div>
+								<div class="studies-empty">No studies yet. Click "+ New study" to create one.</div>
 							{:else}
 								<table class="studies-table">
 									<thead>
@@ -484,7 +479,6 @@
 											<th>Label</th>
 											<th>Start</th>
 											<th>End</th>
-											<th>Type</th>
 											<th>Status</th>
 											<th></th>
 										</tr>
@@ -496,9 +490,6 @@
 												<td class="col-label">{s.label || s.id.slice(0, 8)}</td>
 												<td class="col-date">{s.date_range?.[0] ?? s.start ?? '—'}</td>
 												<td class="col-date">{s.date_range?.[1] ?? s.end ?? '—'}</td>
-												<td class="col-type">
-													<span class="type-badge type-{s.type ?? 'run'}">{s.type ?? 'run'}</span>
-												</td>
 												<td class="col-status">
 													{#if s._stale_run || s._stale_fit}
 														<span class="stale-badge">⚠ stale</span>
@@ -528,7 +519,6 @@
 							<div class="study-save-bar">
 								<button class="study-back-btn" onclick={() => { selectedStudyId = null; simPaneTab = 'studies'; }}>← studies</button>
 								<span class="study-save-label">{selectedStudy?.label ?? selectedStudyId}</span>
-								<span class="type-badge type-{selectedStudy?.type ?? 'run'} badge-sm">{selectedStudy?.type ?? 'run'}</span>
 								<button class="study-save-btn" class:dirty={studyDirty} onclick={saveStudy} disabled={saveLoading}>
 									{saveLoading ? 'Saving…' : studyDirty ? 'Save ●' : 'Saved'}
 								</button>
@@ -569,48 +559,23 @@
 									{/if}
 								</div>
 
-								{#if (selectedStudy?.type ?? 'run') === 'run'}
-								<div class="sim-ctrl-row">
+								<div class="sim-ctrl-row" title="Solver for the forward run">
 									<label class="ctrl-radio"><input type="radio" bind:group={simSolver} value="ivp" /><span>IVP (BDF)</span></label>
 									<label class="ctrl-radio"><input type="radio" bind:group={simSolver} value="zoh" /><span>ZOH</span></label>
-								</div>
-								{/if}
-
-								<div class="sim-ctrl-row">
-									{#if (selectedStudy?.type ?? 'run') === 'run'}
-										<button class="ctrl-btn ctrl-btn-run" onclick={() => triggerRun?.()}>Run</button>
-									{:else}
-										<button class="ctrl-btn ctrl-btn-fit" onclick={() => triggerRun?.()}>Fit</button>
-									{/if}
 								</div>
 							</div>
 
 							<div class="sim-pane-body scrollable">
-								{#if (selectedStudy?.type ?? 'run') === 'run'}
-									<SimulationRun
-										house_name={houseName}
-										study_id={selectedStudyId}
-										inputs={simInputs}
-										range={simRange}
-										observations={simObservations}
-										bind:solver={simSolver}
-										y0_uniform={simInitState.mode === 'uniform' ? simInitState.T : null}
-										{simStale}
-										{onRunSuccess}
-										hideControls={true}
-										onready={(fn) => (triggerRun = fn)}
-									/>
-								{:else}
-									<FitPanel
-										house_name={houseName}
-										study_id={selectedStudyId}
-										inputs={simInputs}
-										range={simRange}
-										observations={simObservations}
-										y0_uniform={simInitState.mode === 'uniform' ? simInitState.T : null}
-										onready={(fn) => (triggerRun = fn)}
-									/>
-								{/if}
+								<FitPanel
+									house_name={houseName}
+									study_id={selectedStudyId}
+									inputs={simInputs}
+									range={simRange}
+									observations={simObservations}
+									solver={simSolver}
+									y0_uniform={simInitState.mode === 'uniform' ? simInitState.T : null}
+									{onRunSuccess}
+								/>
 							</div>
 						{/if}
 					{/if}
@@ -958,15 +923,6 @@
 	.ctrl-btn:disabled              { opacity: 0.35; cursor: default; }
 	.ctrl-btn.active                { background: #334155; color: #e2e8f0; }
 
-	.ctrl-btn-run {
-		background: #4f46e5;
-		border-color: #4338ca;
-		color: #f1f5f9;
-	}
-	.ctrl-btn-run:hover { background: #4338ca; }
-
-	.ctrl-btn-fit { color: #64748b; }
-
 	.ctrl-label {
 		font-size: 12px;
 		color: #94a3b8;
@@ -1012,13 +968,6 @@
 		display: flex;
 		gap: 6px;
 	}
-
-	.home-new-fit {
-		background: #14532d;
-		border-color: #166534;
-		color: #86efac;
-	}
-	.home-new-fit:hover:not(:disabled) { background: #15803d; }
 
 	.studies-empty {
 		font-size: 12px;
@@ -1075,21 +1024,8 @@
 		white-space: nowrap;
 	}
 
-	.col-type { width: 60px; }
 	.col-status { width: 52px; }
 	.col-actions { width: 36px; text-align: right; }
-
-	.type-badge {
-		font-size: 10px;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		padding: 2px 6px;
-		border-radius: 3px;
-	}
-	.type-run { background: #1e3a5f; color: #93c5fd; }
-	.type-fit { background: #14532d; color: #86efac; }
-	.badge-sm { font-size: 9px; padding: 2px 5px; }
 
 	.stale-badge {
 		font-size: 10px;

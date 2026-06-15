@@ -451,6 +451,8 @@ def build_forward_from_view(
     end: str = "1970-01-01T00:00:00",
     dt_minutes: int = 15,
     y0: np.ndarray | None = None,
+    fit_y0: bool = False,
+    y0_nominal: float | None = None,
 ) -> tuple[
     Callable[[np.ndarray], np.ndarray],
     np.ndarray,
@@ -475,12 +477,22 @@ def build_forward_from_view(
     start, end:     ISO-8601 simulation window.
     dt_minutes:     ZOH time step.
     y0:             Initial temperatures per mass node; None ⇒ first boundary value.
+                    Ignored when ``fit_y0`` is True.
+    fit_y0:         If True, append a single uniform initial-temperature scalar
+                    to the parameter vector (key ``"y0"``). Unlike the lump
+                    entries it is carried in **linear** space (temperature is
+                    not sign-constrained), so its slot holds the raw value, not
+                    its log. Inside the closure it is broadcast over all mass
+                    nodes and overrides ``y0``.
+    y0_nominal:     Starting value for the fitted y₀ (°C); required when fit_y0.
 
     Returns
     -------
-    forward_fn:   Callable(log_phi_vec) → residuals.
-    log_phi0:     Initial log-φ vector (log of prior nominals).
-    phi_keys:     List of φ key strings, one-to-one with log_phi_vec entries.
+    forward_fn:   Callable(param_vec) → residuals.
+    log_phi0:     Initial parameter vector (log of prior nominals; the trailing
+                  ``y0`` slot, if present, is linear).
+    phi_keys:     List of φ key strings, one-to-one with param_vec entries; the
+                  last is the literal ``"y0"`` when fit_y0 is True.
     """
     import datetime
     from scipy.interpolate import interp1d
@@ -538,6 +550,13 @@ def build_forward_from_view(
                 "sigma_log": lump.prior.sigma_log,
                 "atom_noms": atom_noms,
             })
+
+    # --- Optional fitted initial state (uniform scalar, linear space) ---
+    if fit_y0:
+        if y0_nominal is None:
+            raise ValueError("fit_y0=True requires y0_nominal")
+        phi_keys.append("y0")
+        log_phi0_list.append(float(y0_nominal))  # linear, not logged
 
     log_phi0 = np.array(log_phi0_list)
 
@@ -605,7 +624,11 @@ def build_forward_from_view(
 
         patched = apply_atom_values(atomic_model, atom_values)
         system = assemble(patched)
-        result = simulate_zoh(system, inputs, start, end, dt_minutes=dt_minutes, y0=y0)
+        # The trailing slot (if fit_y0) holds the uniform initial temperature.
+        y0_run = y0
+        if fit_y0:
+            y0_run = np.full(len(system.mass_ids), float(log_phi_vec[idx]))
+        result = simulate_zoh(system, inputs, start, end, dt_minutes=dt_minutes, y0=y0_run)
 
         residuals = []
         for mass_id in obs_ids:
@@ -650,12 +673,24 @@ def fit_nls_view(
             phi_nominal[lump.id] = lump.prior.nominal
             phi_sigma_log[lump.id] = lump.prior.sigma_log
 
-    log_nominals = np.array([np.log(phi_nominal[k]) for k in phi_keys])
-    sigma_logs = np.array([phi_sigma_log[k] for k in phi_keys])
+    # The optional trailing "y0" key is a linear scalar, not a lump. It lives in
+    # the same parameter vector (linear, not logged) with a loose prior so the
+    # data drives it; its nominal is the starting value carried in log_phi0[-1].
+    # For every key the prior residual is (p - nominal)/sigma, where p, nominal
+    # and sigma are all in the slot's own space (log for lumps, linear for y0).
+    Y0_PRIOR_SIGMA = 100.0  # °C — effectively unconstrained
+    nominals = np.array([
+        (float(log_phi0[-1]) if k == "y0" else np.log(phi_nominal[k]))
+        for k in phi_keys
+    ])
+    sigmas = np.array([
+        (Y0_PRIOR_SIGMA if k == "y0" else phi_sigma_log[k])
+        for k in phi_keys
+    ])
 
-    def residuals_with_prior(log_p: np.ndarray) -> np.ndarray:
-        data_res = forward_fn(log_p)
-        prior_res = (log_p - log_nominals) / sigma_logs
+    def residuals_with_prior(p: np.ndarray) -> np.ndarray:
+        data_res = forward_fn(p)
+        prior_res = (p - nominals) / sigmas
         return np.concatenate([data_res, prior_res])
 
     t0 = time.perf_counter()
@@ -665,7 +700,13 @@ def fit_nls_view(
     )
     elapsed = time.perf_counter() - t0
 
-    phi_fitted = {k: float(np.exp(v)) for k, v in zip(phi_keys, result.x)}
+    # Lumps are in log-space (value = exp(x)); the y0 slot is linear (value = x).
+    phi_fitted = {
+        k: (float(v) if k == "y0" else float(np.exp(v)))
+        for k, v in zip(phi_keys, result.x)
+    }
+    if phi_keys and phi_keys[-1] == "y0":
+        phi_nominal["y0"] = float(log_phi0[-1])  # linear starting value
 
     try:
         J = result.jac
@@ -674,7 +715,11 @@ def fit_nls_view(
         s_sq = 2.0 * result.cost / dof
         cov = np.linalg.pinv(J.T @ J) * s_sq
         std_log = np.sqrt(np.diag(cov))
-        phi_std = {k: float(np.exp(v) * s) for k, v, s in zip(phi_keys, result.x, std_log)}
+        # For y0 the std is in linear °C; for lumps it's the log-normal 1σ.
+        phi_std = {
+            k: (float(s) if k == "y0" else float(np.exp(v) * s))
+            for k, v, s in zip(phi_keys, result.x, std_log)
+        }
     except Exception:
         phi_std = {k: float("nan") for k in phi_keys}
 

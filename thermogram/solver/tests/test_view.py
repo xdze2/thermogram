@@ -122,6 +122,47 @@ class TestDefaultViewMaisonTest:
 
 
 # ---------------------------------------------------------------------------
+# Human-readable lump labels (Step 4.2)
+# ---------------------------------------------------------------------------
+
+class TestLumpLabels:
+    def setup_method(self):
+        self.house = _load("maison_test.json")
+        self.model, self.emap = expand(self.house)
+        self.element_labels = {}
+        for r in self.house.get("rooms", []):
+            if r.get("label"):
+                self.element_labels[r["id"]] = r["label"]
+        for e in self.house.get("elements", []):
+            if e.get("label"):
+                self.element_labels[e["id"]] = e["label"]
+
+    def test_element_labels_propagate(self):
+        view = build_default_view(self.model, self.emap, self.element_labels)
+        by_kind = {l.kind: l for l in view.lumped}
+        # Every lump realizing a known element gets that element's label.
+        for lump in view.lumped:
+            if lump.realizes in self.element_labels:
+                assert lump.label == self.element_labels[lump.realizes], (
+                    f"{lump.kind} {lump.id}: label {lump.label!r} != "
+                    f"{self.element_labels[lump.realizes]!r}"
+                )
+        # Concretely: the chained wall, the room, and the boundary are named.
+        assert by_kind["RC_chain"].label == "Wall SE"
+        assert by_kind["Ceq"].label == "Chambre"
+        assert by_kind["T_boundary"].label == "Extérieur"
+
+    def test_no_label_is_uuid_free_fallback(self):
+        """Without element_labels, labels fall back to cleaned atom labels,
+        never raw UUIDs."""
+        view = build_default_view(self.model, self.emap)
+        for lump in view.lumped:
+            assert lump.label, f"{lump.id} has empty label"
+            # cleaned atom labels strip the (Rsi)/[inner] provenance suffixes
+            assert "(" not in lump.label and "[" not in lump.label, lump.label
+
+
+# ---------------------------------------------------------------------------
 # chambre_1r1c: minimal fixture (1 mass, 1 boundary, 1 resistance)
 # ---------------------------------------------------------------------------
 

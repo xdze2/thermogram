@@ -36,8 +36,12 @@ def _load(name: str) -> dict:
         return json.load(f)
 
 
-def _make_synthetic_data(model, outdoor_id, room_id, noise_sigma, rng):
-    """Simulate 4 days with a diurnal outdoor signal; return (inputs, obs, start, end)."""
+def _make_synthetic_data(model, outdoor_id, room_id, noise_sigma, rng, y0_value=None):
+    """Simulate 4 days with a diurnal outdoor signal; return (inputs, obs, start, end).
+
+    ``y0_value`` sets the (uniform) initial temperature used to generate the
+    synthetic observations; defaults to the first outdoor value.
+    """
     import datetime
     t0_unix = 0.0
     duration = 4 * 86400.0
@@ -57,10 +61,11 @@ def _make_synthetic_data(model, outdoor_id, room_id, noise_sigma, rng):
             inputs_true[node["id"]] = (t_sig, np.zeros_like(t_sig))
 
     n_mass = len([n for n in model["nodes"] if n["kind"] == "mass"])
+    y0 = T_outdoor[0] if y0_value is None else y0_value
     sys_true = assemble(model)
     result = simulate_zoh(
         sys_true, inputs_true, start, end,
-        dt_minutes=dt_minutes, y0=np.full(n_mass, T_outdoor[0])
+        dt_minutes=dt_minutes, y0=np.full(n_mass, y0)
     )
 
     obs_vals = result.temps[room_id] + rng.normal(0, noise_sigma, size=len(result.t))
@@ -212,3 +217,63 @@ def test_roundtrip_phi_path():
     assert abs(fitted_C - C_interior_true) / C_interior_true < 0.10, (
         f"C recovery failed: fitted={fitted_C:.3e}, true={C_interior_true:.3e}"
     )
+
+
+@pytest.mark.roundtrip
+def test_roundtrip_phi_path_with_fit_y0():
+    """φ-path with fit_y0: recover R, C *and* a uniform initial temperature.
+
+    The synthetic data is generated with a known y₀ that differs sharply from
+    the outdoor signal; the fit starts from a deliberately wrong y₀ guess.
+    """
+    rng = np.random.default_rng(0)
+    noise_sigma = 0.05
+    Y0_TRUE = 18.0          # generating initial temperature
+    Y0_GUESS = 5.0          # deliberately wrong starting guess
+
+    house = _load("maison_test.json")
+    model, emap = expand(house)
+
+    outdoor_id = next(n for n in model["nodes"] if n["kind"] == "boundary")["id"]
+    room_id = next(
+        n for n in model["nodes"] if n["kind"] == "mass" and "Chambre" in n["label"]
+    )["id"]
+
+    from thermogram.models import View
+    from thermogram.solver.view import get_chain_priors
+
+    inputs_true, observations, start, end, dt_minutes, n_mass, _ = _make_synthetic_data(
+        model, outdoor_id, room_id, noise_sigma, rng, y0_value=Y0_TRUE
+    )
+
+    # Free only the RC_chain (same identifiability scope as test_roundtrip_phi_path).
+    view_base = build_default_view(model, emap)
+    chain_lump = next(l for l in view_base.lumped if l.kind == "RC_chain")
+    R_true, C_true = get_chain_priors(chain_lump, model, emap)
+    view = View(
+        id=view_base.id,
+        lumped=[
+            l if l.kind == "RC_chain" else l.model_copy(update={"mode": "fixed"})
+            for l in view_base.lumped
+        ],
+    )
+
+    forward_fn, log_phi0, phi_keys = build_forward_from_view(
+        view, model, emap,
+        inputs_true, observations,
+        obs_sigma=noise_sigma,
+        start=start, end=end, dt_minutes=dt_minutes,
+        fit_y0=True, y0_nominal=Y0_GUESS,
+    )
+    assert phi_keys[-1] == "y0"
+
+    result_fit = fit_nls_view(forward_fn, log_phi0, phi_keys, view, model, emap)
+    assert result_fit.success, f"fit_nls_view did not converge: {result_fit.message}"
+
+    fitted_y0 = result_fit.phi_fitted["y0"]
+    fitted_R = result_fit.phi_fitted[chain_lump.id + "_R"]
+    fitted_C = result_fit.phi_fitted[chain_lump.id + "_C"]
+
+    assert abs(fitted_y0 - Y0_TRUE) < 0.5, f"y0 recovery failed: {fitted_y0:.3f} vs {Y0_TRUE}"
+    assert abs(fitted_R - R_true) / R_true < 0.10, f"R recovery failed: {fitted_R:.5f} vs {R_true:.5f}"
+    assert abs(fitted_C - C_true) / C_true < 0.10, f"C recovery failed: {fitted_C:.3e} vs {C_true:.3e}"

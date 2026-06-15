@@ -1,7 +1,9 @@
 <script>
-	import { onDestroy } from 'svelte';
-	import uPlot from 'uplot';
-	import 'uplot/dist/uPlot.min.css';
+	// Merged study panel: the lumped-model (φ-space) table plus a forward run and
+	// a fit, sharing one set of result charts. "Run forward" simulates from the
+	// current nominals (with manual overrides); "Run fit" optimises the free
+	// lumps and writes posteriors back onto the table.
+	import SimCharts from '$lib/SimCharts.svelte';
 
 	const API = '';
 
@@ -12,12 +14,11 @@
 		range        = { start: '', end: '' },
 		observations = {},
 		y0_uniform   = null,
-		onready      = /** @type {(fn: () => void) => void} */ (() => {}),
+		solver       = 'zoh',
+		onRunSuccess = () => {},
 	} = $props();
 
-	$effect(() => { onready(runFit); });
-
-	// ── view state ────────────────────────────────────────────────────────────
+	// ── lumped-model (view) state ───────────────────────────────────────────────
 	let view         = $state(null);   // { lumped: [...], model_hash, _stale_view }
 	let viewLoading  = $state(false);
 	let viewError    = $state(null);
@@ -43,9 +44,7 @@
 		viewLoading = true;
 		viewError   = null;
 		try {
-			const res = await fetch(`${API}/houses/${house_name}/studies/${study_id}/view`, {
-				method: 'POST',
-			});
+			const res = await fetch(`${API}/houses/${house_name}/studies/${study_id}/view`, { method: 'POST' });
 			if (!res.ok) {
 				const d = await res.json().catch(() => ({ detail: res.statusText }));
 				throw new Error(typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail));
@@ -59,30 +58,19 @@
 	}
 
 	// Load view when study changes
-	$effect(() => {
-		study_id;
-		house_name;
-		loadView();
-	});
+	$effect(() => { study_id; house_name; loadView(); });
 
-	// ── mode toggle ───────────────────────────────────────────────────────────
-	let modeUpdatePending = $state(false);
+	// ── view mutation (mode toggle + nominal override) ──────────────────────────
+	let viewUpdatePending = $state(false);
 
-	async function toggleMode(lumpId) {
-		if (!view || modeUpdatePending) return;
-		const lump = view.lumped.find((l) => l.id === lumpId);
-		if (!lump) return;
-		const newMode = lump.mode === 'free' ? 'fixed' : 'free';
-
-		// Optimistic local update
-		view = { ...view, lumped: view.lumped.map((l) => l.id === lumpId ? { ...l, mode: newMode } : l) };
-
-		modeUpdatePending = true;
+	async function persistView(nextLumped) {
+		view = { ...view, lumped: nextLumped };  // optimistic
+		viewUpdatePending = true;
 		try {
 			const res = await fetch(`${API}/houses/${house_name}/studies/${study_id}/view`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ lumped: view.lumped }),
+				body: JSON.stringify({ lumped: nextLumped }),
 			});
 			if (!res.ok) {
 				const d = await res.json().catch(() => ({ detail: res.statusText }));
@@ -91,103 +79,180 @@
 			view = await res.json();
 		} catch (e) {
 			viewError = e.message;
-			// revert
-			await loadView();
+			await loadView();  // revert
 		} finally {
-			modeUpdatePending = false;
+			viewUpdatePending = false;
 		}
 	}
 
-	// ── fit config ────────────────────────────────────────────────────────────
-	let obsSigma = $state(0.5);
+	function toggleMode(lumpId) {
+		if (!view || viewUpdatePending) return;
+		const lump = view.lumped.find((l) => l.id === lumpId);
+		if (!lump) return;
+		const newMode = lump.mode === 'free' ? 'fixed' : 'free';
+		persistView(view.lumped.map((l) => l.id === lumpId ? { ...l, mode: newMode } : l));
+	}
 
-	// ── fit run ───────────────────────────────────────────────────────────────
-	let fitLoading = $state(false);
-	let fitError   = $state(null);
-	let fitResult  = $state(null);
+	// Inline nominal edit — patches prior.nominal (or prior_C.nominal for the C
+	// column of an RC_chain). Debounced so typing doesn't hammer the API.
+	let nominalDebounce = null;
+	function editNominal(lumpId, field, raw) {
+		const value = parseFloat(raw);
+		if (!view || isNaN(value) || value <= 0) return;
+		const nextLumped = view.lumped.map((l) => {
+			if (l.id !== lumpId) return l;
+			const key = field === 'C' ? 'prior_C' : 'prior';
+			const prior = { ...(l[key] ?? { sigma_log: 0.5 }), nominal: value };
+			return { ...l, [key]: prior };
+		});
+		view = { ...view, lumped: nextLumped };  // optimistic, immediate
+		clearTimeout(nominalDebounce);
+		nominalDebounce = setTimeout(() => persistView(nextLumped), 400);
+	}
+
+	// ── fit config ──────────────────────────────────────────────────────────────
+	let obsSigma = $state(0.5);
+	let fitY0    = $state(false);
+
+	// ── run state (shared by forward + fit) ──────────────────────────────────────
+	let busy        = $state(false);
+	let runError    = $state(null);
+	let fitResult   = $state(null);   // last fit metadata (null for forward-only)
+	let simResult   = $state(null);
+	let inputSeries = $state(null);
+	let obsSeries   = $state(null);
 
 	const viewStale = $derived(view?._stale_view === true);
 	const hasView   = $derived(view && (view.lumped?.length ?? 0) > 0);
-	const hasFreeParams = $derived(
-		view?.lumped?.some((l) => l.mode === 'free') ?? false
-	);
+	const hasFreeParams = $derived(view?.lumped?.some((l) => l.mode === 'free') ?? false);
+	const hasObsCfg = $derived(Object.values(observations).some((v) => v?.trim()));
 
-	const canRun = $derived(
-		!fitLoading &&
-		hasView &&
-		!viewStale &&
-		range.start && range.end &&
-		Object.values(observations).some((v) => v?.trim()) &&
-		hasFreeParams
-	);
+	const canForward = $derived(!busy && hasView && !viewStale && range.start && range.end);
+	const canFit     = $derived(canForward && hasObsCfg && hasFreeParams);
 
-	async function runFit() {
-		if (!canRun) return;
-		fitLoading  = true;
-		fitError    = null;
-		fitResult   = null;
-		simResult   = null;
-		inputSeries = null;
-		obsSeries   = null;
+	// ── series fetch ──────────────────────────────────────────────────────────
+	async function fetchSeries(signal, start, end) {
+		const url = `${API}/series?signal=${encodeURIComponent(signal)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+		const res = await fetch(url);
+		if (!res.ok) throw new Error(`Series fetch failed: ${res.statusText}`);
+		return res.json();
+	}
 
+	function parseDetail(d) {
+		const detail = d.detail;
+		if (Array.isArray(detail)) return detail.map((e) => `${e.loc?.slice(1).join('.') || ''}: ${e.msg}`).join('; ');
+		return typeof detail === 'string' ? detail : JSON.stringify(detail);
+	}
+
+	// Build node-field param_overrides from a fitted/forward atomic model.
+	function nodeOverridesFromModel(model) {
+		const ov = {};
+		for (const n of (model?.nodes ?? [])) {
+			if (n.kind === 'resistance' && n.R != null) ov[`${n.id}.R`] = n.R;
+			if (n.kind === 'mass'       && n.C != null) ov[`${n.id}.C`] = n.C;
+			if (n.kind === 'source'     && n.gain != null) ov[`${n.id}.gain`] = n.gain;
+		}
+		return ov;
+	}
+
+	async function runSim(paramOverrides, y0Override) {
 		const body = {
-			house_name,
-			study_id,
-			start:        range.start,
-			end:          range.end,
-			inputs,
-			observations: Object.fromEntries(
-				Object.entries(observations).filter(([, v]) => v?.trim())
-			),
-			obs_sigma:    obsSigma,
-			dt_minutes:   15,
-			...(y0_uniform != null ? { y0_uniform } : {}),
+			house_name, study_id,
+			start: range.start, end: range.end,
+			inputs, solver,
+			param_overrides: paramOverrides ?? {},
+			...(y0Override != null ? { y0_uniform: y0Override }
+				: (y0_uniform != null ? { y0_uniform } : {})),
 		};
+		const res = await fetch(`${API}/simulate/run`, {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body),
+		});
+		if (!res.ok) throw new Error(parseDetail(await res.json().catch(() => ({ detail: res.statusText }))));
+		return res.json();
+	}
 
+	async function loadChartsFor(result) {
+		simResult = result;
+		const labels = Object.fromEntries((result.atomic_model?.nodes ?? []).map((n) => [n.id, n.label ?? n.id]));
+
+		const fetchMap = async (map) => {
+			const entries = await Promise.all(
+				Object.entries(map).map(async ([nodeId, signal]) => {
+					if (!signal) return null;
+					try {
+						const s = await fetchSeries(signal, range.start, range.end);
+						return [nodeId, { t: s.t, values: s.values, label: labels[nodeId] ?? nodeId }];
+					} catch { return null; }
+				})
+			);
+			return Object.fromEntries(entries.filter(Boolean));
+		};
+		inputSeries = await fetchMap(inputs);
+		obsSeries   = await fetchMap(observations);
+	}
+
+	function resetResults() {
+		runError = null; fitResult = null; simResult = null; inputSeries = null; obsSeries = null;
+	}
+
+	// ── forward run (from current nominals / overrides) ─────────────────────────
+	async function runForward() {
+		if (!canForward) return;
+		busy = true;
+		resetResults();
 		try {
-			const res = await fetch(`${API}/fit/run`, {
-				method:  'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body:    JSON.stringify(body),
-			});
-			if (!res.ok) {
-				const d = await res.json().catch(() => ({ detail: res.statusText }));
-				const detail = d.detail;
-				const msg = Array.isArray(detail)
-					? detail.map((e) => `${e.loc?.slice(1).join('.')||''}: ${e.msg}`).join('; ')
-					: (typeof detail === 'string' ? detail : JSON.stringify(detail));
-				throw new Error(msg);
-			}
-			fitResult = await res.json();
-
-			// Reload view to get posteriors persisted by the API
-			await loadView();
-
-			// Forward sim using the fitted atomic_model returned by the API
-			const simRes = await runSimWithFittedModel(fitResult.atomic_model);
-			await loadChartsForResult(simRes);
+			// Forward sim from the persisted nominals: the view already carries the
+			// (possibly hand-edited) nominal values; expand() reproduces them, so an
+			// empty override set runs the prior model as-is.
+			const result = await runSim({});
+			onRunSuccess();
+			await loadChartsFor(result);
 		} catch (e) {
-			fitError = e.message;
+			runError = e.message;
 		} finally {
-			fitLoading = false;
+			busy = false;
 		}
 	}
 
-	// ── formatting helpers ────────────────────────────────────────────────────
-	const KIND_COLORS = {
-		RC_chain:   '#22d3ee',
-		Req:        '#f97316',
-		Ceq:        '#a78bfa',
-		T_boundary: '#94a3b8',
-		Q_source:   '#4ade80',
-	};
+	// ── fit run ─────────────────────────────────────────────────────────────────
+	async function runFit() {
+		if (!canFit) return;
+		busy = true;
+		resetResults();
+		const body = {
+			house_name, study_id,
+			start: range.start, end: range.end,
+			inputs,
+			observations: Object.fromEntries(Object.entries(observations).filter(([, v]) => v?.trim())),
+			obs_sigma: obsSigma,
+			dt_minutes: 15,
+			fit_y0: fitY0,
+			...(y0_uniform != null ? { y0_uniform } : {}),
+		};
+		try {
+			const res = await fetch(`${API}/fit/run`, {
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body),
+			});
+			if (!res.ok) throw new Error(parseDetail(await res.json().catch(() => ({ detail: res.statusText }))));
+			fitResult = await res.json();
+			onRunSuccess();
+			await loadView();  // pull persisted posteriors
 
-	const KIND_UNITS = {
-		RC_chain:   ['m²K/W', 'J/K'],
-		Req:        ['m²K/W'],
-		Ceq:        ['J/K'],
-		T_boundary: ['°C'],
-		Q_source:   ['W'],
+			// Forward sim with the fitted model + fitted y₀ (if any).
+			const result = await runSim(nodeOverridesFromModel(fitResult.atomic_model), fitResult.fitted_y0);
+			await loadChartsFor(result);
+		} catch (e) {
+			runError = e.message;
+		} finally {
+			busy = false;
+		}
+	}
+
+	// ── formatting ──────────────────────────────────────────────────────────────
+	const KIND_COLORS = {
+		RC_chain: '#22d3ee', Req: '#f97316', Ceq: '#a78bfa', T_boundary: '#94a3b8', Q_source: '#4ade80',
 	};
 
 	function fmtVal(v) {
@@ -201,278 +266,6 @@
 		const pct = ((fitted - nominal) / nominal) * 100;
 		return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%';
 	}
-
-	// ── post-fit simulation ───────────────────────────────────────────────────
-	let simResult   = $state(null);
-	let inputSeries = $state(null);
-	let obsSeries   = $state(null);
-
-	async function fetchSeries(signal, start, end) {
-		const url = `${API}/series?signal=${encodeURIComponent(signal)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-		const res = await fetch(url);
-		if (!res.ok) throw new Error(`Series fetch failed: ${res.statusText}`);
-		return res.json();
-	}
-
-	async function runSimWithFittedModel(fittedAtomicModel) {
-		// The fit API returns atomic_model with fitted values already applied.
-		// We need to run a forward sim — use param_overrides to carry the node values
-		// derived from the fitted model's nodes.
-		const nodeOverrides = {};
-		for (const n of (fittedAtomicModel?.nodes ?? [])) {
-			if (n.kind === 'resistance' && n.R != null) nodeOverrides[`${n.id}.R`] = n.R;
-			if (n.kind === 'mass'       && n.C != null) nodeOverrides[`${n.id}.C`] = n.C;
-			if (n.kind === 'source'     && n.gain != null) nodeOverrides[`${n.id}.gain`] = n.gain;
-		}
-		const body = {
-			house_name,
-			study_id,
-			start:           range.start,
-			end:             range.end,
-			inputs,
-			solver:          'zoh',
-			param_overrides: nodeOverrides,
-			...(y0_uniform != null ? { y0_uniform } : {}),
-		};
-		const res = await fetch(`${API}/simulate/run`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body),
-		});
-		if (!res.ok) {
-			const d = await res.json().catch(() => ({ detail: res.statusText }));
-			const detail = d.detail;
-			const msg = Array.isArray(detail)
-				? detail.map((e) => `${e.loc?.slice(1).join('.')||''}: ${e.msg}`).join('; ')
-				: (typeof detail === 'string' ? detail : JSON.stringify(detail));
-			throw new Error(msg);
-		}
-		return res.json();
-	}
-
-	const nodeKindMap = $derived.by(() => {
-		if (!fitResult?.atomic_model) return {};
-		return Object.fromEntries(
-			(fitResult.atomic_model.nodes ?? []).map((n) => [n.id, n.kind])
-		);
-	});
-
-	const nodeLabels = $derived.by(() => {
-		if (!fitResult?.atomic_model) return {};
-		return Object.fromEntries(
-			(fitResult.atomic_model.nodes ?? []).map((n) => [n.id, n.label ?? n.id])
-		);
-	});
-
-	async function loadChartsForResult(result) {
-		simResult = result;
-
-		const inputEntries = await Promise.all(
-			Object.entries(inputs).map(async ([nodeId, signal]) => {
-				try {
-					const s = await fetchSeries(signal, range.start, range.end);
-					return [nodeId, { t: s.t, values: s.values, label: nodeLabels[nodeId] ?? nodeId }];
-				} catch { return null; }
-			})
-		);
-		inputSeries = Object.fromEntries(inputEntries.filter(Boolean));
-
-		const obsEntries = await Promise.all(
-			Object.entries(observations).map(async ([nodeId, signal]) => {
-				if (!signal) return null;
-				try {
-					const s = await fetchSeries(signal, range.start, range.end);
-					return [nodeId, { t: s.t, values: s.values, label: nodeLabels[nodeId] ?? nodeId }];
-				} catch { return null; }
-			})
-		);
-		obsSeries = Object.fromEntries(obsEntries.filter(Boolean));
-	}
-
-	// ── uPlot helpers ─────────────────────────────────────────────────────────
-	const SIM_COLORS  = ['#38bdf8', '#fb923c', '#a78bfa', '#34d399', '#f472b6', '#facc15'];
-	const OBS_COLORS  = ['#fde68a', '#fca5a5', '#d9f99d', '#e9d5ff'];
-	const INP_COLORS  = ['#64748b', '#475569', '#94a3b8', '#6b7280', '#9ca3af'];
-
-	const AXIS_STYLE   = { stroke: '#94a3b8', ticks: { stroke: '#334155' }, grid: { stroke: '#1e293b' } };
-	const AXIS_Y       = { stroke: '#94a3b8', ticks: { stroke: '#334155' }, grid: { stroke: '#334155' }, label: '°C' };
-	const AXIS_Y_RESID = { stroke: '#94a3b8', ticks: { stroke: '#334155' }, grid: { stroke: '#334155' }, label: 'Δ°C' };
-
-	function makeUplot(container, opts, data) {
-		return new uPlot(opts, data, container);
-	}
-
-	function nearestIdx(sortedMs, tms) {
-		if (sortedMs.length === 0) return -1;
-		let lo = 0, hi = sortedMs.length - 1;
-		while (lo < hi) {
-			const mid = (lo + hi) >> 1;
-			if (sortedMs[mid] < tms) lo = mid + 1; else hi = mid;
-		}
-		return lo;
-	}
-
-	// ── temperature chart ─────────────────────────────────────────────────────
-	let tempContainer = $state(null);
-	let tempChart     = null;
-
-	function buildTempChart() {
-		if (tempChart) { tempChart.destroy(); tempChart = null; }
-		if (!tempContainer || !simResult) return;
-
-		const ts      = simResult.t.map((s) => Date.parse(s) / 1000);
-		const massIds = Object.keys(simResult.nodes);
-		const simTsMs = simResult.t.map((s) => Date.parse(s));
-
-		const simSeries = massIds.map((id, i) => ({
-			label: id, stroke: SIM_COLORS[i % SIM_COLORS.length], width: 1.5, spanGaps: false,
-		}));
-		const simData = massIds.map((id) => simResult.nodes[id].map((v) => (v === null ? NaN : v)));
-
-		const obsIds = obsSeries ? Object.keys(obsSeries).filter((id) => simResult.nodes[id] !== undefined) : [];
-		const obsSer = obsIds.map((id, i) => ({
-			label: `${id} (obs)`,
-			stroke: OBS_COLORS[i % OBS_COLORS.length],
-			width: 1, dash: [4, 3], spanGaps: false,
-		}));
-		const obsData = obsIds.map((id) => {
-			const obs   = obsSeries[id];
-			const obsMs = obs.t.map((s) => Date.parse(s));
-			return simTsMs.map((tms) => {
-				const idx = nearestIdx(obsMs, tms);
-				return idx >= 0 ? (obs.values[idx] ?? NaN) : NaN;
-			});
-		});
-
-		const bndEntries = inputSeries
-			? Object.entries(inputSeries).filter(([id]) => nodeKindMap[id] === 'boundary')
-			: [];
-		const bndSeries = bndEntries.map(([, e], i) => ({
-			label: e.label, stroke: INP_COLORS[i % INP_COLORS.length], width: 1.5, spanGaps: false,
-		}));
-		const bndData = bndEntries.map(([, e]) => {
-			const bndMs = e.t.map((s) => Date.parse(s));
-			return simTsMs.map((tms) => {
-				const idx = nearestIdx(bndMs, tms);
-				return idx >= 0 ? (e.values[idx] ?? NaN) : NaN;
-			});
-		});
-
-		const data   = [ts, ...simData, ...obsData, ...bndData];
-		const series = [{}, ...simSeries, ...obsSer, ...bndSeries];
-
-		tempChart = makeUplot(tempContainer, {
-			width: tempContainer.clientWidth || 800, height: 260,
-			cursor: { show: true }, scales: { x: { time: true } }, series,
-			axes: [AXIS_STYLE, AXIS_Y],
-			legend: { show: true },
-		}, data);
-	}
-
-	// ── power inputs chart ────────────────────────────────────────────────────
-	let inpPowerContainer = $state(null);
-	let inpPowerChart     = null;
-
-	function buildPowerChart() {
-		if (inpPowerChart) { inpPowerChart.destroy(); inpPowerChart = null; }
-		if (!inpPowerContainer || !inputSeries) return;
-
-		const entries = Object.entries(inputSeries).filter(([id]) => nodeKindMap[id] === 'source').map(([, e]) => e);
-		if (entries.length === 0) return;
-
-		const ts     = entries[0].t.map((s) => Date.parse(s) / 1000);
-		const data   = [ts, ...entries.map((e) => e.values.map((v) => (v === null ? NaN : v)))];
-		const series = [{}, ...entries.map((e, i) => ({
-			label: e.label, stroke: INP_COLORS[i % INP_COLORS.length], width: 1.5, spanGaps: false,
-		}))];
-		inpPowerChart = makeUplot(inpPowerContainer, {
-			width: inpPowerContainer.clientWidth || 800, height: 200,
-			cursor: { show: true }, scales: { x: { time: true } }, series,
-			axes: [AXIS_STYLE, { stroke: '#94a3b8', ticks: { stroke: '#334155' }, grid: { stroke: '#334155' }, label: 'W' }],
-			legend: { show: true },
-		}, data);
-	}
-
-	// ── residuals chart ───────────────────────────────────────────────────────
-	let residContainer = $state(null);
-	let residChart     = null;
-
-	function buildResidChart() {
-		if (residChart) { residChart.destroy(); residChart = null; }
-		if (!residContainer || !simResult || !obsSeries) return;
-		const validIds = Object.keys(obsSeries).filter((id) => simResult.nodes[id] !== undefined);
-		if (validIds.length === 0) return;
-
-		const simTs = simResult.t.map((s) => Date.parse(s));
-		const ts    = simTs.map((ms) => ms / 1000);
-
-		const residData = validIds.map((id) => {
-			const obs     = obsSeries[id];
-			const obsMs   = obs.t.map((s) => Date.parse(s));
-			const simVals = simResult.nodes[id];
-			return simTs.map((tms, k) => {
-				const idx    = nearestIdx(obsMs, tms);
-				const obsVal = idx >= 0 ? (obs.values[idx] ?? null) : null;
-				return obsVal !== null ? (simVals[k] - obsVal) : NaN;
-			});
-		});
-
-		const data   = [ts, ...residData];
-		const series = [{}, ...validIds.map((id, i) => ({
-			label: id, stroke: SIM_COLORS[i % SIM_COLORS.length], width: 1.5, spanGaps: false,
-		}))];
-
-		residChart = makeUplot(residContainer, {
-			width: residContainer.clientWidth || 800, height: 200,
-			cursor: { show: true }, scales: { x: { time: true } }, series,
-			axes: [AXIS_STYLE, AXIS_Y_RESID],
-			legend: { show: true },
-		}, data);
-	}
-
-	// ── reactive chart builds ─────────────────────────────────────────────────
-	$effect(() => {
-		// eslint-disable-next-line no-unused-expressions
-		tempContainer; simResult; obsSeries; inputSeries;
-		buildTempChart();
-	});
-	$effect(() => {
-		// eslint-disable-next-line no-unused-expressions
-		inpPowerContainer; inputSeries;
-		buildPowerChart();
-	});
-	$effect(() => {
-		// eslint-disable-next-line no-unused-expressions
-		residContainer; simResult; obsSeries;
-		buildResidChart();
-	});
-
-	// ── resize observers ──────────────────────────────────────────────────────
-	function watchResize(getContainer, getChart) {
-		let obs;
-		$effect(() => {
-			const el = getContainer();
-			if (!el) return;
-			obs = new ResizeObserver(() => {
-				const u = getChart();
-				if (u && el) u.setSize({ width: el.clientWidth, height: u.height });
-			});
-			obs.observe(el);
-			return () => obs?.disconnect();
-		});
-	}
-	watchResize(() => tempContainer,      () => tempChart);
-	watchResize(() => inpPowerContainer, () => inpPowerChart);
-	watchResize(() => residContainer,    () => residChart);
-
-	onDestroy(() => {
-		tempChart?.destroy();
-		inpPowerChart?.destroy();
-		residChart?.destroy();
-	});
-
-	const hasObs = $derived(obsSeries && Object.keys(obsSeries).length > 0);
-
 </script>
 
 <div class="fit-panel">
@@ -483,16 +276,26 @@
 			<input type="number" bind:value={obsSigma} min="0.01" step="0.1" style="width:70px" />
 		</label>
 
-		<button class="run-btn" onclick={runFit} disabled={!canRun}>
-			{fitLoading ? 'Fitting…' : 'Run fit'}
-		</button>
+		<label class="checkbox-label" title="Fit a uniform initial temperature instead of using the fixed T₀">
+			<input type="checkbox" bind:checked={fitY0} />
+			<span>fit y₀</span>
+		</label>
+
+		<div class="run-group">
+			<button class="run-btn run-forward" onclick={runForward} disabled={!canForward}>
+				{busy ? '…' : 'Run forward'}
+			</button>
+			<button class="run-btn run-fit" onclick={runFit} disabled={!canFit}>
+				{busy ? 'Working…' : 'Run fit'}
+			</button>
+		</div>
 	</div>
 
 	<div class="body">
-		<!-- view section -->
+		<!-- lumped-model section -->
 		<section class="section">
 			<div class="section-header">
-				<span>φ-space view</span>
+				<span>Lumped model</span>
 				{#if view && !viewStale}
 					<span class="hash-tag"># {view.model_hash?.slice(0, 8) ?? ''}</span>
 				{/if}
@@ -501,30 +304,27 @@
 					class:stale={viewStale}
 					onclick={buildView}
 					disabled={viewLoading}
-					title={view ? 'Rebuild view from current model' : 'Build view'}
+					title={view ? 'Rebuild the lumped model from the current house' : 'Build the lumped model'}
 				>
-					{viewLoading ? '…' : (view ? (viewStale ? '⚠ Rebuild view' : '⟳ Rebuild') : 'Build view')}
+					{viewLoading ? '…' : (view ? (viewStale ? '⚠ Rebuild model' : '⟳ Rebuild') : 'Build lumped model')}
 				</button>
 			</div>
 
-			{#if viewError}
-				<div class="error-box">{viewError}</div>
-			{/if}
-
+			{#if viewError}<div class="error-box">{viewError}</div>{/if}
 			{#if viewStale}
-				<div class="stale-banner">⚠ Model changed — view is stale. Rebuild before fitting.</div>
+				<div class="stale-banner">⚠ House changed — the lumped model is stale. Rebuild before fitting.</div>
 			{/if}
 
 			{#if !view && !viewLoading}
-				<p class="hint">No view built yet. Click "Build view" to create the φ-space from the current model.</p>
+				<p class="hint">No lumped model yet. Click "Build lumped model" to derive it from the current house.</p>
 			{:else if view}
 				<table class="phi-table">
 					<thead>
 						<tr>
 							<th>Label</th>
 							<th>Kind</th>
-							<th>Prior R / Req</th>
-							<th>Prior C</th>
+							<th>Nominal R / Req</th>
+							<th>Nominal C</th>
 							<th>Mode</th>
 							{#if fitResult}
 								<th>Posterior R / Req</th>
@@ -535,21 +335,38 @@
 					<tbody>
 						{#each view.lumped as lump (lump.id)}
 							{@const color = KIND_COLORS[lump.kind] ?? '#94a3b8'}
+							{@const editable = lump.mode !== 'fixed'}
 							{@const hasPosterior = lump.posterior != null}
 							{@const shift = hasPosterior ? fmtShift(lump.posterior.value, lump.prior.nominal) : ''}
 							{@const shiftC = lump.posterior_C && lump.prior_C ? fmtShift(lump.posterior_C.value, lump.prior_C.nominal) : ''}
 							<tr class:fixed-row={lump.mode === 'fixed'}>
 								<td class="lump-label" title={lump.id}>{lump.label ?? lump.id}</td>
-								<td>
-									<span class="kind-badge" style="border-color:{color};color:{color}">{lump.kind}</span>
-								</td>
+								<td><span class="kind-badge" style="border-color:{color};color:{color}">{lump.kind}</span></td>
 								<td class="num">
-									{fmtVal(lump.prior.nominal)}
+									{#if editable}
+										<input
+											class="nominal-input"
+											type="number" step="any" min="0"
+											value={lump.prior.nominal}
+											onchange={(e) => editNominal(lump.id, 'R', e.currentTarget.value)}
+										/>
+									{:else}
+										{fmtVal(lump.prior.nominal)}
+									{/if}
 									<span class="sigma">±{lump.prior.sigma_log.toFixed(2)}</span>
 								</td>
 								<td class="num">
 									{#if lump.prior_C}
-										{fmtVal(lump.prior_C.nominal)}
+										{#if editable}
+											<input
+												class="nominal-input"
+												type="number" step="any" min="0"
+												value={lump.prior_C.nominal}
+												onchange={(e) => editNominal(lump.id, 'C', e.currentTarget.value)}
+											/>
+										{:else}
+											{fmtVal(lump.prior_C.nominal)}
+										{/if}
 										<span class="sigma">±{lump.prior_C.sigma_log.toFixed(2)}</span>
 									{:else}
 										<span class="muted">—</span>
@@ -561,7 +378,7 @@
 										class:mode-free={lump.mode === 'free'}
 										class:mode-fixed={lump.mode === 'fixed'}
 										onclick={() => toggleMode(lump.id)}
-										disabled={modeUpdatePending}
+										disabled={viewUpdatePending}
 										title="Toggle free/fixed"
 									>{lump.mode}</button>
 								</td>
@@ -570,23 +387,15 @@
 										{#if hasPosterior}
 											<span class="posterior">{fmtVal(lump.posterior.value)}</span>
 											<span class="sigma">±{lump.posterior.sigma_log.toFixed(2)}</span>
-											{#if shift}
-												<span class="shift" class:shift-large={Math.abs(parseFloat(shift)) > 30}>{shift}</span>
-											{/if}
-										{:else}
-											<span class="muted">—</span>
-										{/if}
+											{#if shift}<span class="shift" class:shift-large={Math.abs(parseFloat(shift)) > 30}>{shift}</span>{/if}
+										{:else}<span class="muted">—</span>{/if}
 									</td>
 									<td class="num">
 										{#if lump.posterior_C}
 											<span class="posterior">{fmtVal(lump.posterior_C.value)}</span>
 											<span class="sigma">±{lump.posterior_C.sigma_log.toFixed(2)}</span>
-											{#if shiftC}
-												<span class="shift" class:shift-large={Math.abs(parseFloat(shiftC)) > 30}>{shiftC}</span>
-											{/if}
-										{:else}
-											<span class="muted">—</span>
-										{/if}
+											{#if shiftC}<span class="shift" class:shift-large={Math.abs(parseFloat(shiftC)) > 30}>{shiftC}</span>{/if}
+										{:else}<span class="muted">—</span>{/if}
 									</td>
 								{/if}
 							</tr>
@@ -596,12 +405,8 @@
 			{/if}
 		</section>
 
-		<!-- fit error -->
-		{#if fitError}
-			<div class="error-box">⚠ {fitError}</div>
-		{/if}
+		{#if runError}<div class="error-box">⚠ {runError}</div>{/if}
 
-		<!-- fit meta -->
 		{#if fitResult}
 			<div class="result-meta-row">
 				<span class="result-meta">
@@ -609,6 +414,7 @@
 					{#if fitResult.elapsed_s !== undefined}· {fitResult.elapsed_s.toFixed(1)} s{/if}
 					{#if fitResult.n_evals !== undefined}· {fitResult.n_evals} evals{/if}
 					{#if fitResult.cost !== undefined}· cost {fitResult.cost.toFixed(4)}{/if}
+					{#if fitResult.fitted_y0 != null}· y₀ {fitResult.fitted_y0.toFixed(2)} °C{/if}
 					{#if fitResult.success !== undefined}
 						<span class:ok={fitResult.success} class:fail={!fitResult.success}>
 							· {fitResult.success ? '✓' : '✗ ' + fitResult.message}
@@ -616,274 +422,137 @@
 					{/if}
 				</span>
 			</div>
+		{/if}
 
-			<!-- charts -->
-			{#if simResult}
-				<section class="section">
-					<div class="section-header">
-						Temperatures — fitted simulation
-						{#if hasObs}<span class="chart-sub">simulated + observed overlay</span>{/if}
-					</div>
-					<div class="chart-wrap" bind:this={tempContainer}></div>
-				</section>
-
-				<section class="section" class:hidden={!inputSeries || !Object.keys(inputSeries).some((id) => nodeKindMap[id] === 'source')}>
-					<div class="section-header">Input power</div>
-					<div class="chart-wrap" bind:this={inpPowerContainer}></div>
-				</section>
-
-				<section class="section" class:hidden={!hasObs}>
-					<div class="section-header">
-						Residuals
-						<span class="chart-sub">simulated − observed [°C]</span>
-					</div>
-					<div class="chart-wrap" bind:this={residContainer}></div>
-				</section>
-			{/if}
+		{#if simResult}
+			<SimCharts {simResult} {inputSeries} {obsSeries} />
 		{/if}
 	</div>
 </div>
 
 <style>
 	.fit-panel {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		min-height: 0;
-		overflow: hidden;
-		color: #f1f5f9;
+		flex: 1; display: flex; flex-direction: column;
+		min-height: 0; overflow: hidden; color: #f1f5f9;
 	}
 
 	.action-bar {
-		display: flex;
-		align-items: center;
-		gap: 16px;
-		padding: 10px 20px;
-		background: #1e293b;
-		border-bottom: 1px solid #334155;
-		flex-shrink: 0;
+		display: flex; align-items: center; gap: 16px;
+		padding: 10px 20px; background: #1e293b;
+		border-bottom: 1px solid #334155; flex-shrink: 0;
 	}
 
-	.obs-sigma-label {
+	.obs-sigma-label, .checkbox-label {
 		display: flex; align-items: center; gap: 6px;
 		font-size: 11px; text-transform: uppercase;
 		letter-spacing: 0.06em; color: #94a3b8;
 	}
+	.checkbox-label { cursor: pointer; }
+	.checkbox-label input { cursor: pointer; }
 
+	.run-group { margin-left: auto; display: flex; gap: 8px; }
 	.run-btn {
-		background: #4f46e5; color: #f1f5f9;
-		border: none; border-radius: 4px;
+		color: #f1f5f9; border: none; border-radius: 4px;
 		padding: 8px 16px; font-size: 13px; font-weight: 600;
 		cursor: pointer; transition: background 0.15s;
-		margin-left: auto;
 	}
-	.run-btn:hover:not(:disabled) { background: #4338ca; }
 	.run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.run-forward { background: #334155; }
+	.run-forward:hover:not(:disabled) { background: #475569; }
+	.run-fit { background: #4f46e5; }
+	.run-fit:hover:not(:disabled) { background: #4338ca; }
 
 	.body {
-		flex: 1;
-		overflow-y: auto;
-		padding: 16px 20px;
-		display: flex;
-		flex-direction: column;
-		gap: 20px;
-		min-height: 0;
+		flex: 1; overflow-y: auto; padding: 16px 20px;
+		display: flex; flex-direction: column; gap: 20px; min-height: 0;
 	}
 
-	.section {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
+	.section { display: flex; flex-direction: column; gap: 8px; }
 	.section-header {
-		font-size: 10px;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: #94a3b8;
-		display: flex;
-		align-items: center;
-		gap: 8px;
+		font-size: 10px; font-weight: 700; text-transform: uppercase;
+		letter-spacing: 0.08em; color: #94a3b8;
+		display: flex; align-items: center; gap: 8px;
 	}
 
 	.hash-tag {
-		font-family: monospace;
-		font-weight: 400;
-		font-size: 10px;
-		color: #475569;
-		text-transform: none;
-		letter-spacing: 0;
+		font-family: monospace; font-weight: 400; font-size: 10px;
+		color: #475569; text-transform: none; letter-spacing: 0;
 	}
 
 	.hint { font-size: 12px; color: #94a3b8; margin: 0; }
 
 	input[type='number'] {
-		background: #0f172a;
-		color: #e2e8f0;
-		border: 1px solid #334155;
-		border-radius: 4px;
-		padding: 4px 8px;
-		font-size: 12px;
-		font-family: monospace;
-		box-sizing: border-box;
+		background: #0f172a; color: #e2e8f0; border: 1px solid #334155;
+		border-radius: 4px; padding: 4px 8px; font-size: 12px;
+		font-family: monospace; box-sizing: border-box;
 	}
 	input:focus { outline: none; border-color: #6366f1; }
 
-	/* ── view button ── */
+	.nominal-input { width: 96px; }
+
 	.view-btn {
-		background: #1e293b;
-		border: 1px solid #334155;
-		color: #64748b;
-		font-size: 10px;
-		font-weight: 600;
-		padding: 3px 10px;
-		border-radius: 4px;
-		cursor: pointer;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		background: #1e293b; border: 1px solid #334155; color: #64748b;
+		font-size: 10px; font-weight: 600; padding: 3px 10px; border-radius: 4px;
+		cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em;
 	}
 	.view-btn:hover:not(:disabled) { background: #334155; color: #94a3b8; }
 	.view-btn:disabled { opacity: 0.4; cursor: default; }
-	.view-btn.stale {
-		border-color: #92400e;
-		color: #f59e0b;
-		background: #1c1100;
-	}
+	.view-btn.stale { border-color: #92400e; color: #f59e0b; background: #1c1100; }
 	.view-btn.stale:hover:not(:disabled) { background: #291900; }
 
-	/* ── stale banner ── */
 	.stale-banner {
-		font-size: 12px;
-		color: #f59e0b;
-		background: #1c1100;
-		border: 1px solid #92400e;
-		border-radius: 4px;
-		padding: 8px 12px;
+		font-size: 12px; color: #f59e0b; background: #1c1100;
+		border: 1px solid #92400e; border-radius: 4px; padding: 8px 12px;
 	}
 
-	/* ── φ-table ── */
-	.phi-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 12px;
-	}
+	.phi-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 	.phi-table th {
-		text-align: left;
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: #94a3b8;
-		padding: 4px 8px 6px;
-		border-bottom: 1px solid #334155;
+		text-align: left; font-size: 10px; text-transform: uppercase;
+		letter-spacing: 0.06em; color: #94a3b8;
+		padding: 4px 8px 6px; border-bottom: 1px solid #334155;
 	}
 	.phi-table td { padding: 5px 8px; vertical-align: middle; }
-	.phi-table tr.fixed-row { opacity: 0.45; }
+	.phi-table tr.fixed-row { opacity: 0.55; }
 	.phi-table tr:hover:not(.fixed-row) { background: #1e293b33; }
 
 	.lump-label {
-		font-size: 12px;
-		color: #e2e8f0;
-		max-width: 200px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		font-size: 12px; color: #e2e8f0; max-width: 200px;
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 	}
 
 	.kind-badge {
-		font-size: 9px;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		padding: 2px 5px;
-		border-radius: 3px;
-		border: 1px solid;
-		white-space: nowrap;
+		font-size: 9px; font-weight: 700; text-transform: uppercase;
+		letter-spacing: 0.05em; padding: 2px 5px; border-radius: 3px;
+		border: 1px solid; white-space: nowrap;
 	}
 
-	.num {
-		font-family: monospace;
-		color: #cbd5e1;
-		white-space: nowrap;
-	}
-
-	.sigma {
-		font-size: 10px;
-		color: #475569;
-		margin-left: 3px;
-	}
-
+	.num { font-family: monospace; color: #cbd5e1; white-space: nowrap; }
+	.sigma { font-size: 10px; color: #475569; margin-left: 3px; }
 	.muted { color: #334155; }
-
 	.posterior { color: #38bdf8; font-weight: 600; }
 
-	.shift {
-		font-size: 10px;
-		color: #a78bfa;
-		margin-left: 4px;
-	}
+	.shift { font-size: 10px; color: #a78bfa; margin-left: 4px; }
 	.shift.shift-large { color: #f59e0b; }
 
-	/* ── mode button ── */
 	.mode-btn {
-		font-size: 10px;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		padding: 2px 8px;
-		border-radius: 3px;
-		border: 1px solid #334155;
-		cursor: pointer;
-		background: none;
-		color: #64748b;
+		font-size: 10px; font-weight: 700; text-transform: uppercase;
+		letter-spacing: 0.05em; padding: 2px 8px; border-radius: 3px;
+		border: 1px solid #334155; cursor: pointer; background: none; color: #64748b;
 		transition: background 0.1s, color 0.1s, border-color 0.1s;
 	}
-	.mode-btn.mode-free {
-		border-color: #22d3ee44;
-		color: #22d3ee;
-		background: #0c2a2e;
-	}
-	.mode-btn.mode-fixed {
-		border-color: #334155;
-		color: #475569;
-		background: none;
-	}
+	.mode-btn.mode-free  { border-color: #22d3ee44; color: #22d3ee; background: #0c2a2e; }
+	.mode-btn.mode-fixed { border-color: #334155; color: #475569; background: none; }
 	.mode-btn:hover:not(:disabled).mode-free  { background: #0e353a; }
 	.mode-btn:hover:not(:disabled).mode-fixed { background: #1e293b; color: #64748b; }
 	.mode-btn:disabled { opacity: 0.4; cursor: default; }
 
-	/* ── result meta ── */
-	.result-meta-row {
-		padding: 4px 0;
-	}
-	.result-meta {
-		font-size: 11px;
-		color: #64748b;
-		font-family: monospace;
-	}
+	.result-meta-row { padding: 4px 0; }
+	.result-meta { font-size: 11px; color: #64748b; font-family: monospace; }
 	.result-meta .ok   { color: #4ade80; }
 	.result-meta .fail { color: #f87171; }
 
 	.error-box {
-		background: #1c0a0a;
-		border: 1px solid #7f1d1d;
-		border-radius: 4px;
-		color: #f87171;
-		padding: 12px 16px;
-		font-size: 13px;
+		background: #1c0a0a; border: 1px solid #7f1d1d; border-radius: 4px;
+		color: #f87171; padding: 12px 16px; font-size: 13px;
 	}
-
-	.chart-wrap { flex-shrink: 0; }
-	.chart-sub {
-		font-size: 11px;
-		font-weight: 400;
-		text-transform: none;
-		letter-spacing: 0;
-		color: #475569;
-	}
-	.hidden { display: none; }
-
-	:global(.uplot)           { color: #94a3b8; }
-	:global(.uplot canvas)    { background: #0f172a; }
-	:global(.uplot .u-legend) { background: transparent; color: #94a3b8; font-size: 12px; }
 </style>

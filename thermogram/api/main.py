@@ -436,8 +436,17 @@ def post_study_view(name: str, study_id: str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Expand error: {e}") from e
 
+    element_labels: dict[str, str] = {}
+    for room in house.rooms:
+        if room.label:
+            element_labels[room.id] = room.label
+    for elem in house.elements:
+        label = getattr(elem, "label", None)
+        if label:
+            element_labels[elem.id] = label
+
     try:
-        view = build_default_view(atomic_model_raw, expansion_map)
+        view = build_default_view(atomic_model_raw, expansion_map, element_labels)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"View build error: {e}") from e
 
@@ -504,6 +513,7 @@ class FitRequest(BaseModel):
     obs_sigma: float = 0.5
     dt_minutes: int = 15
     y0_uniform: float | None = None
+    fit_y0: bool = False
 
 
 @app.post("/fit/run")
@@ -585,6 +595,19 @@ def post_fit_run(req: FitRequest) -> dict:
     if req.y0_uniform is not None:
         y0 = np.full(len(_sys.mass_ids), req.y0_uniform)
 
+    # Starting value for a fitted y₀: explicit y0_uniform, else first boundary
+    # temperature at the window start, else a neutral indoor guess.
+    y0_nominal = None
+    if req.fit_y0:
+        if req.y0_uniform is not None:
+            y0_nominal = float(req.y0_uniform)
+        else:
+            y0_nominal = next(
+                (float(vals[0]) for b_id in _sys.boundary_ids
+                 if b_id in inputs for _, vals in [inputs[b_id]] if len(vals)),
+                20.0,
+            )
+
     try:
         forward_fn, log_phi0, phi_keys = build_forward_from_view(
             view, atomic_model, expansion_map,
@@ -593,6 +616,8 @@ def post_fit_run(req: FitRequest) -> dict:
             start=req.start, end=req.end,
             dt_minutes=req.dt_minutes,
             y0=y0,
+            fit_y0=req.fit_y0,
+            y0_nominal=y0_nominal,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Forward model error: {e}") from e
@@ -649,6 +674,7 @@ def post_fit_run(req: FitRequest) -> dict:
         "n_evals":      result.n_evals,
         "fit_record":   fit_record,
         "atomic_model": atomic_model,
+        "fitted_y0":    result.phi_fitted.get("y0"),
     }
 
 
