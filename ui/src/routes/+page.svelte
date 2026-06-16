@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import GraphView from '$lib/GraphView.svelte';
+	import LumpedView from '$lib/LumpedView.svelte';
 	import PropertiesPanel from '$lib/PropertiesPanel.svelte';
 	import InputsPanel from '$lib/InputsPanel.svelte';
 	import FitPanel from '$lib/FitPanel.svelte';
@@ -273,6 +274,7 @@
 
 	// ── simulation pane (house view) ─────────────────────────────────────────
 	let simPaneTab    = $state('rc'); // 'rc' | 'studies' | 'sim'
+	let showAtomicMesh = $state(false); // RC Graph tab: show raw expand() dagre graph instead of lumped cards
 	let rangeMode     = $state('duration'); // 'dates' | 'duration'
 	let durationDays  = $state(7);
 	let durationStart = $state('');
@@ -436,9 +438,22 @@
 					</div>
 
 					{#if simPaneTab === 'rc'}
-						{#if atomicModel}
+						{#if !showAtomicMesh && !selectedStudyId}
+							<div class="study-pane-empty">
+								<span>Select or create a study to see the lumped model.</span>
+								<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = true)}>show atomic mesh instead</button>
+							</div>
+						{:else if !showAtomicMesh}
 							<div class="sim-pane-body">
 								<div class="rc-graph-toolbar">
+									<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = true)} title="Show raw atomic expand() graph">debug: atomic mesh</button>
+								</div>
+								<LumpedView house_name={houseName} study_id={selectedStudyId} />
+							</div>
+						{:else if atomicModel}
+							<div class="sim-pane-body">
+								<div class="rc-graph-toolbar">
+									<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = false)} title="Back to lumped model cards">← lumped view</button>
 									<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading} title="Refresh RC graph">
 										{atomicModelLoading ? '…' : '⟳'}
 									</button>
@@ -455,6 +470,7 @@
 								<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading}>
 									{atomicModelLoading ? 'loading…' : '⟳ refresh'}
 								</button>
+								<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = false)}>← lumped view</button>
 							</div>
 						{/if}
 
