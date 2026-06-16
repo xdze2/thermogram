@@ -7,7 +7,11 @@
 
 	const API = '';
 
-	let { house_name, study_id } = $props();
+	let {
+		house_name, study_id, selectedId = null, onselect = () => {},
+		onview = () => {},       // (view) => void — fired whenever the view changes, so the page can share it (e.g. with FitPanel)
+		refreshToken = 0,        // bump from the parent to force a reload (e.g. after a fit persists posteriors)
+	} = $props();
 
 	let view        = $state(null);   // { lumped: [...], model_hash, _stale_view }
 	let viewLoading = $state(false);
@@ -28,6 +32,9 @@
 			viewLoading = false;
 		}
 	}
+
+	$effect(() => { onview(view); });
+	$effect(() => { refreshToken; loadView(); });
 
 	async function buildView() {
 		if (!house_name || !study_id) return;
@@ -154,7 +161,15 @@
 					{#each lumps as lump (lump.id)}
 						{@const color = KIND_COLORS[lump.kind] ?? '#94a3b8'}
 						{@const editable = lump.mode !== 'fixed'}
-						<div class="lump-card" class:fixed-card={lump.mode === 'fixed'}>
+						{@const isSelected = lump.realizes != null && lump.realizes === selectedId}
+						<div
+							class="lump-card"
+							class:fixed-card={lump.mode === 'fixed'}
+							class:selected-card={isSelected}
+							role="button" tabindex="0"
+							onclick={() => onselect(lump.realizes ?? null)}
+							onkeydown={(e) => e.key === 'Enter' && onselect(lump.realizes ?? null)}
+						>
 							<div class="lump-card-top">
 								<span class="lump-label" title={lump.id}>{lump.label ?? lump.id}</span>
 								<span class="kind-badge" style="border-color:{color};color:{color}">{lump.kind}</span>
@@ -175,6 +190,7 @@
 											class="nominal-input"
 											type="number" step="any" min="0"
 											value={lump.prior.nominal}
+											onclick={(e) => e.stopPropagation()}
 											onchange={(e) => editNominal(lump.id, 'R', e.currentTarget.value)}
 										/>
 									{:else}
@@ -190,6 +206,7 @@
 												class="nominal-input"
 												type="number" step="any" min="0"
 												value={lump.prior_C.nominal}
+												onclick={(e) => e.stopPropagation()}
 												onchange={(e) => editNominal(lump.id, 'C', e.currentTarget.value)}
 											/>
 										{:else}
@@ -203,7 +220,7 @@
 								class="mode-btn"
 								class:mode-free={lump.mode === 'free'}
 								class:mode-fixed={lump.mode === 'fixed'}
-								onclick={() => toggleMode(lump.id)}
+								onclick={(e) => { e.stopPropagation(); toggleMode(lump.id); }}
 								disabled={viewUpdatePending}
 								title="Toggle free/fixed"
 							>{lump.mode}</button>
@@ -245,6 +262,8 @@
 		background: #0f172a;
 	}
 	.lump-card.fixed-card { opacity: 0.6; }
+	.lump-card { cursor: pointer; }
+	.lump-card.selected-card { border-color: #3b82f6; background: #15233d; }
 
 	.lump-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 	.lump-label { font-size: 12px; font-weight: 600; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

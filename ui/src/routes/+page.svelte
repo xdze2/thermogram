@@ -2,18 +2,16 @@
 	import { onMount } from 'svelte';
 	import GraphView from '$lib/GraphView.svelte';
 	import LumpedView from '$lib/LumpedView.svelte';
-	import PropertiesPanel from '$lib/PropertiesPanel.svelte';
-	import InputsPanel from '$lib/InputsPanel.svelte';
 	import FitPanel from '$lib/FitPanel.svelte';
 	import HousePanel from '$lib/HousePanel.svelte';
 	import MaterialsPanel from '$lib/MaterialsPanel.svelte';
 	import RangeSelect from '$lib/RangeSelect.svelte';
+	import SimCharts from '$lib/SimCharts.svelte';
 
 	const API = '';
 
 	// ── navigation ────────────────────────────────────────────────────────────
 	// activeSection: 'materials' | 'houses' | 'house'
-	// simPaneTab: right-pane tab: 'studies' | 'sim' | 'rc' | 'topology' | 'inputs' | 'run' | 'fit' | 'debug'
 	let activeSection = $state('houses');
 
 	// ── houses list ───────────────────────────────────────────────────────────
@@ -228,7 +226,6 @@
 		selectedStudyId = studyId;
 		loadStudyIntoState(study);
 		activeSection = 'house';
-		simPaneTab    = 'sim';
 	}
 
 	// ── save study ────────────────────────────────────────────────────────────
@@ -272,12 +269,29 @@
 		}
 	}
 
-	// ── simulation pane (house view) ─────────────────────────────────────────
-	let simPaneTab    = $state('rc'); // 'rc' | 'studies' | 'sim'
-	let showAtomicMesh = $state(false); // RC Graph tab: show raw expand() dagre graph instead of lumped cards
-	let rangeMode     = $state('duration'); // 'dates' | 'duration'
-	let durationDays  = $state(7);
-	let durationStart = $state('');
+	function clickOutsideStudyPicker(node) {
+		const handler = (e) => { if (!node.contains(e.target)) studyPickerOpen = false; };
+		document.addEventListener('mousedown', handler, true);
+		return { destroy() { document.removeEventListener('mousedown', handler, true); } };
+	}
+
+	// ── house-view layout state ──────────────────────────────────────────────
+	let studyPickerOpen = $state(false);  // top-bar study switcher dropdown
+	let showAtomicMesh  = $state(false);  // modal: raw expand() dagre graph instead of lumped cards
+	let rangeMode       = $state('duration'); // 'dates' | 'duration'
+	let durationDays    = $state(7);
+	let durationStart   = $state('');
+
+	// Cross-link selection shared between HousePanel (left) and LumpedView (center):
+	// a house-element uuid, or null. See docs/todo_2.md "Cross-linking, left ↔ center".
+	let selectedElementId = $state(null);
+
+	// View + run/fit result state, lifted out of FitPanel so the right column's
+	// SimCharts can render it (FitPanel keeps the run/fit controls + reports
+	// results upward via onResult; LumpedView keeps the view via onview).
+	let lumpedView      = $state(null);
+	let lumpedViewToken  = $state(0); // bump to force LumpedView to reload (e.g. after a fit persists posteriors)
+	let runResult        = $state({ simResult: null, fitResult: null, inputSeries: null, obsSeries: null, runError: null });
 
 	// ── create study from house ───────────────────────────────────────────────
 	let createStudyLoading = $state(false);
@@ -300,7 +314,7 @@
 			const data = await res.json();
 			await loadHouse(houseName);
 			await openStudy(data.id);
-			simPaneTab = 'sim';
+			studyPickerOpen = false;
 		} catch (e) {
 			createStudyError = e.message;
 		} finally {
@@ -317,10 +331,7 @@
 				const d = await res.json().catch(() => ({}));
 				throw new Error(d.detail ?? res.statusText);
 			}
-			if (selectedStudyId === studyId) {
-				selectedStudyId = null;
-				simPaneTab = 'studies';
-			}
+			if (selectedStudyId === studyId) selectedStudyId = null;
 			await loadHouse(houseName);
 		} catch (e) {
 			alert(`Failed to delete study: ${e.message}`);
@@ -349,12 +360,6 @@
 			<button class="nav-item" class:active={activeSection === 'houses' || activeSection === 'house'} onclick={() => (activeSection = houseName ? 'house' : 'houses')}>
 				House
 			</button>
-
-			<!-- house sub-nav -->
-			{#if activeSection === 'house' && houseName}
-				<div class="nav-divider"></div>
-				<button class="nav-item nav-back" onclick={() => { houseName = null; house = null; selectedStudyId = null; atomicModel = null; activeSection = 'houses'; }}>← all houses</button>
-			{/if}
 		</div>
 		<div class="nav-bottom">
 			<a class="nav-link" href="/docs" target="_blank" rel="noopener">API docs ↗</a>
@@ -413,8 +418,58 @@
 			</div>
 
 		{:else if activeSection === 'house' && house}
-			<div class="house-split">
-				<div class="house-pane">
+			<!-- ── top bar ── -->
+			<div class="house-topbar">
+				<span class="topbar-house-name">{house.label || houseName}</span>
+
+				<div class="study-picker-wrap" use:clickOutsideStudyPicker>
+					<button class="study-picker-trigger" onclick={() => (studyPickerOpen = !studyPickerOpen)}>
+						<span class="study-picker-icon">study:</span>
+						<span class="study-picker-label">{selectedStudy?.label || selectedStudy?.id?.slice(0, 8) || 'none selected'}</span>
+						<span class="tb-caret">{studyPickerOpen ? '▴' : '▾'}</span>
+					</button>
+					{#if studyPickerOpen}
+						<div class="study-picker-dropdown">
+							{#if createStudyError}<div class="home-error">{createStudyError}</div>{/if}
+							<button class="study-picker-new" onclick={() => createStudy()} disabled={createStudyLoading}>
+								{createStudyLoading ? 'Creating…' : '+ New study'}
+							</button>
+							{#if studies.length === 0}
+								<div class="studies-empty">No studies yet.</div>
+							{:else}
+								{#each studies as s}
+									<div class="study-picker-row" class:selected-row={s.id === selectedStudyId}
+										onclick={() => { openStudy(s.id); studyPickerOpen = false; }}>
+										<span class="col-label">{s.label || s.id.slice(0, 8)}</span>
+										<span class="col-date">{s.date_range?.[0] ?? s.start ?? '—'} → {s.date_range?.[1] ?? s.end ?? '—'}</span>
+										{#if s._stale_run || s._stale_fit}
+											<span class="stale-badge">⚠ stale</span>
+										{:else if s.run || s.fit}
+											<span class="done-badge">✓</span>
+										{/if}
+										<button class="card-action card-action-del" onclick={(e) => { e.stopPropagation(); deleteStudy(s.id); }} title="Delete">✕</button>
+									</div>
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				{#if selectedStudyId}
+					<button class="study-save-btn" class:dirty={studyDirty} onclick={saveStudy} disabled={saveLoading}>
+						{saveLoading ? 'Saving…' : studyDirty ? 'Save study ●' : 'Study saved'}
+					</button>
+					{#if saveError}<span class="study-save-error">{saveError}</span>{/if}
+				{/if}
+
+				<button class="topbar-back" onclick={() => { houseName = null; house = null; selectedStudyId = null; atomicModel = null; activeSection = 'houses'; }}>← all houses</button>
+			</div>
+
+			<!-- ── three columns ── -->
+			<div class="house-columns">
+
+				<!-- LEFT: elements -->
+				<div class="col col-elements">
 					<HousePanel
 						{house}
 						onchange={(h) => (house = { ...h, _model_hash: house._model_hash, studies: $state.snapshot(house.studies) })}
@@ -425,41 +480,112 @@
 						saveError={houseSaveError}
 						onsave={saveHouse}
 						ondelete={deleteHouse}
+						selectedId={selectedElementId}
+						onselect={(id) => (selectedElementId = id)}
 					/>
 				</div>
-				<div class="study-pane">
-					<div class="study-pane-tabs">
-						<button class="sim-tab" class:active={simPaneTab === 'rc'}         onclick={() => { simPaneTab = 'rc'; loadAtomicModel(); }}>RC Graph</button>
-						<button class="sim-tab" class:active={simPaneTab === 'studies'}    onclick={() => (simPaneTab = 'studies')}>Studies</button>
-						<button class="sim-tab" class:active={simPaneTab === 'sim'}
-							class:disabled={!selectedStudyId}
-							onclick={() => { if (selectedStudyId) simPaneTab = 'sim'; }}
-						>Simulation</button>
+
+				<!-- CENTER: lumped view + run/fit controls -->
+				<div class="col col-lumped">
+					{#if !selectedStudyId}
+						<div class="study-pane-empty"><span>Select or create a study above.</span></div>
+					{:else}
+						<div class="lumped-col-toolbar">
+							<button class="rc-refresh-btn" onclick={() => { showAtomicMesh = true; loadAtomicModel(); }} title="Show raw atomic expand() graph">debug: atomic mesh</button>
+						</div>
+						<div class="lumped-col-cards">
+							<LumpedView
+								house_name={houseName}
+								study_id={selectedStudyId}
+								selectedId={selectedElementId}
+								onselect={(id) => (selectedElementId = id)}
+								onview={(v) => (lumpedView = v)}
+								refreshToken={lumpedViewToken}
+							/>
+						</div>
+						<div class="lumped-col-fit">
+							<FitPanel
+								house_name={houseName}
+								study_id={selectedStudyId}
+								inputs={simInputs}
+								range={simRange}
+								observations={simObservations}
+								solver={simSolver}
+								y0_uniform={simInitState.mode === 'uniform' ? simInitState.T : null}
+								view={lumpedView}
+								{onRunSuccess}
+								onViewRefresh={() => (lumpedViewToken += 1)}
+								onResult={(r) => (runResult = r)}
+							/>
+						</div>
+					{/if}
+				</div>
+
+				<!-- RIGHT: time range + graphs -->
+				<div class="col col-right">
+					<div class="range-col-block">
+						<div class="range-col-row">
+							<RangeSelect
+								bind:range={simRange}
+								bind:rangeMode
+								bind:durationDays
+								bind:durationStart
+							/>
+						</div>
+						<div class="range-col-row">
+							<span class="ctrl-label">T₀</span>
+							<label class="ctrl-radio">
+								<input type="radio" bind:group={simInitState.mode} value="auto" />
+								<span>auto</span>
+							</label>
+							<label class="ctrl-radio">
+								<input type="radio" bind:group={simInitState.mode} value="uniform" />
+								<span>uniform</span>
+							</label>
+							{#if simInitState.mode === 'uniform'}
+								<input
+									class="ctrl-number"
+									type="number"
+									step="0.5"
+									value={simInitState.T}
+									oninput={(e) => (simInitState = { ...simInitState, T: parseFloat(e.currentTarget.value) })}
+									title="Initial temperature [°C]"
+								/>
+								<span class="ctrl-unit">°C</span>
+							{/if}
+							<label class="ctrl-radio" title="Solver for the forward run" style="margin-left:auto">
+								<input type="radio" bind:group={simSolver} value="ivp" /><span>IVP</span>
+							</label>
+							<label class="ctrl-radio">
+								<input type="radio" bind:group={simSolver} value="zoh" /><span>ZOH</span>
+							</label>
+						</div>
 					</div>
 
-					{#if simPaneTab === 'rc'}
-						{#if !showAtomicMesh && !selectedStudyId}
-							<div class="study-pane-empty">
-								<span>Select or create a study to see the lumped model.</span>
-								<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = true)}>show atomic mesh instead</button>
-							</div>
-						{:else if !showAtomicMesh}
-							<div class="sim-pane-body">
-								<div class="rc-graph-toolbar">
-									<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = true)} title="Show raw atomic expand() graph">debug: atomic mesh</button>
-								</div>
-								<LumpedView house_name={houseName} study_id={selectedStudyId} />
-							</div>
-						{:else if atomicModel}
-							<div class="sim-pane-body">
-								<div class="rc-graph-toolbar">
-									<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = false)} title="Back to lumped model cards">← lumped view</button>
-									<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading} title="Refresh RC graph">
-										{atomicModelLoading ? '…' : '⟳'}
-									</button>
-								</div>
-								<GraphView model={atomicModel} selected={null} onselect={() => {}} onaddedge={() => {}} groups={[]} />
-							</div>
+					<div class="graphs-col">
+						{#if runResult.simResult}
+							<SimCharts simResult={runResult.simResult} inputSeries={runResult.inputSeries} obsSeries={runResult.obsSeries} />
+						{:else}
+							<div class="study-pane-empty"><span>Run a forward simulation or a fit to see graphs here.</span></div>
+						{/if}
+					</div>
+				</div>
+
+			</div>
+
+			<!-- ── atomic mesh debug modal ── -->
+			{#if showAtomicMesh}
+				<div class="modal-backdrop" onclick={() => (showAtomicMesh = false)}>
+					<div class="modal-atomic" onclick={(e) => e.stopPropagation()}>
+						<div class="modal-atomic-toolbar">
+							<span class="modal-atomic-title">debug: atomic mesh</span>
+							<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading} title="Refresh">
+								{atomicModelLoading ? '…' : '⟳'}
+							</button>
+							<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = false)}>✕ close</button>
+						</div>
+						{#if atomicModel}
+							<GraphView model={atomicModel} selected={null} onselect={() => {}} onaddedge={() => {}} groups={[]} />
 						{:else}
 							<div class="study-pane-empty">
 								{#if atomicModelError}
@@ -467,136 +593,11 @@
 								{:else}
 									<span>no atomic model</span>
 								{/if}
-								<button class="rc-refresh-btn" onclick={loadAtomicModel} disabled={atomicModelLoading}>
-									{atomicModelLoading ? 'loading…' : '⟳ refresh'}
-								</button>
-								<button class="rc-refresh-btn" onclick={() => (showAtomicMesh = false)}>← lumped view</button>
 							</div>
 						{/if}
-
-					{:else if simPaneTab === 'studies'}
-						<div class="studies-tab-content">
-							<div class="studies-tab-header">
-								{#if createStudyError}<div class="home-error">{createStudyError}</div>{/if}
-								<!-- new study -->
-								<div class="new-study-wrap">
-									<button class="home-new-btn" onclick={() => createStudy()} disabled={createStudyLoading}>
-										{createStudyLoading ? 'Creating…' : '+ New study'}
-									</button>
-								</div>
-							</div>
-
-							{#if studies.length === 0}
-								<div class="studies-empty">No studies yet. Click "+ New study" to create one.</div>
-							{:else}
-								<table class="studies-table">
-									<thead>
-										<tr>
-											<th>Label</th>
-											<th>Start</th>
-											<th>End</th>
-											<th>Status</th>
-											<th></th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each studies as s}
-											<tr class="study-row" class:selected-row={s.id === selectedStudyId}
-												onclick={() => { openStudy(s.id); simPaneTab = 'sim'; }}>
-												<td class="col-label">{s.label || s.id.slice(0, 8)}</td>
-												<td class="col-date">{s.date_range?.[0] ?? s.start ?? '—'}</td>
-												<td class="col-date">{s.date_range?.[1] ?? s.end ?? '—'}</td>
-												<td class="col-status">
-													{#if s._stale_run || s._stale_fit}
-														<span class="stale-badge">⚠ stale</span>
-													{:else if s.run || s.fit}
-														<span class="done-badge">✓</span>
-													{/if}
-												</td>
-												<td class="col-actions" onclick={(e) => e.stopPropagation()}>
-													<button class="card-action card-action-del" onclick={() => deleteStudy(s.id)} title="Delete">✕</button>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							{/if}
-						</div>
-
-					{:else if simPaneTab === 'sim'}
-						{#if !selectedStudyId}
-							<div class="study-pane-empty"><span>select a study first</span></div>
-						{:else if createStudyLoading}
-							<div class="study-pane-empty"><span>creating…</span></div>
-						{:else if createStudyError}
-							<div class="study-pane-empty study-pane-error"><span>{createStudyError}</span></div>
-						{:else}
-							<!-- ── study header bar ── -->
-							<div class="study-save-bar">
-								<button class="study-back-btn" onclick={() => { selectedStudyId = null; simPaneTab = 'studies'; }}>← studies</button>
-								<span class="study-save-label">{selectedStudy?.label ?? selectedStudyId}</span>
-								<button class="study-save-btn" class:dirty={studyDirty} onclick={saveStudy} disabled={saveLoading}>
-									{saveLoading ? 'Saving…' : studyDirty ? 'Save ●' : 'Saved'}
-								</button>
-								{#if saveError}<span class="study-save-error">{saveError}</span>{/if}
-							</div>
-
-							<!-- ── control bar ── -->
-							<div class="sim-controls">
-								<div class="sim-ctrl-row sim-ctrl-range">
-									<RangeSelect
-										bind:range={simRange}
-										bind:rangeMode
-										bind:durationDays
-										bind:durationStart
-									/>
-								</div>
-
-								<div class="sim-ctrl-row sim-ctrl-initstate">
-									<span class="ctrl-label">T₀</span>
-									<label class="ctrl-radio">
-										<input type="radio" bind:group={simInitState.mode} value="auto" />
-										<span>auto</span>
-									</label>
-									<label class="ctrl-radio">
-										<input type="radio" bind:group={simInitState.mode} value="uniform" />
-										<span>uniform</span>
-									</label>
-									{#if simInitState.mode === 'uniform'}
-										<input
-											class="ctrl-number"
-											type="number"
-											step="0.5"
-											value={simInitState.T}
-											oninput={(e) => (simInitState = { ...simInitState, T: parseFloat(e.currentTarget.value) })}
-											title="Initial temperature [°C]"
-										/>
-										<span class="ctrl-unit">°C</span>
-									{/if}
-								</div>
-
-								<div class="sim-ctrl-row" title="Solver for the forward run">
-									<label class="ctrl-radio"><input type="radio" bind:group={simSolver} value="ivp" /><span>IVP (BDF)</span></label>
-									<label class="ctrl-radio"><input type="radio" bind:group={simSolver} value="zoh" /><span>ZOH</span></label>
-								</div>
-							</div>
-
-							<div class="sim-pane-body scrollable">
-								<FitPanel
-									house_name={houseName}
-									study_id={selectedStudyId}
-									inputs={simInputs}
-									range={simRange}
-									observations={simObservations}
-									solver={simSolver}
-									y0_uniform={simInitState.mode === 'uniform' ? simInitState.T : null}
-									{onRunSuccess}
-								/>
-							</div>
-						{/if}
-					{/if}
+					</div>
 				</div>
-			</div>
+			{/if}
 
 		{/if}
 
@@ -673,17 +674,9 @@
 	.nav-item.active { background: #334155; color: #f1f5f9; font-weight: 600; }
 
 	.nav-tab  { padding-left: 24px; font-size: 12px; }
-	.nav-back { font-size: 11px; color: #475569; }
-	.nav-back:hover { color: #94a3b8; }
 	.nav-dev  { color: #475569; font-style: italic; }
 	.nav-dev:hover  { color: #94a3b8; }
 	.nav-dev.active { color: #94a3b8; font-weight: 600; }
-
-	.nav-divider {
-		height: 1px;
-		background: #334155;
-		margin: 8px 12px;
-	}
 
 	.nav-house-name {
 		font-size: 11px;
@@ -739,106 +732,29 @@
 	}
 
 	/* ── house split view ── */
-	.house-split {
-		flex: 1;
-		display: flex;
-		min-height: 0;
-		overflow: hidden;
-	}
-
-	.house-pane {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-		overflow: hidden;
-		border-right: 1px solid #1e293b;
-	}
-
-	.study-pane {
-		flex: 2;
-		min-width: 0;
-		display: flex;
-		flex-direction: column;
-		min-height: 0;
-		overflow: hidden;
-		background: #111827;
-	}
-
-	.study-pane-empty {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		align-items: center;
-		justify-content: center;
-		color: #334155;
-		font-size: 12px;
-	}
-
-	.rc-graph-toolbar {
-		position: absolute;
-		top: 6px;
-		right: 8px;
-		z-index: 10;
-	}
-
-	.rc-refresh-btn {
-		background: none;
-		border: 1px solid #334155;
-		color: #64748b;
-		border-radius: 4px;
-		padding: 2px 7px;
-		font-size: 13px;
-		cursor: pointer;
-		line-height: 1.4;
-	}
-	.rc-refresh-btn:hover:not(:disabled) { color: #94a3b8; border-color: #475569; }
-	.rc-refresh-btn:disabled { opacity: 0.4; cursor: default; }
-	.rc-model-error { color: #f87171; max-width: 260px; text-align: center; }
-
-	.study-pane-error { color: #f87171 !important; }
-
-	.study-pane-tabs {
-		display: flex;
-		flex-shrink: 0;
-		border-bottom: 1px solid #1e293b;
-		background: #111827;
-	}
-
-	.sim-tab {
-		flex: 1;
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		color: #64748b;
-		font-size: 11px;
-		font-weight: 500;
-		padding: 7px 4px 5px;
-		cursor: pointer;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		border-radius: 0;
-		transition: color 0.1s, border-color 0.1s;
-	}
-	.sim-tab:hover  { color: #94a3b8; background: none; }
-	.sim-tab.active { color: #e2e8f0; border-bottom-color: #3b82f6; }
-	.sim-tab-dev    { color: #334155; font-style: italic; }
-	.sim-tab-dev:hover { color: #64748b; }
-	.sim-tab-dev.active { color: #94a3b8; border-bottom-color: #475569; }
-
-	/* ── study save bar ── */
-	.study-save-bar {
+	/* ── house top bar ── */
+	.house-topbar {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 5px 12px;
+		gap: 10px;
+		padding: 8px 16px;
 		border-bottom: 1px solid #1e293b;
 		background: #0f172a;
 		flex-shrink: 0;
 	}
 
-	.study-back-btn {
+	.topbar-house-name {
+		font-size: 13px;
+		font-weight: 700;
+		color: #f1f5f9;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 240px;
+	}
+
+	.topbar-back {
+		margin-left: auto;
 		background: none;
 		border: none;
 		color: #475569;
@@ -848,17 +764,93 @@
 		border-radius: 3px;
 		flex-shrink: 0;
 	}
-	.study-back-btn:hover { color: #94a3b8; background: #1e293b; }
+	.topbar-back:hover { color: #94a3b8; background: #1e293b; }
 
-	.study-save-label {
-		flex: 1;
-		font-size: 11px;
+	/* ── study picker dropdown ── */
+	.study-picker-wrap {
+		position: relative;
+	}
+
+	.study-picker-trigger {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		background: #1e293b;
+		border: 1px solid #334155;
+		color: #cbd5e1;
+		font-size: 12px;
+		padding: 4px 10px;
+		border-radius: 5px;
+		cursor: pointer;
+	}
+	.study-picker-trigger:hover { background: #273548; }
+	.study-picker-icon { color: #64748b; font-size: 11px; }
+	.study-picker-label {
+		font-weight: 600; max-width: 220px;
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	}
+	.tb-caret { font-size: 9px; color: #64748b; }
+
+	.study-picker-dropdown {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		z-index: 100;
+		background: #1e293b;
+		border: 1px solid #334155;
+		border-radius: 6px;
+		padding: 6px;
+		min-width: 360px;
+		max-height: 320px;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+	}
+
+	.study-picker-new {
+		align-self: flex-start;
+		margin-bottom: 4px;
+	}
+
+	.studies-empty {
+		font-size: 12px;
+		color: #475569;
+		padding: 10px 6px;
+		text-align: center;
+	}
+
+	.study-picker-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 8px;
+		border-radius: 4px;
+		cursor: pointer;
+	}
+	.study-picker-row:hover { background: #273548; }
+	.study-picker-row.selected-row { background: #1a2744; }
+
+	.col-label {
+		color: #e2e8f0;
 		font-weight: 600;
-		color: #94a3b8;
+		max-width: 140px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+
+	.col-date {
+		font-family: monospace;
+		font-size: 11px;
+		color: #64748b;
+		white-space: nowrap;
+		margin-left: auto;
+	}
+
+	.stale-badge { font-size: 10px; color: #f59e0b; }
+	.done-badge  { font-size: 11px; color: #4ade80; }
 
 	.study-save-btn {
 		background: none;
@@ -881,40 +873,98 @@
 		flex-shrink: 0;
 	}
 
-	.sim-pane-body {
+	/* ── three-column layout ── */
+	.house-columns {
 		flex: 1;
-		position: relative;
 		display: flex;
-		flex-direction: column;
 		min-height: 0;
 		overflow: hidden;
 	}
-	.sim-pane-body.scrollable { overflow-y: auto; }
 
-	/* ── simulation control bar ── */
-	.sim-controls {
+	.col {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		border-right: 1px solid #1e293b;
+	}
+	.col:last-child { border-right: none; }
+
+	.col-elements { flex: 1.1; }
+	.col-lumped   { flex: 1.4; background: #111827; position: relative; }
+	.col-right    { flex: 1.1; background: #0b1220; }
+
+	.study-pane-empty {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		align-items: center;
+		justify-content: center;
+		color: #334155;
+		font-size: 12px;
+		text-align: center;
+		padding: 16px;
+	}
+
+	.lumped-col-toolbar {
+		position: absolute;
+		top: 6px;
+		right: 8px;
+		z-index: 10;
+	}
+
+	.lumped-col-cards {
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.lumped-col-fit {
+		flex-shrink: 0;
+		max-height: 45%;
+		display: flex;
+		flex-direction: column;
+		border-top: 1px solid #1e293b;
+		min-height: 0;
+	}
+
+	.rc-refresh-btn {
+		background: none;
+		border: 1px solid #334155;
+		color: #64748b;
+		border-radius: 4px;
+		padding: 2px 7px;
+		font-size: 13px;
+		cursor: pointer;
+		line-height: 1.4;
+	}
+	.rc-refresh-btn:hover:not(:disabled) { color: #94a3b8; border-color: #475569; }
+	.rc-refresh-btn:disabled { opacity: 0.4; cursor: default; }
+	.rc-model-error { color: #f87171; max-width: 260px; text-align: center; }
+
+	/* ── right column: range + graphs ── */
+	.range-col-block {
+		flex-shrink: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 0;
 		border-bottom: 1px solid #1e293b;
-		flex-shrink: 0;
 		background: #111827;
 	}
 
-	.sim-ctrl-row {
+	.range-col-row {
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
 		gap: 6px;
 		padding: 7px 12px;
 		border-bottom: 1px solid #0f172a;
 	}
-	.sim-ctrl-row:last-child { border-bottom: none; }
-
-	.sim-ctrl-range {
-		flex-wrap: wrap;
-		gap: 5px;
-	}
-
+	.range-col-row:last-child { border-bottom: none; }
 
 	.ctrl-radio {
 		display: flex;
@@ -924,20 +974,6 @@
 		margin-right: 6px;
 	}
 	.ctrl-radio span { font-size: 12px; color: #e2e8f0; }
-
-	.ctrl-btn {
-		font-size: 12px;
-		font-weight: 600;
-		padding: 5px 14px;
-		border-radius: 4px;
-		border: 1px solid #334155;
-		background: #1e293b;
-		color: #94a3b8;
-		cursor: pointer;
-	}
-	.ctrl-btn:hover:not(:disabled) { background: #273548; color: #e2e8f0; }
-	.ctrl-btn:disabled              { opacity: 0.35; cursor: default; }
-	.ctrl-btn.active                { background: #334155; color: #e2e8f0; }
 
 	.ctrl-label {
 		font-size: 12px;
@@ -962,103 +998,52 @@
 		color: #64748b;
 	}
 
-	/* ── studies tab (right pane) ── */
-	.studies-tab-content {
+	.graphs-col {
 		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
-		padding: 14px 16px;
-		overflow-y: auto;
 	}
 
-	.studies-tab-header {
+	/* ── atomic mesh debug modal ── */
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0,0,0,0.6);
 		display: flex;
 		align-items: center;
-		justify-content: flex-end;
+		justify-content: center;
+		z-index: 200;
+	}
+
+	.modal-atomic {
+		width: 90vw;
+		height: 85vh;
+		background: #0f172a;
+		border: 1px solid #334155;
+		border-radius: 8px;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.modal-atomic-toolbar {
+		display: flex;
+		align-items: center;
 		gap: 8px;
+		padding: 8px 12px;
+		border-bottom: 1px solid #1e293b;
 		flex-shrink: 0;
 	}
 
-	.new-study-wrap {
-		display: flex;
-		gap: 6px;
-	}
-
-	.studies-empty {
+	.modal-atomic-title {
 		font-size: 12px;
-		color: #475569;
-		padding: 24px 0;
-		text-align: center;
-	}
-
-	/* ── studies table ── */
-	.studies-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 12px;
-	}
-
-	.studies-table thead th {
-		text-align: left;
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		color: #475569;
-		padding: 4px 10px;
-		border-bottom: 1px solid #1e293b;
-		font-weight: 500;
-	}
-
-	.study-row {
-		cursor: pointer;
-		border-bottom: 1px solid #1e293b;
-		transition: background 0.1s;
-	}
-	.study-row:hover { background: #1e293b; }
-	.study-row.selected-row { background: #1a2744; }
-
-	.study-row td {
-		padding: 7px 10px;
-		color: #94a3b8;
-		vertical-align: middle;
-	}
-
-	.col-label {
-		color: #e2e8f0 !important;
 		font-weight: 600;
-		max-width: 160px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		color: #94a3b8;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
-
-	.col-date {
-		font-family: monospace;
-		font-size: 11px !important;
-		color: #64748b !important;
-		white-space: nowrap;
-	}
-
-	.col-status { width: 52px; }
-	.col-actions { width: 36px; text-align: right; }
-
-	.stale-badge {
-		font-size: 10px;
-		color: #f59e0b;
-	}
-
-	.done-badge {
-		font-size: 11px;
-		color: #4ade80;
-	}
-
-	/* ── disabled tab ── */
-	.sim-tab.disabled {
-		opacity: 0.35;
-		cursor: default;
-	}
-	.sim-tab.disabled:hover { color: #64748b; }
 
 	/* ── home views ── */
 	.home {

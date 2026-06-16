@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import SignalPicker from '$lib/SignalPicker.svelte';
 
-  let { house, onchange, customMaterials = {}, atomicModel = null, dirty = false, saveLoading = false, saveError = null, onsave = null, ondelete = null } = $props();
+  let { house, onchange, customMaterials = {}, atomicModel = null, dirty = false, saveLoading = false, saveError = null, onsave = null, ondelete = null, selectedId = null, onselect = () => {} } = $props();
 
   let addMenuOpen = $state(false);
 
@@ -178,6 +178,7 @@
 
   function toggleExpand(id) {
     expandedId = expandedId === id ? null : id;
+    onselect(id);
   }
 
   // ── add helpers: create skeleton + expand immediately ─────────────────────
@@ -334,7 +335,7 @@
 
       {@const sigs = signalIcons(item)}
 
-      <div class="row" class:expanded>
+      <div class="row" class:expanded class:selected-row={item.id === selectedId}>
 
         <!-- ── row header (grid row) ── -->
         <div class="row-header" role="button" tabindex="0"
@@ -883,6 +884,7 @@
     overflow: hidden;
   }
   .row.expanded { border-color: #6366f1; }
+  .row.selected-row { border-color: #3b82f6; background: #15233d; }
 
   .row-header {
     padding: 5px 6px;
