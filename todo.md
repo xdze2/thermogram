@@ -193,7 +193,7 @@ Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/
 - [x] Signal picker rows for GHI / direct / diffuse in DataSources panel
 - [x] `DataPreview.svelte` — raw irradiance as dotted lines; per-orientation `G_*` keys auto-detected from `input_data` and plotted as filled area traces with distinct colors
 - [x] Fix `lifecycle_outside_component` crash: move store subscriptions out of async `onMount`, guard with `_loaded` flag
-- [ ] City search modal — `api-adresse.data.gouv.fr` (France open data, no key) autocomplete → fills lat/lon in room form
+- [x] City search modal — `api-adresse.data.gouv.fr` (France open data, no key) autocomplete → fills lat/lon in room form
 - [ ] Show per-orientation α in fit results table
 
 ---
