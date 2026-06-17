@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -78,42 +78,6 @@ def get_signals() -> list[str]:
         return list_signals()
     except Exception:
         return []
-
-
-# ---------------------------------------------------------------------------
-# Data fetch endpoint
-# ---------------------------------------------------------------------------
-
-@app.get("/api/data")
-def get_data(
-    signals: list[str] = Query(default=[]),
-    start: str = Query(...),
-    end: str = Query(...),
-) -> dict[str, list[list]]:
-    """Fetch time-series for selected signals. Returns {signal: [[iso_ts, value], ...]}."""
-    if not _HAS_INFLUX or not signals:
-        return {}
-    result: dict[str, list[list]] = {}
-    for sig in signals:
-        try:
-            s = fetch_series(sig, start, end)
-            pairs = [
-                [ts.isoformat(), None if (v != v) else float(v)]
-                for ts, v in s.items()
-            ]
-            result[sig] = pairs
-        except Exception:
-            result[sig] = []
-    return result
-
-
-# ---------------------------------------------------------------------------
-# RC model prior endpoint (kept for backwards compat)
-# ---------------------------------------------------------------------------
-
-@app.post("/api/room/rc_model", response_model=RCModelOut)
-def post_rc_model(room: Room) -> RCModelOut:
-    return build_priors(room)
 
 
 # ---------------------------------------------------------------------------

@@ -101,9 +101,9 @@ export const dataSources = writable({ T_int: null, T_ext: null, Q_sol: null });
 // --- Time range ---
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function addDays(iso, n) {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = iso.split('-').map(Number);
+  const date = new Date(y, m - 1, d + n);
+  return date.toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
 }
 const today = todayISO();
 export const rangeStart = writable(addDays(today, -7));

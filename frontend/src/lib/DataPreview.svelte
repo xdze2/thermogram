@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { dataSources, DATA_SOURCE_DEFS, rangeStart, rangeEnd, theme } from './store.js';
 
+  export let studyId;
+
   let chartDiv;
   let status = '';
   let Plotly = null;
@@ -56,12 +58,10 @@
     }
 
     status = 'loading…';
-    const params = new URLSearchParams({ start: `${start}T00:00:00Z`, end: `${end}T23:59:59Z` });
-    selected.forEach(d => params.append('signals', d.signal));
 
     let data;
     try {
-      const r = await fetch(`/api/data?${params}`);
+      const r = await fetch(`/api/studies/${studyId}/data`);
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       data = await r.json();
     } catch (e) {
@@ -111,18 +111,25 @@
       margin: { t: 8, r: 10, b: 36, l: 45 },
       legend: { font: { size: 10, color: textCol }, bgcolor: 'transparent', orientation: 'h', y: -0.12 },
       font: { family: 'ui-monospace, monospace', color: textCol },
-      grid: hasSol ? { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom', rowheights: rowHeights } : undefined,
       xaxis:  { type: 'date', color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, showticklabels: !hasSol },
       yaxis:  { color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, zeroline: false, title: { text: '°C', font: { size: 9 } } },
-      xaxis2: hasSol ? { type: 'date', color: textCol, gridcolor: gridCol, tickfont: { size: 9 } } : undefined,
-      yaxis2: hasSol ? { color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, zeroline: true, zerolinecolor: gridCol, title: { text: 'W/m²', font: { size: 9 } } } : undefined,
+      ...(hasSol && {
+        grid:   { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom', rowheights: rowHeights },
+        xaxis2: { type: 'date', color: textCol, gridcolor: gridCol, tickfont: { size: 9 } },
+        yaxis2: { color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, zeroline: true, zerolinecolor: gridCol, title: { text: 'W/m²', font: { size: 9 } } },
+      }),
     };
+
+    const totalPts = Object.values(data).reduce((n, pairs) => n + pairs.length, 0);
+    if (!totalPts) {
+      status = 'no data in range';
+      Plotly.purge(chartDiv);
+      return;
+    }
 
     chartDiv.style.height = hasSol ? '340px' : '220px';
     Plotly.react(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
-
-    const totalPts = Object.values(data).reduce((n, pairs) => n + pairs.length, 0);
-    status = totalPts ? `${totalPts} points` : 'no data in range';
+    status = `${totalPts} points`;
   }
 </script>
 

@@ -292,6 +292,6 @@
 
     <div class="divider my-4"></div>
 
-    <DataPreview bind:this={previewComp} />
+    <DataPreview bind:this={previewComp} {studyId} />
   </div>
 </div>

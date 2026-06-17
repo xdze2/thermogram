@@ -58,37 +58,47 @@ def test_materials_schema():
     assert {"key", "name", "lambda_W_mK", "rho_kg_m3", "cp_J_kgK", "is_heavy"} <= first.keys()
 
 
-def test_rc_model_brick_room_h_env_range():
-    r = client.post("/api/room/rc_model", json=BRICK_ROOM)
+@pytest.fixture
+def study():
+    r = client.post("/api/studies", json={"name": "rc test"})
+    assert r.status_code == 201
+    s = r.json()
+    yield s
+    client.delete(f"/api/studies/{s['id']}")
+
+
+def _patch_room(sid, room):
+    return client.patch(f"/api/studies/{sid}/room", json={"room": room})
+
+
+def test_rc_model_brick_room_h_env_range(study):
+    r = _patch_room(study["id"], BRICK_ROOM)
     assert r.status_code == 200
-    body = r.json()
-    h_env = body["H_env"]
+    h_env = r.json()["H_env"]
     # Brick 0.20m + 0.10m mineral wool: U ≈ 0.3 W/m²K, area 12m² → ~3.6 W/K
     assert 1.0 < h_env["mu"] < 10.0
     assert h_env["sigma"] > 0
     assert len(h_env["contributions"]) == 1
 
 
-def test_rc_model_deterministic():
-    r1 = client.post("/api/room/rc_model", json=BRICK_ROOM)
-    r2 = client.post("/api/room/rc_model", json=BRICK_ROOM)
+def test_rc_model_deterministic(study):
+    r1 = _patch_room(study["id"], BRICK_ROOM)
+    r2 = _patch_room(study["id"], BRICK_ROOM)
     assert r1.json() == r2.json()
 
 
-def test_rc_model_all_parameters_present():
-    r = client.post("/api/room/rc_model", json=BRICK_ROOM)
-    body = r.json()
-    assert {"H_env", "H_ve", "C_wall", "C_room", "alpha_eff"} == body.keys()
+def test_rc_model_all_parameters_present(study):
+    r = _patch_room(study["id"], BRICK_ROOM)
+    assert {"H_env", "H_ve", "C_wall", "C_room", "alpha_eff"} == r.json().keys()
 
 
-def test_rc_model_c_wall_has_brick_contribution():
-    r = client.post("/api/room/rc_model", json=BRICK_ROOM)
-    c_wall = r.json()["C_wall"]
+def test_rc_model_c_wall_has_brick_contribution(study):
+    c_wall = _patch_room(study["id"], BRICK_ROOM).json()["C_wall"]
     assert c_wall["mu"] > 0
     assert any("South wall" in c["label"] for c in c_wall["contributions"])
 
 
-def test_rc_model_missing_layers_returns_422():
+def test_rc_model_missing_layers_returns_422(study):
     bad = {**BRICK_ROOM, "elements": [
         {
             "name": "South wall",
@@ -98,11 +108,11 @@ def test_rc_model_missing_layers_returns_422():
             "layers": [],
         }
     ]}
-    r = client.post("/api/room/rc_model", json=bad)
+    r = _patch_room(study["id"], bad)
     assert r.status_code == 422
 
 
-def test_rc_model_window_with_u_override():
+def test_rc_model_window_with_u_override(study):
     room = {**BRICK_ROOM, "elements": [
         {
             "name": "South window",
@@ -112,7 +122,7 @@ def test_rc_model_window_with_u_override():
             "u_value_override": 1.4,
         }
     ]}
-    r = client.post("/api/room/rc_model", json=room)
+    r = _patch_room(study["id"], room)
     assert r.status_code == 200
     h_env = r.json()["H_env"]
     assert abs(h_env["mu"] - 1.4 * 2.0) < 0.01

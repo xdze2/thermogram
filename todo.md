@@ -50,6 +50,8 @@ No static U-value path. No forward simulation endpoint.
 - [x] `GET /api/data?signals=…&start=…&end=…` — fetch selected signals, return `{signal: [[t, v], ...]}`
 - [x] Input data preview panel (right column, below RC diagram) - two Plotly subplots: temperatures (T_int, T_ext) on top; Q_sol area-filled below - auto-fetches on date range or signal selection change (debounced)
 - [x] Full UI state persisted in localStorage (room fields, elements, signals, date range)
+- [x] Fix Plotly crash when API returns empty data (purge chart instead of calling react with zero traces)
+- [x] Fix `+7d` / `+30d` / `+90d` date arithmetic (was off by one day in timezones behind UTC)
 
 ---
 
@@ -64,43 +66,47 @@ Replace vanilla JS frontend with a Svelte + Vite app. FastAPI serves `frontend/d
 
 ---
 
-## Phase 1.7 — Studies manager
+## Phase 1.7 — Studies manager ← done
 
 Backend and frontend for managing multiple studies (room + data spec + results bundles).
 
 ### Backend
 
-- [ ] `thermal/study.py` — `Study` Pydantic model: `id`, `name`, `created_at`, `updated_at`, `room`, `data_spec` (`{signals, start, end}`), `rc_prior`, `fit_result`
-- [ ] `thermal/study_store.py` — CRUD over `user_data/{id}.json`: list, load, save, delete, duplicate
-- [ ] New endpoints:
+- [x] `thermal/study.py` — `Study` Pydantic model: `id`, `name`, `created_at`, `updated_at`, `room`, `data_spec` (`{signals, start, end}`), `rc_prior`, `fit_result`
+- [x] `thermal/study_store.py` — CRUD over `user_data/{id}.json`: list, load, save, delete, duplicate
+- [x] New endpoints:
       `GET    /api/studies`              → list stubs (id, name, updated_at)
       `POST   /api/studies`              → create new study, return full Study
       `GET    /api/studies/{id}`         → full Study JSON
       `DELETE /api/studies/{id}`
       `PATCH  /api/studies/{id}/room`    → RoomIn → updates rc_prior in-place, returns RCModelOut
-      `PATCH  /api/studies/{id}/data_spec` → {signals, start, end} → fetches + caches data, returns preview
-      `GET    /api/studies/{id}/data`    → cached series (fetched on data_spec update)
-- [ ] Drop old flat endpoints (`/api/room/rc_model`, `/api/data`) once frontend is migrated
+      `PATCH  /api/studies/{id}/name`    → rename study
+      `POST   /api/studies/{id}/duplicate`
+- [x] Drop old flat endpoints (`/api/room/rc_model`, `/api/data`); migrate `DataPreview` to `/api/studies/{id}/data`
 
 ### Frontend (Svelte)
 
-- [ ] `/` route — Studies list page: table of studies (name, updated_at), create, open, duplicate, delete, rename inline
-- [ ] `/study/:id` route — Study editor (current UI, hydrated from `GET /api/studies/{id}`)
+- [x] `/` route — Studies list page: table of studies (name, updated_at), create, open, duplicate, delete, rename inline
+- [x] `/study/:id` route — Study editor (current UI, hydrated from `GET /api/studies/{id}`)
       Replace localStorage persistence with implicit auto-PATCH on every field change
-- [ ] Study name editable inline in the editor header; breadcrumb back to studies list
+- [x] Study name editable inline in the editor header; breadcrumb back to studies list
 
 ---
 
 ## Phase 2 — Bayesian identification
 
-What about using:
-from scipy.signal import cont2discrete, dlsim
-from scipy.interpolate import interp1d
+### Backend
 
-- [ ] `thermal/state_space.py` - build A, B matrices for 2R2C system from theta - discrete-time ZOH transition (matrix exponential) - Kalman filter likelihood p(T_obs | theta, weather)
-- [ ] `POST /api/room/fit` - input: RoomIn + CSV/JSON of observed T° (hourly) + weather year - uses scipy.optimize (MAP) or emcee (full posterior) - returns RCModelOut with posterior mu/sigma replacing prior - contributions log becomes: "prior: 13.4, posterior: 11.2 (pulled by data)"
-- [ ] Frontend: prior vs posterior overlay plot per parameter (Plotly.js)
-- [ ] Frontend: upload T° log (CSV drag-and-drop)
+- [ ] `thermal/state_space.py` — build A, B matrices for 2R2C system from theta; discrete-time ZOH transition (matrix exponential); Kalman filter likelihood p(T_obs | theta, weather)
+- [ ] `thermal/fit.py` — MAP or full posterior via scipy.optimize / emcee; returns `FitResult` with posterior mu/sigma per parameter
+- [ ] `POST /api/studies/{id}/fit` — triggers fit using study's `rc_prior` + live data from `data_spec`; stores result in `study.fit_result`; returns updated `RCModelOut` with posterior
+- [ ] `GET  /api/studies/{id}/fit` — return cached `fit_result` (or 404 if not yet run)
+
+### Frontend
+
+- [ ] Fit trigger button in study editor; show spinner while running
+- [ ] Prior vs posterior overlay in `PriorBlock.svelte` — show both mu±sigma when `fit_result` is present
+- [ ] Contributions log annotation: "prior: 13.4 → posterior: 11.2 (pulled by data)"
 
 ---
 
