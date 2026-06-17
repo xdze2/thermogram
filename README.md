@@ -1,4 +1,4 @@
-# Thermal Room Estimator
+# Thermal nodes
 
 A small engineering app for identifying the thermal parameters of a room from sensor data, using a 2R2C RC model and Bayesian inference.
 
@@ -10,8 +10,8 @@ The user describes a room **element by element** — walls, windows, roof, floor
 
 1. **Describe** the room: envelope elements, ACH, location.
 2. **Inspect** the prior: H_env, H_ve, C_wall, C_room, α_eff with per-element breakdown and uncertainty.
-3. **Upload** an observed indoor temperature log (hourly CSV).
-4. **Fit**: Bayesian update yields a posterior — the data pulls the parameters away from the physics-based prior.
+3. **Upload** an observed indoor temperature log (hourly CSV). _(Phase 2)_
+4. **Fit**: Bayesian update yields a posterior. _(Phase 2)_
 
 ## RC model
 
@@ -26,13 +26,13 @@ T_sa(t) ──R_ext──[C_wall]──R_int──[C_room]
 
 Five parameters with Gaussian priors:
 
-| Symbol    | Meaning                        | Unit  |
-|-----------|-------------------------------|-------|
-| H_env     | Envelope conduction loss       | W/K   |
-| H_ve      | Ventilation heat loss          | W/K   |
-| C_wall    | Envelope thermal mass          | MJ/K  |
-| C_room    | Interior thermal mass          | MJ/K  |
-| α_eff     | Effective outer absorptivity   | —     |
+| Symbol | Meaning                      | Unit |
+|--------|------------------------------|------|
+| H_env  | Envelope conduction loss     | W/K  |
+| H_ve   | Ventilation heat loss        | W/K  |
+| C_wall | Envelope thermal mass        | MJ/K |
+| C_room | Interior thermal mass        | MJ/K |
+| α_eff  | Effective outer absorptivity | —    |
 
 ## Physics references
 
@@ -51,14 +51,17 @@ Five parameters with Gaussian priors:
 ```
 thermal/
   materials_db.py   # 30+ materials with λ, ρ, cp
-  models.py         # Room, EnvelopeElement, MaterialLayer dataclasses
+  api_models.py     # Pydantic v2 models (Room, EnvelopeElement, MaterialLayer, *Out)
   priors.py         # build_priors(room) → Gaussian priors on RC parameters
-  iso6946.py        # U-value, surface resistances (used only by priors.py)
+  iso6946.py        # U-value, surface resistances
   solar.py          # Solar geometry and surface irradiance
   weather.py        # Open-Meteo fetch and cache
-  state_space.py    # 2R2C A/B matrices, ZOH, Kalman likelihood
-api.py              # FastAPI app
-frontend/           # HTML + vanilla JS + Plotly.js
+api.py              # FastAPI app (GET /api/schema, /api/materials, POST /api/room/rc_model)
+frontend/
+  index.html        # Two-column shell (DaisyUI night theme)
+  app.js            # Room editor + prior display; all dropdowns data-driven from API
+tests/
+  test_api.py       # pytest + httpx round-trip tests
 ```
 
 ## Running
@@ -66,8 +69,20 @@ frontend/           # HTML + vanilla JS + Plotly.js
 Requires [uv](https://github.com/astral-sh/uv).
 
 ```bash
-uv run fastapi dev api.py
+uv run uvicorn api:app --reload
 ```
+
+Then open `http://localhost:8000`.
+
+## API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/schema` | Element types and orientations (enum values for dropdowns) |
+| GET | `/api/materials` | All materials with λ, ρ, cp, is_heavy |
+| POST | `/api/room/rc_model` | `Room` → `RCModelOut` (five parameter priors) |
+
+Interactive docs at `http://localhost:8000/docs`.
 
 ## Scope and limitations
 
