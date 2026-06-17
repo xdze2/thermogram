@@ -14,6 +14,12 @@ from thermal.api_models import (
 from thermal.materials_db import MATERIALS
 from thermal.priors import build_priors
 
+try:
+    from thermal.data_src.influx import list_signals
+    _HAS_INFLUX = True
+except Exception:
+    _HAS_INFLUX = False
+
 app = FastAPI(title="Thermal nodes API", version="0.1.0")
 
 
@@ -47,6 +53,21 @@ def get_materials() -> list[MaterialOut]:
         )
         for key, spec in MATERIALS.items()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Signals endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/signals")
+def get_signals() -> list[str]:
+    """Return available InfluxDB signal names. Empty list if unreachable."""
+    if not _HAS_INFLUX:
+        return []
+    try:
+        return list_signals()
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 // State fetched from API on load
 let MATERIALS = [];   // [{key, name, lambda_W_mK, rho_kg_m3, cp_J_kgK, is_heavy}]
 let SCHEMA = {};      // {element_types: [...], orientations: [...]}
+let ALL_SIGNALS = []; // string[] from /api/signals
 
 // In-memory room elements
 let elements = [];
@@ -21,12 +22,14 @@ async function init() {
       if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
       return r.json();
     };
-    const [schema, materials] = await Promise.all([
+    const [schema, materials, signals] = await Promise.all([
       fetchJson("/api/schema"),
       fetchJson("/api/materials"),
+      fetchJson("/api/signals").catch(() => []),
     ]);
     SCHEMA = schema;
     MATERIALS = materials;
+    ALL_SIGNALS = signals;
   } catch (e) {
     setStatus(`Failed to load: ${e.message}`, true);
     return;
@@ -34,6 +37,7 @@ async function init() {
 
   addElement();
   bindRoomFields();
+  initDataSources();
   compute();
 }
 
@@ -395,6 +399,97 @@ function fmt(v) {
   if (Math.abs(v) >= 100) return v.toFixed(1);
   if (Math.abs(v) >= 10)  return v.toFixed(2);
   return v.toFixed(3);
+}
+
+// ---------------------------------------------------------------------------
+// Data sources
+// ---------------------------------------------------------------------------
+
+const DATA_SOURCE_DEFS = [
+  { key: "T_int", label: "T_int", hint: "indoor temperature" },
+  { key: "T_ext", label: "T_ext", hint: "outdoor temperature" },
+  { key: "Q_sol", label: "Q_sol", hint: "solar irradiance" },
+];
+
+// selected signal per key, null = not set
+const dataSources = Object.fromEntries(DATA_SOURCE_DEFS.map(d => [d.key, null]));
+
+let _pickerTarget = null; // key being picked
+
+function initDataSources() {
+  renderDataSources();
+  initSignalModal();
+}
+
+function renderDataSources() {
+  const list = document.getElementById("data-sources-list");
+  list.innerHTML = "";
+  DATA_SOURCE_DEFS.forEach(def => {
+    const selected = dataSources[def.key];
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-2 text-xs";
+    row.innerHTML = `
+      <span class="text-base-content/50 w-12 shrink-0 font-mono">${escAttr(def.label)}</span>
+      <span class="flex-1 truncate text-base-content/40 italic" title="${escAttr(selected ?? "")}"
+            data-ds-value="${escAttr(def.key)}">${selected ? escAttr(selected) : `<span class="text-base-content/20">${escAttr(def.hint)}</span>`}</span>
+      <button class="btn btn-xs btn-ghost px-1" data-ds-pick="${escAttr(def.key)}">pick</button>
+    `;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll("[data-ds-pick]").forEach(btn => {
+    btn.addEventListener("click", () => openSignalPicker(btn.dataset.dsPick));
+  });
+}
+
+function initSignalModal() {
+  const modal = document.getElementById("signal-modal");
+  const search = document.getElementById("signal-search");
+
+  search.addEventListener("input", () => renderSignalList(search.value.trim()));
+
+  document.getElementById("signal-modal-clear").addEventListener("click", () => {
+    if (_pickerTarget) {
+      dataSources[_pickerTarget] = null;
+      renderDataSources();
+    }
+    modal.close();
+  });
+}
+
+function openSignalPicker(key) {
+  _pickerTarget = key;
+  const def = DATA_SOURCE_DEFS.find(d => d.key === key);
+  document.getElementById("signal-modal-title").textContent = `Pick signal for ${def.label} — ${def.hint}`;
+  document.getElementById("signal-search").value = "";
+  renderSignalList("");
+  document.getElementById("signal-modal").showModal();
+}
+
+function renderSignalList(filter) {
+  const container = document.getElementById("signal-list");
+  container.innerHTML = "";
+
+  const lc = filter.toLowerCase();
+  const shown = ALL_SIGNALS.filter(s => !lc || s.toLowerCase().includes(lc));
+
+  if (!shown.length) {
+    container.innerHTML = `<p class="text-xs text-base-content/30 p-2">${ALL_SIGNALS.length ? "no match" : "no signals available (InfluxDB unreachable?)"}</p>`;
+    return;
+  }
+
+  shown.forEach(sig => {
+    const btn = document.createElement("button");
+    btn.className = "btn btn-xs btn-ghost justify-start font-mono text-left" +
+      (dataSources[_pickerTarget] === sig ? " btn-active" : "");
+    btn.textContent = sig;
+    btn.addEventListener("click", () => {
+      dataSources[_pickerTarget] = sig;
+      renderDataSources();
+      document.getElementById("signal-modal").close();
+    });
+    container.appendChild(btn);
+  });
 }
 
 // ---------------------------------------------------------------------------

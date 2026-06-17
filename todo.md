@@ -53,6 +53,28 @@ No static U-value path. No forward simulation endpoint.
 
 ---
 
+## Phase 1.5 — Input data specification
+
+### Signal selection  ← done
+- [x] `thermal/data_src/influx.py` — InfluxDB wrapper: `list_signals()`, `fetch_series()`
+- [x] `GET /api/signals` — returns all queryable signal names; empty list if unreachable
+- [x] Data sources block in left panel — T_int, T_ext, Q_sol each with a modal signal picker
+      - searchable list populated from `/api/signals`
+      - selected signal shown inline; "clear" to deselect
+
+### Time range + data preview  ← next
+- [ ] Date range selector in frontend (below data sources block)
+      - start / end date inputs (ISO, whole-day granularity)
+      - `+ N days` helper button to extend end date
+- [ ] `GET /api/data?signals=…&start=…&end=…` — fetch selected signals, return JSON timeseries
+      - calls `fetch_series()` per signal, aligns to common index, returns `{signal: [[t, v], ...]}`
+- [ ] Input data preview panel (right column, below RC diagram)
+      - Plotly.js time-series chart — one trace per selected + assigned signal
+      - auto-fetches when date range or signal selection changes (debounced)
+      - shows gap / NaN regions visually
+
+---
+
 ## Phase 2 — Bayesian identification
 
 - [ ] `thermal/state_space.py`

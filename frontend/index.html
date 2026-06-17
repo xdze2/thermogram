@@ -120,6 +120,14 @@
 
       <div class="divider my-0"></div>
 
+      <!-- Data sources -->
+      <div>
+        <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">Data sources</p>
+        <div id="data-sources-list" class="flex flex-col gap-1"></div>
+      </div>
+
+      <div class="divider my-0"></div>
+
       <!-- Envelope elements -->
       <div class="flex flex-col gap-2">
         <p class="text-xs uppercase tracking-widest text-base-content/30">Envelope elements</p>
@@ -158,6 +166,22 @@ graph LR
     </div>
 
   </div>
+
+  <!-- Signal picker modal -->
+  <dialog id="signal-modal" class="modal">
+    <div class="modal-box w-11/12 max-w-xl flex flex-col gap-3" style="max-height:80vh">
+      <h3 class="font-semibold text-sm" id="signal-modal-title">Pick a signal</h3>
+      <input id="signal-search" type="text" placeholder="filter…"
+             class="input input-sm input-bordered w-full" />
+      <div id="signal-list" class="flex flex-col gap-0.5 overflow-y-auto flex-1 min-h-0"
+           style="max-height:55vh"></div>
+      <div class="modal-action mt-0">
+        <button id="signal-modal-clear" class="btn btn-xs btn-ghost text-error">clear</button>
+        <form method="dialog"><button class="btn btn-xs">cancel</button></form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
 
   <script src="app.js"></script>
 </body>
