@@ -365,7 +365,8 @@
               <th class="pr-4 pb-1 font-normal">param</th>
               <th class="pr-4 pb-1 font-normal">unit</th>
               <th class="pr-4 pb-1 font-normal">prior μ ± σ</th>
-              <th class="pb-1 font-normal">posterior</th>
+              <th class="pr-4 pb-1 font-normal">posterior</th>
+              <th class="pb-1 font-normal text-right">shift (σ)</th>
             </tr>
           </thead>
           <tbody>
@@ -374,6 +375,13 @@
               {@const unit  = PARAM_UNITS[k]}
               {@const prior = $rcResult?.[k]}
               {@const post  = fitResult[k]}
+              {@const shift = (prior && typeof post === 'number' && prior.sigma > 0)
+                ? (post - prior.mu) / prior.sigma
+                : null}
+              {@const shiftColor = shift === null ? ''
+                : Math.abs(shift) < 1 ? 'text-base-content/40'
+                : Math.abs(shift) < 2 ? 'text-warning'
+                : 'text-error'}
               <tr class="border-t border-base-300/40">
                 <td class="pr-4 py-0.5 text-base-content/50">{k}</td>
                 <td class="pr-4 py-0.5 text-base-content/30">{unit}</td>
@@ -382,8 +390,11 @@
                     {(prior.mu * scale).toPrecision(3)} ± {(prior.sigma * scale).toPrecision(2)}
                   {:else}—{/if}
                 </td>
-                <td class="py-0.5 text-base-content/70 font-semibold">
+                <td class="pr-4 py-0.5 text-base-content/70 font-semibold">
                   {typeof post === 'number' ? (post * scale).toPrecision(4) : '—'}
+                </td>
+                <td class="py-0.5 text-right {shiftColor}">
+                  {shift !== null ? (shift > 0 ? '+' : '') + shift.toFixed(2) : '—'}
                 </td>
               </tr>
             {/each}
@@ -393,9 +404,10 @@
                   <td class="pr-4 py-0.5 text-base-content/40 pl-3">α_{orient}</td>
                   <td class="pr-4 py-0.5 text-base-content/30">—</td>
                   <td class="pr-4 py-0.5 text-base-content/30">—</td>
-                  <td class="py-0.5 text-base-content/60 font-semibold">
+                  <td class="pr-4 py-0.5 text-base-content/60 font-semibold">
                     {typeof alpha === 'number' ? alpha.toPrecision(3) : '—'}
                   </td>
+                  <td></td>
                 </tr>
               {/each}
             {/if}
@@ -404,18 +416,21 @@
                 <td class="pr-4 py-0.5 text-base-content/50">{label}</td>
                 <td class="pr-4 py-0.5 text-base-content/30">°C</td>
                 <td class="pr-4 py-0.5 text-base-content/40">—</td>
-                <td class="py-0.5 text-base-content/70 font-semibold">
+                <td class="pr-4 py-0.5 text-base-content/70 font-semibold">
                   {typeof fitResult[key] === 'number' ? fitResult[key].toFixed(2) : '—'}
                 </td>
+                <td></td>
               </tr>
             {/each}
             <tr class="border-t border-base-300/40">
               <td class="pr-4 py-0.5 text-base-content/30" colspan="3">RMSE</td>
               <td class="py-0.5 text-base-content/70">{fitResult.residual_rmse?.toFixed(3)} °C</td>
+              <td></td>
             </tr>
             <tr>
               <td class="pr-4 py-0.5 text-base-content/30" colspan="3">n obs</td>
               <td class="py-0.5 text-base-content/70">{fitResult.n_obs}</td>
+              <td></td>
             </tr>
           </tbody>
         </table>
