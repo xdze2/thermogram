@@ -62,16 +62,14 @@ No static U-value path. No forward simulation endpoint.
       - searchable list populated from `/api/signals`
       - selected signal shown inline; "clear" to deselect
 
-### Time range + data preview  ← next
-- [ ] Date range selector in frontend (below data sources block)
-      - start / end date inputs (ISO, whole-day granularity)
-      - `+ N days` helper button to extend end date
-- [ ] `GET /api/data?signals=…&start=…&end=…` — fetch selected signals, return JSON timeseries
-      - calls `fetch_series()` per signal, aligns to common index, returns `{signal: [[t, v], ...]}`
-- [ ] Input data preview panel (right column, below RC diagram)
-      - Plotly.js time-series chart — one trace per selected + assigned signal
-      - auto-fetches when date range or signal selection changes (debounced)
-      - shows gap / NaN regions visually
+### Time range + data preview  ← done
+- [x] Date range selector in frontend (below data sources block)
+      - start / end ISO date inputs (YYYY-MM-DD), `+7d` / `+30d` / `+90d` helper buttons
+- [x] `GET /api/data?signals=…&start=…&end=…` — fetch selected signals, return `{signal: [[t, v], ...]}`
+- [x] Input data preview panel (right column, below RC diagram)
+      - two Plotly subplots: temperatures (T_int, T_ext) on top; Q_sol area-filled below
+      - auto-fetches on date range or signal selection change (debounced)
+- [x] Full UI state persisted in localStorage (room fields, elements, signals, date range)
 
 ---
 

@@ -70,6 +70,7 @@
         localStorage.setItem('theme', theme);
         themeMenu.classList.add('hidden');
         rerenderMermaid(theme);
+        if (window.fetchDataPreview) fetchDataPreview();
       });
     });
     const saved = localStorage.getItem('theme');
@@ -126,6 +127,26 @@
         <div id="data-sources-list" class="flex flex-col gap-1"></div>
       </div>
 
+      <!-- Time range -->
+      <div>
+        <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">Time range</p>
+        <div class="flex flex-col gap-1">
+          <label class="flex items-center gap-2">
+            <span class="text-xs text-base-content/50 w-10 shrink-0">Start</span>
+            <input id="range-start" type="text" placeholder="YYYY-MM-DD" class="input input-xs input-bordered flex-1 font-mono" />
+          </label>
+          <label class="flex items-center gap-2">
+            <span class="text-xs text-base-content/50 w-10 shrink-0">End</span>
+            <input id="range-end" type="text" placeholder="YYYY-MM-DD" class="input input-xs input-bordered flex-1 font-mono" />
+          </label>
+          <div class="flex gap-1 mt-0.5">
+            <button class="btn btn-xs btn-ghost" data-extend-days="7">+7 d</button>
+            <button class="btn btn-xs btn-ghost" data-extend-days="30">+30 d</button>
+            <button class="btn btn-xs btn-ghost" data-extend-days="90">+90 d</button>
+          </div>
+        </div>
+      </div>
+
       <div class="divider my-0"></div>
 
       <!-- Envelope elements -->
@@ -163,6 +184,13 @@ graph LR
       <p class="text-xs uppercase tracking-widest text-base-content/30 mb-3">RC model priors</p>
       <div id="status" class="text-xs text-base-content/30 mb-2"></div>
       <div id="priors-content" class="flex flex-col gap-5"></div>
+
+      <div class="divider my-4"></div>
+
+      <!-- Data preview -->
+      <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">Data preview</p>
+      <div id="data-preview-status" class="text-xs text-base-content/30 mb-1"></div>
+      <div id="data-preview-chart" style="height:220px;width:100%"></div>
     </div>
 
   </div>
@@ -183,6 +211,7 @@ graph LR
     <form method="dialog" class="modal-backdrop"><button>close</button></form>
   </dialog>
 
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

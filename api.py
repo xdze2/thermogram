@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -15,7 +15,7 @@ from thermal.materials_db import MATERIALS
 from thermal.priors import build_priors
 
 try:
-    from thermal.data_src.influx import list_signals
+    from thermal.data_src.influx import list_signals, fetch_series
     _HAS_INFLUX = True
 except Exception:
     _HAS_INFLUX = False
@@ -68,6 +68,33 @@ def get_signals() -> list[str]:
         return list_signals()
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Data fetch endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/data")
+def get_data(
+    signals: list[str] = Query(default=[]),
+    start: str = Query(...),
+    end: str = Query(...),
+) -> dict[str, list[list]]:
+    """Fetch time-series for selected signals. Returns {signal: [[iso_ts, value], ...]}."""
+    if not _HAS_INFLUX or not signals:
+        return {}
+    result: dict[str, list[list]] = {}
+    for sig in signals:
+        try:
+            s = fetch_series(sig, start, end)
+            pairs = [
+                [ts.isoformat(), None if (v != v) else float(v)]
+                for ts, v in s.items()
+            ]
+            result[sig] = pairs
+        except Exception:
+            result[sig] = []
+    return result
 
 
 # ---------------------------------------------------------------------------

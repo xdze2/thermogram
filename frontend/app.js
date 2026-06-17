@@ -7,6 +7,35 @@ let ALL_SIGNALS = []; // string[] from /api/signals
 let elements = [];
 let elementIdSeq = 0;
 
+// ---------------------------------------------------------------------------
+// Persistence (localStorage)
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEY = "thnodes_state";
+
+function saveState() {
+  if (!document.getElementById("range-start")) return; // not yet mounted
+  const roomFields = {};
+  ["room-name", "room-floor", "room-height", "room-ach", "room-lat", "room-lon"]
+    .forEach(id => { roomFields[id] = document.getElementById(id).value; });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    roomFields,
+    elements,
+    elementIdSeq,
+    dataSources,
+    rangeStart: document.getElementById("range-start")?.value ?? "",
+    rangeEnd:   document.getElementById("range-end")?.value ?? "",
+  }));
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
 function escAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -35,10 +64,32 @@ async function init() {
     return;
   }
 
-  addElement();
+  const saved = loadState();
+  if (saved) {
+    // restore room fields
+    Object.entries(saved.roomFields ?? {}).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    });
+    // restore elements
+    if (saved.elements?.length) {
+      elements = saved.elements;
+      elementIdSeq = saved.elementIdSeq ?? saved.elements.length;
+    } else {
+      addElement();
+    }
+    // restore signal selections
+    Object.assign(dataSources, saved.dataSources ?? {});
+  } else {
+    addElement();
+  }
+
+  renderElements();
   bindRoomFields();
   initDataSources();
+  initTimeRange(saved);
   compute();
+  fetchDataPreview();
 }
 
 function bindRoomFields() {
@@ -270,6 +321,7 @@ function buildRoom() {
 
 let _debounce = null;
 function compute() {
+  saveState();
   clearTimeout(_debounce);
   _debounce = setTimeout(_compute, 180);
 }
@@ -452,6 +504,7 @@ function initSignalModal() {
     if (_pickerTarget) {
       dataSources[_pickerTarget] = null;
       renderDataSources();
+      fetchDataPreview();
     }
     modal.close();
   });
@@ -486,10 +539,167 @@ function renderSignalList(filter) {
     btn.addEventListener("click", () => {
       dataSources[_pickerTarget] = sig;
       renderDataSources();
+      fetchDataPreview();
       document.getElementById("signal-modal").close();
     });
     container.appendChild(btn);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Time range
+// ---------------------------------------------------------------------------
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(isoDate, n) {
+  const d = new Date(isoDate);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function initTimeRange(saved = null) {
+  const startEl = document.getElementById("range-start");
+  const endEl   = document.getElementById("range-end");
+
+  if (saved?.rangeStart && saved?.rangeEnd) {
+    startEl.value = saved.rangeStart;
+    endEl.value   = saved.rangeEnd;
+  } else {
+    const today = todayISO();
+    endEl.value   = today;
+    startEl.value = addDays(today, -7);
+  }
+
+  startEl.addEventListener("input", fetchDataPreview);
+  endEl.addEventListener("input", fetchDataPreview);
+
+  document.querySelectorAll("[data-extend-days]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const n = parseInt(btn.dataset.extendDays);
+      const cur = endEl.value || todayISO();
+      endEl.value = addDays(cur, n);
+      fetchDataPreview();
+    });
+  });
+}
+
+function getTimeRange() {
+  const start = document.getElementById("range-start").value;
+  const end   = document.getElementById("range-end").value;
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
+// Data preview
+// ---------------------------------------------------------------------------
+
+const TRACE_COLORS = { T_int: "#60a5fa", T_ext: "#34d399", Q_sol: "#fbbf24" };
+const TEMP_KEYS = ["T_int", "T_ext"];
+const SOL_KEYS  = ["Q_sol"];
+
+let _previewDebounce = null;
+function fetchDataPreview() {
+  saveState();
+  clearTimeout(_previewDebounce);
+  _previewDebounce = setTimeout(_fetchDataPreview, 300);
+}
+
+async function _fetchDataPreview() {
+  const selected = DATA_SOURCE_DEFS
+    .map(d => ({ key: d.key, signal: dataSources[d.key] }))
+    .filter(d => d.signal);
+
+  const statusEl = document.getElementById("data-preview-status");
+
+  if (!selected.length) {
+    statusEl.textContent = "no signals selected";
+    Plotly.purge("data-preview-chart");
+    return;
+  }
+
+  const { start, end } = getTimeRange();
+  const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+  if (!isoRe.test(start) || !isoRe.test(end)) {
+    statusEl.textContent = "set start and end date (YYYY-MM-DD)";
+    return;
+  }
+
+  statusEl.textContent = "loading…";
+
+  const params = new URLSearchParams({ start: `${start}T00:00:00Z`, end: `${end}T23:59:59Z` });
+  selected.forEach(d => params.append("signals", d.signal));
+
+  let data;
+  try {
+    const r = await fetch(`/api/data?${params}`);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    data = await r.json();
+  } catch (e) {
+    statusEl.textContent = `error: ${e.message}`;
+    return;
+  }
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const paperBg = isDark ? "#1d232a" : "#ffffff";
+  const plotBg  = isDark ? "#191e24" : "#f9fafb";
+  const gridCol = isDark ? "#2a323c" : "#e5e7eb";
+  const textCol = isDark ? "#a6adba" : "#374151";
+
+  const tempSel = selected.filter(d => TEMP_KEYS.includes(d.key));
+  const solSel  = selected.filter(d => SOL_KEYS.includes(d.key));
+  const hasSol  = solSel.length > 0;
+
+  const traces = [];
+
+  tempSel.forEach(({ key, signal }) => {
+    const pairs = data[signal] ?? [];
+    traces.push({
+      type: "scatter", mode: "lines", name: key,
+      x: pairs.map(p => p[0]), y: pairs.map(p => p[1]),
+      connectgaps: false,
+      line: { color: TRACE_COLORS[key], width: 1.5 },
+      xaxis: "x", yaxis: "y",
+    });
+  });
+
+  solSel.forEach(({ key, signal }) => {
+    const pairs = data[signal] ?? [];
+    const color = TRACE_COLORS[key];
+    traces.push({
+      type: "scatter", mode: "lines", name: key,
+      x: pairs.map(p => p[0]), y: pairs.map(p => p[1]),
+      connectgaps: false,
+      fill: "tozeroy",
+      line: { color, width: 1 },
+      fillcolor: color + "33",
+      xaxis: "x2", yaxis: "y2",
+    });
+  });
+
+  const rowHeights = hasSol ? [0.6, 0.4] : [1];
+  const layout = {
+    paper_bgcolor: paperBg,
+    plot_bgcolor:  plotBg,
+    margin: { t: 8, r: 10, b: 36, l: 45 },
+    legend: { font: { size: 10, color: textCol }, bgcolor: "transparent", orientation: "h", y: -0.12 },
+    font: { family: "ui-monospace, monospace", color: textCol },
+    grid: hasSol ? { rows: 2, columns: 1, pattern: "independent", roworder: "top to bottom", rowheights: rowHeights } : undefined,
+    xaxis:  { type: "date", color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, showticklabels: hasSol ? false : true },
+    yaxis:  { color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, zeroline: false, title: { text: "°C", font: { size: 9 } } },
+    xaxis2: hasSol ? { type: "date", color: textCol, gridcolor: gridCol, tickfont: { size: 9 } } : undefined,
+    yaxis2: hasSol ? { color: textCol, gridcolor: gridCol, tickfont: { size: 9 }, zeroline: true, zerolinecolor: gridCol, title: { text: "W/m²", font: { size: 9 } } } : undefined,
+  };
+
+  // adjust chart height: taller when both subplots shown
+  document.getElementById("data-preview-chart").style.height = hasSol ? "340px" : "220px";
+
+  Plotly.react("data-preview-chart", traces, layout, { responsive: true, displayModeBar: false });
+
+  const totalPts = Object.values(data).reduce((n, pairs) => n + pairs.length, 0);
+  statusEl.textContent = totalPts ? `${totalPts} points` : "no data in range";
 }
 
 // ---------------------------------------------------------------------------
