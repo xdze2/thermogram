@@ -16,12 +16,14 @@ def surface_resistances(element: EnvelopeElement) -> tuple[float, float]:
         if element.is_ground_contact:
             return 0.17, 0.00  # ground contact: no Rso (ISO 13370)
         return 0.17, 0.04
-    return 0.13, 0.04
+    raise ValueError(f"Unhandled element type: {element.type!r}")
 
 
 def layer_resistance(layer: MaterialLayer) -> float:
     """R = d / λ  [m²·K/W]"""
-    mat = MATERIALS[layer.material_key]
+    mat = MATERIALS.get(layer.material_key)
+    if mat is None:
+        raise ValueError(f"Unknown material key: {layer.material_key!r}")
     return layer.thickness_m / mat.lambda_
 
 
@@ -61,20 +63,19 @@ def ua_total(elements: list[EnvelopeElement]) -> float:
 def element_summary(element: EnvelopeElement) -> dict:
     """Return a dict of key metrics for one element (for display)."""
     u = element_u_value(element)
-    rsi, rso = surface_resistances(element)
     r_total = 1.0 / u
-    r_layers = r_total - rsi - rso
 
     layers_info = []
-    for layer in element.layers:
-        mat = MATERIALS.get(layer.material_key)
-        r = layer_resistance(layer)
-        layers_info.append({
-            "material": mat.name if mat else layer.material_key,
-            "thickness_mm": layer.thickness_m * 1000,
-            "lambda": mat.lambda_ if mat else None,
-            "R": round(r, 3),
-        })
+    if element.u_value_override is None:
+        for layer in element.layers:
+            mat = MATERIALS.get(layer.material_key)
+            r = layer_resistance(layer)
+            layers_info.append({
+                "material": mat.name if mat else layer.material_key,
+                "thickness_mm": layer.thickness_m * 1000,
+                "lambda": mat.lambda_ if mat else None,
+                "R": round(r, 3),
+            })
 
     return {
         "name": element.name,
