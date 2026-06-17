@@ -26,6 +26,7 @@ from thermal.study_store import (
     save_study,
 )
 from thermal.fit import run_fit
+from thermal.irradiance import compute_poa, orientations_in_room, orientation_key
 
 try:
     from thermal.data_src.influx import list_signals, fetch_series
@@ -190,8 +191,47 @@ def post_fetch_data(study_id: str) -> dict[str, list[list]]:
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"InfluxDB error for {sig}: {e}")
     study.input_data = result
+
+    # Compute per-orientation POA irradiance if room + irradiance signals are available
+    if study.room:
+        _append_poa_irradiance(study, result)
+
     save_study(study)
     return result
+
+
+def _append_poa_irradiance(study, result: dict[str, list[list]]) -> None:
+    """Compute pvlib POA irradiance per orientation and append G_{orient} to result in-place."""
+    spec = study.data_spec
+    room = study.room
+    ghi_key    = spec.signals.get("GHI") or spec.signals.get("Q_sol")  # Q_sol legacy fallback
+    direct_key = spec.signals.get("direct")
+    diffuse_key = spec.signals.get("diffuse")
+
+    ghi_pairs = (result.get(ghi_key) or []) if ghi_key else []
+    if not ghi_pairs:
+        return
+
+    timestamps = [p[0] for p in ghi_pairs]
+    ghi_arr    = np.array([p[1] if p[1] is not None else 0.0 for p in ghi_pairs], dtype=float)
+
+    direct_map  = {p[0]: p[1] for p in (result.get(direct_key)  or [])} if direct_key else {}
+    diffuse_map = {p[0]: p[1] for p in (result.get(diffuse_key) or [])} if diffuse_key else {}
+    direct_arr  = np.array([direct_map.get(ts, float("nan"))  for ts in timestamps], dtype=float) if direct_map  else None
+    diffuse_arr = np.array([diffuse_map.get(ts, float("nan")) for ts in timestamps], dtype=float) if diffuse_map else None
+
+    orientations = orientations_in_room(room)
+    poa = compute_poa(
+        lat=room.latitude,
+        lon=room.longitude,
+        timestamps=timestamps,
+        ghi=ghi_arr,
+        direct=direct_arr,
+        diffuse=diffuse_arr,
+        orientations=orientations,
+    )
+    for orient, G_arr in poa.items():
+        result[f"G_{orient}"] = [[ts, round(float(v), 2)] for ts, v in zip(timestamps, G_arr)]
 
 
 @app.post("/api/studies/{study_id}/fit")
@@ -208,7 +248,6 @@ def post_fit(study_id: str) -> dict:
     spec = study.data_spec
     t_int_key = spec.signals.get("T_int")
     t_ext_key = spec.signals.get("T_ext")
-    q_sol_key = spec.signals.get("Q_sol")
 
     if not t_int_key or t_int_key not in study.input_data:
         raise HTTPException(status_code=400, detail="T_int signal not in cached data")
@@ -224,12 +263,19 @@ def post_fit(study_id: str) -> dict:
     T_ext_map = {p[0]: p[1] for p in t_ext_pairs}
     T_ext_arr = np.array([T_ext_map.get(ts, float("nan")) for ts in timestamps], dtype=float)
 
-    if q_sol_key and q_sol_key in study.input_data:
-        q_sol_map = {p[0]: p[1] for p in study.input_data[q_sol_key]}
-        G_opaque = np.array([q_sol_map.get(ts, 0.0) for ts in timestamps], dtype=float)
-        G_opaque = np.where(np.isnan(G_opaque), 0.0, G_opaque)
-    else:
-        G_opaque = np.zeros(len(timestamps))
+    # Build area-weighted G_opaque from per-orientation POA irradiance (computed at fetch time)
+    from thermal.state_space import opaque_elements
+    opaque_elems = opaque_elements(study.room)
+    total_opaque_area = sum(e.area_m2 for e in opaque_elems)
+    G_opaque = np.zeros(len(timestamps))
+    if total_opaque_area > 0:
+        for elem in opaque_elems:
+            g_key = f"G_{orientation_key(elem)}"
+            if g_key in study.input_data:
+                g_map = {p[0]: p[1] for p in study.input_data[g_key]}
+                g_arr = np.array([g_map.get(ts, 0.0) for ts in timestamps], dtype=float)
+                g_arr = np.where(np.isnan(g_arr), 0.0, g_arr)
+                G_opaque += (elem.area_m2 / total_opaque_area) * g_arr
 
     # Remove rows with NaN T_obs or T_ext
     mask = ~(np.isnan(T_obs) | np.isnan(T_ext_arr))

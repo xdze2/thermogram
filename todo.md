@@ -167,6 +167,37 @@ Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/
 
 ---
 
+## Phase 3 — Solar gains + per-orientation irradiance
+
+### Architecture
+
+- Irradiance signals (shortwave, direct, diffuse) come from InfluxDB alongside sensor data
+- GPS coordinates → sun position + plane-of-array projection via **pvlib**
+- One irradiance series `G_i(t)` per **orientation group** present in the room: walls/doors keyed by azimuth (S, E, W, …), roof as "roof" (30° tilt, south-facing), floor as "floor"
+- Opaque element in group i: `α_i · G_i / h_ext` → sol-air ΔT — one free `α` per orientation group (per-element `α` is unidentifiable since elements in the same group see identical irradiance time series)
+- Window in group i: `SHGC · A · G_i` → direct gain into `Q_room` (fixed physics, no free param)
+
+### Backend
+
+- [x] Add `pvlib` dependency
+- [x] `thermal/irradiance.py` — given GPS + timestamps + GHI + optional direct/diffuse → `dict[orient_key, G(t)]` per orientation group present in room; `orientation_key(elem)` maps element to its group key
+- [x] `DataSpec.signals` extended with `GHI`, `direct`, `diffuse` roles (legacy `Q_sol` still accepted as GHI fallback)
+- [x] `POST /api/studies/{id}/fetch_data` — after InfluxDB pull, runs pvlib POA and appends `G_{orient}` series to `input_data`
+- [x] `POST /api/studies/{id}/fit` — builds area-weighted `G_opaque` from per-orientation `G_*` arrays in `input_data`
+- [ ] Extend `state_space.py` / `fit.py` to accept per-orientation `G_i` arrays and fit one `α_i` per opaque orientation group
+- [ ] Wire `Q_room` from window solar gains (`SHGC · A · G_i` per window, direct into C_room)
+- [ ] Update `run_fit` / `FitResult` to carry per-orientation `alpha` posteriors
+
+### Frontend
+
+- [x] Signal picker rows for GHI / direct / diffuse in DataSources panel
+- [x] `DataPreview.svelte` — raw irradiance as dotted lines; per-orientation `G_*` keys auto-detected from `input_data` and plotted as filled area traces with distinct colors
+- [x] Fix `lifecycle_outside_component` crash: move store subscriptions out of async `onMount`, guard with `_loaded` flag
+- [ ] City search modal — `api-adresse.data.gouv.fr` (France open data, no key) autocomplete → fills lat/lon in room form
+- [ ] Show per-orientation α in fit results table
+
+---
+
 ## Parking lot / later
 
 - Multi-zone (inter-room heat transfer)

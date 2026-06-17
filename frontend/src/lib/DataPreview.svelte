@@ -4,16 +4,21 @@
 
   // input_data: dict signal_name → [[iso_ts, value], ...]
   export let inputData = null;
-  // dataSources: { T_int, T_ext, Q_sol } → signal names
+  // dataSources: { T_int, T_ext, GHI, direct, diffuse } → signal names
   export let dataSources = {};
 
   let chartDiv;
   let status = '';
   let Plotly = null;
 
-  const TRACE_COLORS = { T_int: '#60a5fa', T_ext: '#34d399', Q_sol: '#fbbf24' };
+  const TRACE_COLORS = {
+    T_int: '#60a5fa', T_ext: '#34d399',
+    GHI: '#fbbf24', direct: '#f97316', diffuse: '#a78bfa',
+  };
+  // Palette for per-orientation G_i traces
+  const G_COLORS = ['#fbbf24','#f97316','#f43f5e','#a78bfa','#34d399','#60a5fa','#94a3b8','#e879f9'];
   const TEMP_KEYS = ['T_int', 'T_ext'];
-  const SOL_KEYS  = ['Q_sol'];
+  const RAW_SOL_KEYS = ['GHI', 'direct', 'diffuse'];
 
   onMount(async () => {
     Plotly = window.Plotly;
@@ -48,10 +53,16 @@
     const tempSel = TEMP_KEYS
       .map(k => ({ key: k, signal: dataSources[k] }))
       .filter(d => d.signal && inputData[d.signal]);
-    const solSel = SOL_KEYS
+
+    // Raw irradiance signals (GHI / direct / diffuse) from InfluxDB
+    const rawSolSel = RAW_SOL_KEYS
       .map(k => ({ key: k, signal: dataSources[k] }))
       .filter(d => d.signal && inputData[d.signal]);
-    const hasSol = solSel.length > 0;
+
+    // Per-orientation POA irradiance keys computed by pvlib (G_S, G_E, …)
+    const gOrientKeys = Object.keys(inputData).filter(k => k.startsWith('G_')).sort();
+
+    const hasSol = rawSolSel.length > 0 || gOrientKeys.length > 0;
 
     const traces = [];
     tempSel.forEach(({ key, signal }) => {
@@ -64,16 +75,32 @@
         xaxis: 'x', yaxis: 'y',
       });
     });
-    solSel.forEach(({ key, signal }) => {
+
+    // Raw irradiance as thin dashed lines (context only)
+    rawSolSel.forEach(({ key, signal }) => {
       const pairs = inputData[signal] ?? [];
       const color = TRACE_COLORS[key];
       traces.push({
         type: 'scatter', mode: 'lines', name: key,
         x: pairs.map(p => p[0]), y: pairs.map(p => p[1]),
         connectgaps: false,
+        line: { color, width: 1, dash: 'dot' },
+        xaxis: 'x2', yaxis: 'y2',
+      });
+    });
+
+    // Per-orientation G_i as filled area traces
+    gOrientKeys.forEach((key, i) => {
+      const pairs = inputData[key] ?? [];
+      const color = G_COLORS[i % G_COLORS.length];
+      const orient = key.slice(2); // strip "G_"
+      traces.push({
+        type: 'scatter', mode: 'lines', name: `G_${orient}`,
+        x: pairs.map(p => p[0]), y: pairs.map(p => p[1]),
+        connectgaps: false,
         fill: 'tozeroy',
-        line: { color, width: 1 },
-        fillcolor: color + '33',
+        line: { color, width: 1.5 },
+        fillcolor: color + '22',
         xaxis: 'x2', yaxis: 'y2',
       });
     });
@@ -101,7 +128,7 @@
       return;
     }
 
-    chartDiv.style.height = hasSol ? '340px' : '220px';
+    chartDiv.style.height = hasSol ? '380px' : '220px';
     Plotly.react(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
     const firstPair = Object.values(inputData).find(p => p.length)?.[0];
     const lastPair  = Object.values(inputData).find(p => p.length)?.at(-1);

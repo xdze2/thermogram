@@ -17,7 +17,7 @@ def _now() -> datetime:
 class DataSpec(BaseModel):
     """Signal selection and time range for fitting."""
     signals: dict[str, str | None] = Field(
-        default_factory=lambda: {"T_int": None, "T_ext": None, "Q_sol": None},
+        default_factory=lambda: {"T_int": None, "T_ext": None, "GHI": None, "direct": None, "diffuse": None},
         description="Mapping of role → signal name (or None if unselected).",
     )
     start: str | None = Field(default=None, description="ISO date string YYYY-MM-DD.")

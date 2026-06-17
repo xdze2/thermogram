@@ -40,6 +40,15 @@
   })();
 
   // --- Load study on mount ---
+  // Set up subscriptions synchronously so onDestroy works correctly.
+  // Guard with a flag so they don't fire before the study is fully loaded.
+  let _loaded = false;
+  const _unsubs = [
+    room.subscribe(() => { if (_loaded) scheduleRoomPatch(); }),
+    elements.subscribe(() => { if (_loaded) scheduleRoomPatch(); }),
+  ];
+  onDestroy(() => _unsubs.forEach(u => u()));
+
   onMount(async () => {
     try {
       const [s, m, sigs] = await Promise.all([
@@ -86,7 +95,7 @@
       if (study.rc_prior) rcResult.set(study.rc_prior);
 
       if (study.data_spec) {
-        if (study.data_spec.signals) dataSources.set(study.data_spec.signals);
+        if (study.data_spec.signals) dataSources.update(defaults => ({ ...defaults, ...study.data_spec.signals }));
         if (study.data_spec.start) rangeStart.set(study.data_spec.start);
         if (study.data_spec.end) rangeEnd.set(study.data_spec.end);
       }
@@ -98,13 +107,7 @@
       return;
     }
 
-    // Subscribe to changes → auto-PATCH
-    const unsubs = [
-      room.subscribe(() => scheduleRoomPatch()),
-      elements.subscribe(() => scheduleRoomPatch()),
-    ];
-    onDestroy(() => unsubs.forEach(u => u()));
-
+    _loaded = true;
     compute();
   });
 

@@ -91,12 +91,14 @@ export function updateLayer(elemId, idx, patch) {
 
 // --- Data sources ---
 export const DATA_SOURCE_DEFS = [
-  { key: 'T_int', label: 'T_int', hint: 'indoor temperature' },
-  { key: 'T_ext', label: 'T_ext', hint: 'outdoor temperature' },
-  { key: 'Q_sol', label: 'Q_sol', hint: 'solar irradiance' },
+  { key: 'T_int',    label: 'T_int',   hint: 'indoor temperature' },
+  { key: 'T_ext',    label: 'T_ext',   hint: 'outdoor temperature' },
+  { key: 'GHI',      label: 'GHI',     hint: 'global horizontal irradiance' },
+  { key: 'direct',   label: 'direct',  hint: 'direct (beam) horizontal irradiance' },
+  { key: 'diffuse',  label: 'diffuse', hint: 'diffuse horizontal irradiance' },
 ];
 
-export const dataSources = writable({ T_int: null, T_ext: null, Q_sol: null });
+export const dataSources = writable({ T_int: null, T_ext: null, GHI: null, direct: null, diffuse: null });
 
 // --- Time range ---
 function todayISO() { return new Date().toISOString().slice(0, 10); }
