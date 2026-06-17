@@ -17,11 +17,16 @@ The user describes a room **element by element** — walls, windows, roof, floor
 
 The room is a 2R2C network driven by sol-air temperature:
 
-```
-T_sa(t) ──R_ext──[C_wall]──R_int──[C_room]
-                                      │
-                                Q_int + Q_sol_win
-                                R_ve ── T_out
+```mermaid
+graph LR
+    Tsa["T_sa(t)<br/>sol-air"]
+    Tout["T_out<br/>outdoor"]
+    Qint(["Q_int + Q_sol_win<br/>internal gains"])
+
+    Tsa -->|"R_ext<br/>envelope"| Cwall(["C_wall<br/>thermal mass"])
+    Cwall -->|"R_int<br/>inner surface"| Croom(["C_room<br/>room air"])
+    Tout -->|"R_ve<br/>ventilation"| Croom
+    Qint --> Croom
 ```
 
 Five parameters with Gaussian priors:

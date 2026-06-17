@@ -6,6 +6,11 @@
   <title>Thermal nodes</title>
   <link href="/vendor/daisyui.css" rel="stylesheet" />
   <script src="/vendor/tailwindcss-browser.js"></script>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+    window._mermaid = mermaid;
+  </script>
   <style>
     body { font-family: ui-monospace, "Cascadia Code", monospace; }
     #app { display: grid; grid-template-columns: 380px 1fr; height: calc(100vh - 41px); }
@@ -43,11 +48,28 @@
     document.addEventListener('click', e => {
       if (!themeBtn.contains(e.target) && !themeMenu.contains(e.target)) themeMenu.classList.add('hidden');
     });
+    async function rerenderMermaid(theme) {
+      if (!window._mermaid) return;
+      window._mermaid.initialize({ startOnLoad: false, theme: theme === 'dark' ? 'dark' : 'default' });
+      const el = document.getElementById('rc-diagram');
+      const pre = el.querySelector('pre.mermaid');
+      if (!pre) return;
+      const source = pre.textContent;
+      el.innerHTML = '';
+      const newPre = document.createElement('pre');
+      newPre.className = 'mermaid';
+      newPre.textContent = source;
+      el.appendChild(newPre);
+      await window._mermaid.run({ nodes: [newPre] });
+    }
+
     document.querySelectorAll('.theme-option').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.documentElement.setAttribute('data-theme', btn.dataset.theme);
-        localStorage.setItem('theme', btn.dataset.theme);
+        const theme = btn.dataset.theme;
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
         themeMenu.classList.add('hidden');
+        rerenderMermaid(theme);
       });
     });
     const saved = localStorage.getItem('theme');
@@ -109,6 +131,27 @@
 
     <!-- ── Right: priors display ── -->
     <div id="priors" class="p-4">
+
+      <!-- RC diagram -->
+      <div class="mb-5">
+        <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">RC model</p>
+        <div id="rc-diagram" class="flex justify-center">
+          <pre class="mermaid">
+graph LR
+    Tsa["T_sa(t)<br/>sol-air"]
+    Tout["T_out<br/>outdoor"]
+    Qint(["Q_int + Q_sol_win"])
+
+    Tsa -->|"R_ext"| Cwall(["C_wall"])
+    Cwall -->|"R_int"| Croom(["C_room<br/>room air"])
+    Tout -->|"R_ve"| Croom
+    Qint --> Croom
+          </pre>
+        </div>
+      </div>
+
+      <div class="divider my-0 mb-4"></div>
+
       <p class="text-xs uppercase tracking-widest text-base-content/30 mb-3">RC model priors</p>
       <div id="status" class="text-xs text-base-content/30 mb-2"></div>
       <div id="priors-content" class="flex flex-col gap-5"></div>
