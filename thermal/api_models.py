@@ -126,13 +126,6 @@ class Room(BaseModel):
         default=0.5, gt=0,
         description="Air changes per hour for infiltration/ventilation.",
     )
-    # ISO 52016 κ₁ value: light=40, medium=70, heavy=110 kJ/(m²·K)
-    kappa: float = Field(
-        default=70.0,
-        description="Effective heat capacity per floor area [kJ/(m²·K)]. Light=40, medium=70, heavy=110.",
-    )
-    t_set_heating: float = Field(default=20.0, description="Heating setpoint [°C].")
-    t_set_cooling: float = Field(default=26.0, description="Cooling setpoint [°C].")
 
     @computed_field
     @property

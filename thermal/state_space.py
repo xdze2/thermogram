@@ -108,33 +108,10 @@ def discretize(
     dt: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """ZOH discretisation via scipy. Returns (A_d, B_d)."""
-    C = np.eye(2)          # observe both states (we select T_room in forward_sim)
+    C = np.eye(2)
     D = np.zeros((2, 3))
     A_d, B_d, _, _, _ = cont2discrete((A, B, C, D), dt, method="zoh")
     return A_d, B_d
-
-
-def forward_sim_full(
-    A_d: np.ndarray,
-    B_d: np.ndarray,
-    T_sa: np.ndarray,
-    T_ext: np.ndarray,
-    Q_room: np.ndarray,
-    x0: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Like forward_sim but returns (T_wall_pred, T_room_pred)."""
-    N = len(T_sa)
-    if x0 is None:
-        x0 = np.array([T_ext[0], T_ext[0]])
-    x = x0.copy()
-    T_wall_pred = np.empty(N)
-    T_room_pred = np.empty(N)
-    for k in range(N):
-        u = np.array([T_sa[k], T_ext[k], Q_room[k]])
-        T_wall_pred[k] = x[0]
-        T_room_pred[k] = x[1]
-        x = A_d @ x + B_d @ u
-    return T_wall_pred, T_room_pred
 
 
 def forward_sim(
@@ -144,7 +121,7 @@ def forward_sim(
     T_ext: np.ndarray,
     Q_room: np.ndarray,
     x0: np.ndarray | None = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Step the discrete-time 2R2C model over N timesteps.
 
@@ -158,21 +135,20 @@ def forward_sim(
 
     Returns
     -------
-    T_room_pred : (N,) predicted indoor temperature [°C]
+    (T_wall_pred, T_room_pred) : each (N,) array [°C]
     """
     N = len(T_sa)
     if x0 is None:
         x0 = np.array([T_ext[0], T_ext[0]])
-
     x = x0.copy()
+    T_wall_pred = np.empty(N)
     T_room_pred = np.empty(N)
-
     for k in range(N):
         u = np.array([T_sa[k], T_ext[k], Q_room[k]])
+        T_wall_pred[k] = x[0]
         T_room_pred[k] = x[1]
         x = A_d @ x + B_d @ u
-
-    return T_room_pred
+    return T_wall_pred, T_room_pred
 
 
 def sol_air_temperature(

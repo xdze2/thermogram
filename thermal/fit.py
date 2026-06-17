@@ -19,7 +19,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from .api_models import RCModelOut
-from .state_space import build_state_space, discretize, forward_sim, forward_sim_full, sol_air_temperature
+from .state_space import build_state_space, discretize, forward_sim, sol_air_temperature
 
 
 # Observation noise (assumed, 1-sigma) [°C]
@@ -125,7 +125,7 @@ def _neg_log_posterior(
     H_int: float,
     H_win: float,
     dt: float,
-    T_sa: np.ndarray,
+    G_opaque: np.ndarray,
     T_ext: np.ndarray,
     Q_room: np.ndarray,
     T_obs: np.ndarray,
@@ -150,9 +150,9 @@ def _neg_log_posterior(
     # --- likelihood ---
     A, B = build_state_space(H_env, H_ve, C_wall, C_room, H_int, H_win)
     A_d, B_d = discretize(A, B, dt)
-    T_sa_with_alpha = sol_air_temperature(T_ext, T_sa, alpha_eff)
+    T_sa = sol_air_temperature(T_ext, G_opaque, alpha_eff)
     x0 = np.array([T_wall_0, T_room_0])
-    T_pred = forward_sim(A_d, B_d, T_sa_with_alpha, T_ext, Q_room, x0=x0)
+    _, T_pred = forward_sim(A_d, B_d, T_sa, T_ext, Q_room, x0=x0)
 
     residuals = T_pred - T_obs
     nll_obs = 0.5 * np.sum(residuals ** 2) / sigma_obs ** 2
@@ -224,7 +224,7 @@ def run_fit(
     A_d, B_d = discretize(A, B, dt)
     T_sa = sol_air_temperature(T_ext, G_opaque, alpha_eff)
     x0 = np.array([T_wall_0, T_room_0])
-    T_wall_arr, T_room_arr = forward_sim_full(A_d, B_d, T_sa, T_ext, Q_room, x0=x0)
+    T_wall_arr, T_room_arr = forward_sim(A_d, B_d, T_sa, T_ext, Q_room, x0=x0)
     rmse = float(np.sqrt(np.mean((T_room_arr - T_obs) ** 2)))
 
     return FitResult(
