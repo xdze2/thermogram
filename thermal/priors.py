@@ -25,9 +25,7 @@ All sigmas combine in quadrature across independent elements.
 
 import math
 
-from pydantic import BaseModel, Field
-
-from .api_models import Room, EnvelopeElement, ElementType
+from .api_models import Room, EnvelopeElement, ElementType, ContributionOut, ParameterPriorOut, RCModelOut
 from .iso6946 import element_u_value, layer_resistance, surface_resistances
 from .materials_db import MATERIALS
 
@@ -55,23 +53,6 @@ _ALPHA_TABLE: dict[str, tuple[float, float]] = {
     "metal_sheet":     (0.70, 0.15),
 }
 _ALPHA_DEFAULT = (0.65, 0.15)
-
-
-class Contribution(BaseModel):
-    label: str         # e.g. "Wall S (brick 30cm)"
-    value: float       # contribution to the parameter
-    sigma: float       # 1-sigma uncertainty on this contribution
-    detail: str = ""   # optional extra info shown to user
-
-
-class ParameterPrior(BaseModel):
-    name: str
-    symbol: str
-    unit: str
-    description: str
-    mu: float
-    sigma: float
-    contributions: list[Contribution]
 
 
 def _outer_material_key(element: EnvelopeElement) -> str | None:
@@ -107,13 +88,10 @@ def _heavy_layer_mass(element: EnvelopeElement) -> float:
     return total
 
 
-def build_priors(room: Room) -> dict[str, ParameterPrior]:
-    """
-    Build all five parameter priors from a Room description.
-    Returns dict keyed by parameter name.
-    """
-    h_env_contribs: list[Contribution] = []
-    c_wall_contribs: list[Contribution] = []
+def build_priors(room: Room) -> RCModelOut:
+    """Build all five parameter priors from a Room description."""
+    h_env_contribs: list[ContributionOut] = []
+    c_wall_contribs: list[ContributionOut] = []
 
     total_opaque_area = 0.0
     alpha_area_sum = 0.0
@@ -122,7 +100,7 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
     for elem in room.elements:
         ua = element_u_value(elem) * elem.area_m2
         sigma_h = ua * _REL_SIGMA_H_ENV
-        h_env_contribs.append(Contribution(
+        h_env_contribs.append(ContributionOut(
             label=f"{elem.name}  [{elem.orientation.value}]",
             value=ua,
             sigma=sigma_h,
@@ -133,7 +111,7 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
             c = _heavy_layer_mass(elem)
             if c > 0:
                 sigma_c = c * _REL_SIGMA_C_WALL
-                c_wall_contribs.append(Contribution(
+                c_wall_contribs.append(ContributionOut(
                     label=f"{elem.name}  [{elem.orientation.value}]",
                     value=c,
                     sigma=sigma_c,
@@ -172,15 +150,15 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
     for elem in room.elements:
         if elem.type != ElementType.window:
             a_mu, a_sig = _alpha_for_element(elem)
-            alpha_contribs.append(Contribution(
+            alpha_contribs.append(ContributionOut(
                 label=f"{elem.name}  [{elem.orientation.value}]",
                 value=a_mu,
                 sigma=a_sig,
                 detail=f"outer layer: {_outer_material_key(elem) or 'unknown'}  ×  {elem.area_m2} m²",
             ))
 
-    return {
-        "H_env": ParameterPrior(
+    return RCModelOut(
+        H_env=ParameterPriorOut(
             name="Envelope heat loss",
             symbol="H_env",
             unit="W/K",
@@ -189,21 +167,21 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
             sigma=h_env_sigma,
             contributions=h_env_contribs,
         ),
-        "H_ve": ParameterPrior(
+        H_ve=ParameterPriorOut(
             name="Ventilation heat loss",
             symbol="H_ve",
             unit="W/K",
             description="ρ·cp·n·V from ACH and room volume. Wide prior: ACH is often uncertain.",
             mu=h_ve_mu,
             sigma=h_ve_sigma,
-            contributions=[Contribution(
+            contributions=[ContributionOut(
                 label=f"Ventilation  (ACH={room.ach})",
                 value=h_ve_mu,
                 sigma=h_ve_sigma,
                 detail=f"0.34 × {room.ach} ACH × {room.volume:.1f} m³",
             )],
         ),
-        "C_wall": ParameterPrior(
+        C_wall=ParameterPriorOut(
             name="Envelope thermal mass",
             symbol="C_wall",
             unit="MJ/K",
@@ -212,21 +190,21 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
             sigma=c_wall_sigma,
             contributions=c_wall_contribs,
         ),
-        "C_room": ParameterPrior(
+        C_room=ParameterPriorOut(
             name="Room interior thermal mass",
             symbol="C_room",
             unit="MJ/K",
             description="Furniture, floor finishes, partition walls. Not described by user — wide prior.",
             mu=c_room_mu,
             sigma=c_room_sigma,
-            contributions=[Contribution(
+            contributions=[ContributionOut(
                 label=f"Interior estimate  ({room.floor_area_m2} m² floor)",
                 value=c_room_mu,
                 sigma=c_room_sigma,
                 detail=f"20 kJ/(m²·K) × {room.floor_area_m2} m²  (weak prior)",
             )],
         ),
-        "alpha_eff": ParameterPrior(
+        alpha_eff=ParameterPriorOut(
             name="Outer surface absorptivity",
             symbol="α_eff",
             unit="—",
@@ -235,4 +213,4 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
             sigma=alpha_sigma,
             contributions=alpha_contribs,
         ),
-    }
+    )

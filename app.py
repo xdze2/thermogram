@@ -8,7 +8,8 @@ import streamlit as st
 
 from thermal.api_models import Room, EnvelopeElement, MaterialLayer, ElementType, Orientation
 from thermal.materials_db import MATERIALS
-from thermal.priors import build_priors, ParameterPrior
+from thermal.api_models import ParameterPriorOut
+from thermal.priors import build_priors
 
 st.set_page_config(page_title="Thermal Room Estimator", layout="wide")
 
@@ -175,7 +176,7 @@ with col_right:
 
     _C_SCALE = 1e6  # J/K → MJ/K
 
-    def _render_prior(p: ParameterPrior):
+    def _render_prior(p: ParameterPriorOut):
         scale      = _C_SCALE if p.unit == "MJ/K" else 1.0
         mu_disp    = p.mu    / scale
         sigma_disp = p.sigma / scale
@@ -203,7 +204,8 @@ with col_right:
         lines.append(f"  = {mu_disp:>8.3g} {p.unit}  ±{sigma_disp:.2g}  (quadrature)")
         st.code("\n".join(lines), language=None)
 
-    tabs = st.tabs([p.symbol for p in priors.values()])
-    for tab, p in zip(tabs, priors.values()):
+    all_priors = [priors.H_env, priors.H_ve, priors.C_wall, priors.C_room, priors.alpha_eff]
+    tabs = st.tabs([p.symbol for p in all_priors])
+    for tab, p in zip(tabs, all_priors):
         with tab:
             _render_prior(p)
