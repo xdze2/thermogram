@@ -170,13 +170,14 @@ class ParameterPriorOut(BaseModel):
 
 
 class RCModelOut(BaseModel):
-    """2R2C + sol-air RC model with Gaussian priors on all five parameters."""
+    """2R2C + sol-air RC model with Gaussian priors on all five free parameters."""
 
-    H_env:     ParameterPriorOut = Field(..., description="Envelope conduction loss [W/K].")
-    H_ve:      ParameterPriorOut = Field(..., description="Ventilation heat loss [W/K].")
+    H_env:     ParameterPriorOut = Field(..., description="Opaque envelope conduction loss [W/K]. Drives sol-air path.")
+    H_ve:      ParameterPriorOut = Field(..., description="Ventilation + window heat loss [W/K]. Direct T_ext→T_room.")
     C_wall:    ParameterPriorOut = Field(..., description="Envelope thermal mass [MJ/K].")
     C_room:    ParameterPriorOut = Field(..., description="Interior thermal mass [MJ/K].")
     alpha_eff: ParameterPriorOut = Field(..., description="Effective outer surface absorptivity [—].")
+    H_int:     float             = Field(default=0.0, description="Inner-surface conductance [W/K], fixed from ISO 6946 (not fitted).")
 
 
 # ---------------------------------------------------------------------------

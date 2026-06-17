@@ -10,34 +10,38 @@ The user describes a room **element by element** — walls, windows, roof, floor
 
 1. **Describe** the room: envelope elements, ACH, location.
 2. **Inspect** the prior: H_env, H_ve, C_wall, C_room, α_eff with per-element breakdown and uncertainty.
-3. **Upload** an observed indoor temperature log (hourly CSV). _(Phase 2)_
-4. **Fit**: Bayesian update yields a posterior. _(Phase 2)_
+3. **Select signals** (T_int, T_ext, Q_sol from InfluxDB) and a date range; click **Fetch data** to pull and cache the time-series inside the study file.
+4. **Fit** _(Phase 2)_: Bayesian MAP update reads the cached data and yields a posterior.
+
+Input data is stored in the study JSON (`input_data` field) — both the preview chart and the fit use the same frozen snapshot, so results are reproducible without a live InfluxDB connection at fit time.
 
 ## RC model
 
-The room is a 2R2C network driven by sol-air temperature:
+The room is a 2R2C network. Opaque walls are driven by sol-air temperature (absorbs direct solar on outer surfaces); windows pass solar directly into the room air.
 
 ```mermaid
 graph LR
-    Tsa["T_sa(t)<br/>sol-air"]
-    Tout["T_out<br/>outdoor"]
-    Qint(["Q_int + Q_sol_win<br/>internal gains"])
+    Tsa["T_sa = T_ext + α·G/h_ext<br/>sol-air (opaque)"]
+    Tout["T_ext<br/>outdoor"]
+    Qroom(["Q_sol_win + Q_int<br/>direct gains"])
 
-    Tsa -->|"R_ext<br/>envelope"| Cwall(["C_wall<br/>thermal mass"])
-    Cwall -->|"R_int<br/>inner surface"| Croom(["C_room<br/>room air"])
-    Tout -->|"R_ve<br/>ventilation"| Croom
-    Qint --> Croom
+    Tsa  -->|"H_env<br/>opaque U·A"| Cwall(["C_wall<br/>envelope mass"])
+    Cwall -->|"H_int (fixed)<br/>inner surface"| Croom(["C_room<br/>room air"])
+    Tout -->|"H_ve + H_win<br/>ventilation + windows"| Croom
+    Qroom --> Croom
 ```
 
-Five parameters with Gaussian priors:
+Five free parameters with Gaussian priors:
 
-| Symbol | Meaning                      | Unit |
-|--------|------------------------------|------|
-| H_env  | Envelope conduction loss     | W/K  |
-| H_ve   | Ventilation heat loss        | W/K  |
-| C_wall | Envelope thermal mass        | MJ/K |
-| C_room | Interior thermal mass        | MJ/K |
-| α_eff  | Effective outer absorptivity | —    |
+| Symbol | Meaning                                  | Unit |
+|--------|------------------------------------------|------|
+| H_env  | Opaque envelope conduction loss (U·A)    | W/K  |
+| H_ve   | Ventilation + window heat loss           | W/K  |
+| C_wall | Envelope thermal mass (heavy layers)     | MJ/K |
+| C_room | Interior thermal mass (furniture, air)   | MJ/K |
+| α_eff  | Effective outer surface absorptivity     | —    |
+
+`H_int` (inner-surface + layer conductance) is fixed from ISO 6946 geometry and is not fitted.
 
 ## Physics references
 
@@ -49,25 +53,31 @@ Five parameters with Gaussian priors:
 | Solar irradiance on tilted surface | Isotropic sky diffuse model (Hottel-Woertz) |
 | Sol-air temperature | Spencer (1971) declination |
 | Weather data | Open-Meteo historical archive (ERA5-based) |
-| Likelihood for fit | Kalman filter on 2R2C state-space |
+| Fit | MAP via scipy L-BFGS-B; Gaussian priors from ISO 6946; ZOH-discretised 2R2C likelihood |
 
 ## Project structure
 
 ```
 thermal/
   materials_db.py       # 30+ materials with λ, ρ, cp
-  api_models.py         # Pydantic v2 models (Room, EnvelopeElement, MaterialLayer, *Out)
-  priors.py             # build_priors(room) → Gaussian priors on RC parameters
-  iso6946.py            # U-value, surface resistances
+  api_models.py         # Pydantic v2 models (Room, EnvelopeElement, *Out, RCModelOut)
+  priors.py             # build_priors(room) → Gaussian priors on 5 RC parameters
+  iso6946.py            # U-value, surface resistances (ISO 6946)
   solar.py              # Solar geometry and surface irradiance
+  state_space.py        # 2R2C A/B matrices, ZOH discretisation, forward_sim
+  fit.py                # MAP fit via scipy L-BFGS-B; returns FitResult
+  study.py              # Study Pydantic model (room, data_spec, input_data, rc_prior, fit_result)
+  study_store.py        # CRUD over user_data/{id}.json
   data_src/influx.py    # InfluxDB wrapper: list_signals(), fetch_series()
-api.py                  # FastAPI app; serves frontend/dist/ as static files
-frontend/        # Svelte + Vite source (builds into frontend/dist/)
+api.py                  # FastAPI app; studies endpoints; serves frontend/dist/
+frontend/               # Svelte + Vite source (builds into frontend/dist/)
   src/
-    App.svelte          # Top-level layout + compute loop
-    lib/store.js        # All state as Svelte stores + localStorage
-    lib/*.svelte        # RoomFields, ElementCard, DataSources, SignalPicker,
-                        # PriorBlock, DataPreview
+    App.svelte          # Top-level layout, routing
+    lib/StudyEditor.svelte  # Study editor (room + data + prior + fit)
+    lib/DataSources.svelte  # Signal picker + date range + Fetch data button
+    lib/DataPreview.svelte  # Plotly chart from cached input_data
+    lib/PriorBlock.svelte   # Per-parameter prior (+ posterior overlay, phase 2)
+    lib/*.svelte        # RoomFields, ElementCard, SignalPicker, StudiesList
 tests/
   test_api.py           # pytest + httpx round-trip tests
 ```
@@ -96,8 +106,17 @@ npm run build
 | GET | `/api/schema` | Element types and orientations (enum values for dropdowns) |
 | GET | `/api/materials` | All materials with λ, ρ, cp, is_heavy |
 | GET | `/api/signals` | Available InfluxDB signal names (empty if unreachable) |
-| GET | `/api/data` | Fetch time-series for selected signals |
-| POST | `/api/room/rc_model` | `Room` → `RCModelOut` (five parameter priors) |
+| GET | `/api/studies` | List all studies (id, name, updated_at) |
+| POST | `/api/studies` | Create a new study |
+| GET | `/api/studies/{id}` | Full study JSON (room, data_spec, input_data, rc_prior, fit_result) |
+| DELETE | `/api/studies/{id}` | Delete a study |
+| POST | `/api/studies/{id}/duplicate` | Duplicate a study |
+| PATCH | `/api/studies/{id}/name` | Rename a study |
+| PATCH | `/api/studies/{id}/room` | Update room description → recomputes rc_prior |
+| PATCH | `/api/studies/{id}/data_spec` | Update signal selection and date range |
+| POST | `/api/studies/{id}/fetch_data` | Pull signals from InfluxDB, cache as input_data in study |
+| POST | `/api/studies/{id}/fit` | Run MAP fit on cached input_data → stores fit_result _(Phase 2)_ |
+| GET | `/api/studies/{id}/fit` | Return cached fit_result _(Phase 2)_ |
 
 Interactive docs at `http://localhost:8000/docs`.
 

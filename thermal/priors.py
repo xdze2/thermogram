@@ -28,6 +28,7 @@ import math
 from .api_models import Room, EnvelopeElement, ElementType, ContributionOut, ParameterPriorOut, RCModelOut
 from .iso6946 import element_u_value, layer_resistance, surface_resistances
 from .materials_db import MATERIALS
+from .state_space import h_int_from_room
 
 
 # Relative uncertainty (1-sigma / mean) per parameter source
@@ -91,6 +92,7 @@ def _heavy_layer_mass(element: EnvelopeElement) -> float:
 def build_priors(room: Room) -> RCModelOut:
     """Build all five parameter priors from a Room description."""
     h_env_contribs: list[ContributionOut] = []
+    h_win_contribs: list[ContributionOut] = []
     c_wall_contribs: list[ContributionOut] = []
 
     total_opaque_area = 0.0
@@ -100,14 +102,20 @@ def build_priors(room: Room) -> RCModelOut:
     for elem in room.elements:
         ua = element_u_value(elem) * elem.area_m2
         sigma_h = ua * _REL_SIGMA_H_ENV
-        h_env_contribs.append(ContributionOut(
+        contrib = ContributionOut(
             label=f"{elem.name}  [{elem.orientation.value}]",
             value=ua,
             sigma=sigma_h,
             detail=f"U={element_u_value(elem):.2f} W/m²K  ×  {elem.area_m2} m²",
-        ))
+        )
 
-        if elem.type != ElementType.window:
+        if elem.type == ElementType.window:
+            # Windows: direct T_ext→T_room loss, shown separately from H_env
+            h_win_contribs.append(contrib)
+        else:
+            # Opaque elements: drive the sol-air path through C_wall
+            h_env_contribs.append(contrib)
+
             c = _heavy_layer_mass(elem)
             if c > 0:
                 sigma_c = c * _REL_SIGMA_C_WALL
@@ -123,13 +131,29 @@ def build_priors(room: Room) -> RCModelOut:
             alpha_var_sum  += (alpha_sig * elem.area_m2) ** 2
             total_opaque_area += elem.area_m2
 
-    # H_env
+    # H_env (opaque only)
     h_env_mu    = sum(c.value for c in h_env_contribs)
-    h_env_sigma = math.sqrt(sum(c.sigma**2 for c in h_env_contribs))
+    h_env_sigma = math.sqrt(sum(c.sigma**2 for c in h_env_contribs)) if h_env_contribs else 0.0
 
-    # H_ve
-    h_ve_mu    = 0.34 * room.ach * room.volume
-    h_ve_sigma = h_ve_mu * _REL_SIGMA_H_VE
+    # H_win (windows, direct T_ext→T_room)
+    h_win_mu    = sum(c.value for c in h_win_contribs)
+    h_win_sigma = math.sqrt(sum(c.sigma**2 for c in h_win_contribs)) if h_win_contribs else 0.0
+
+    # H_ve: ventilation only; H_win added as separate contribution
+    h_ve_vent_mu    = 0.34 * room.ach * room.volume
+    h_ve_vent_sigma = h_ve_vent_mu * _REL_SIGMA_H_VE
+    # Combined H_ve prior shown to user includes window loss (same direct T_ext→T_room path)
+    h_ve_mu    = h_ve_vent_mu + h_win_mu
+    h_ve_sigma = math.sqrt(h_ve_vent_sigma**2 + h_win_sigma**2)
+    h_ve_contribs = [ContributionOut(
+        label=f"Ventilation  (ACH={room.ach})",
+        value=h_ve_vent_mu,
+        sigma=h_ve_vent_sigma,
+        detail=f"0.34 × {room.ach} ACH × {room.volume:.1f} m³",
+    )] + h_win_contribs
+
+    # H_int: fixed from ISO 6946, not a free parameter — shown for information
+    h_int_mu = h_int_from_room(room)
 
     # C_wall
     c_wall_mu    = sum(c.value for c in c_wall_contribs)
@@ -159,27 +183,22 @@ def build_priors(room: Room) -> RCModelOut:
 
     return RCModelOut(
         H_env=ParameterPriorOut(
-            name="Envelope heat loss",
+            name="Opaque envelope heat loss",
             symbol="H_env",
             unit="W/K",
-            description="Sum of U·A for all envelope elements. Drives steady-state heat loss.",
+            description="U·A for opaque elements (walls, roof, floor). Drives sol-air path through C_wall.",
             mu=h_env_mu,
             sigma=h_env_sigma,
             contributions=h_env_contribs,
         ),
         H_ve=ParameterPriorOut(
-            name="Ventilation heat loss",
+            name="Ventilation + window heat loss",
             symbol="H_ve",
             unit="W/K",
-            description="ρ·cp·n·V from ACH and room volume. Wide prior: ACH is often uncertain.",
+            description="Direct T_ext→T_room losses: ventilation (ρ·cp·n·V) plus window conduction (U·A). Windows bypass C_wall.",
             mu=h_ve_mu,
             sigma=h_ve_sigma,
-            contributions=[ContributionOut(
-                label=f"Ventilation  (ACH={room.ach})",
-                value=h_ve_mu,
-                sigma=h_ve_sigma,
-                detail=f"0.34 × {room.ach} ACH × {room.volume:.1f} m³",
-            )],
+            contributions=h_ve_contribs,
         ),
         C_wall=ParameterPriorOut(
             name="Envelope thermal mass",
@@ -213,4 +232,5 @@ def build_priors(room: Room) -> RCModelOut:
             sigma=alpha_sigma,
             contributions=alpha_contribs,
         ),
+        H_int=h_int_mu,
     )

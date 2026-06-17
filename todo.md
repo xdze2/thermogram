@@ -95,15 +95,58 @@ Backend and frontend for managing multiple studies (room + data spec + results b
 
 ## Phase 2 — Bayesian identification
 
+### Revised RC model (2R2C)
+
+```
+T_sa(t) ──H_env──[C_wall]──H_int──┐
+                                   ├──[C_room]── T_room (observed)
+T_ext ──(H_ve + H_win)────────────┘
+                                   │
+                      Q_sol_win + Q_int
+```
+
+- `T_sa = T_ext + α_eff · G / h_ext`  — sol-air temperature (opaque surfaces only)
+- `H_env = Σ U·A` opaque elements (walls, roof, floor) — drives sol-air path through C_wall
+- `H_win = Σ U·A` windows — direct T_ext→C_room loss (lumped with H_ve or kept separate)
+- `H_int` — fixed from ISO 6946: `H_int = A_opaque / (R_si + R_layers)`, not a free param
+- `Q_sol_win = Σ SHGC·A·G_surface` per window — direct gain into C_room
+- `α_eff` — area-weighted absorptivity of opaque outer surfaces
+
+**5 free parameters:** `H_env`, `H_ve` (or `H_ve+H_win`), `C_wall`, `C_room`, `α_eff`
+
+Notes:
+- Per-orientation wall split deferred to later (one α_eff scalar for now)
+- H_int fixed ratio keeps state-space identifiable
+- Windows skip C_wall (solar gain direct to C_room, U-loss direct T_ext→C_room)
+
 ### Backend
 
-- [ ] `thermal/state_space.py` — build A, B matrices for 2R2C system from theta; discrete-time ZOH transition (matrix exponential); Kalman filter likelihood p(T_obs | theta, weather)
-- [ ] `thermal/fit.py` — MAP or full posterior via scipy.optimize / emcee; returns `FitResult` with posterior mu/sigma per parameter
-- [ ] `POST /api/studies/{id}/fit` — triggers fit using study's `rc_prior` + live data from `data_spec`; stores result in `study.fit_result`; returns updated `RCModelOut` with posterior
+- [x] `thermal/state_space.py` — 2R2C A/B matrices; H_int fixed from ISO 6946; ZOH via `scipy.signal.cont2discrete`; `forward_sim`, `sol_air_temperature`
+- [x] Update `priors.py` — `H_env` opaque-only; window U·A in `H_ve` contributions; `H_int` returned in `RCModelOut`
+- [x] Update README mermaid diagram to match revised model
+- [x] `thermal/fit.py` — MAP via `scipy.optimize.minimize` (L-BFGS-B); log/logit-space params; returns `FitResult`
+### Input data caching (replaces live-fetch preview)
+
+Store fetched time-series inside the study JSON as `input_data`. Preview and fit both read from it — no live InfluxDB query at fit or render time.
+
+```
+study.input_data = {
+  "signal_name": [[iso_timestamp, value], ...]   # one entry per selected signal
+}
+```
+
+Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/studies/{id}/fetch_data` pulls from InfluxDB and writes `input_data` into study file → preview renders from cached data → fit reads same array.
+
+- [ ] Add `input_data` field to `Study` model (`dict[str, list[list]] | None`)
+- [ ] `POST /api/studies/{id}/fetch_data` — reads `data_spec`, pulls from InfluxDB, saves `input_data` in study, returns it
+- [ ] Remove `GET /api/studies/{id}/data` (replaced by fetch_data + cached field)
+- [ ] Update `DataPreview.svelte` — render from `study.input_data` (loaded with study), trigger re-render on fetch; replace live-fetch with "Fetch data" button
+- [ ] `POST /api/studies/{id}/fit` — read `study.input_data`, run `fit.run_fit()`, store result in `study.fit_result`, return `FitResult`
 - [ ] `GET  /api/studies/{id}/fit` — return cached `fit_result` (or 404 if not yet run)
 
 ### Frontend
 
+- [ ] "Fetch data" button in DataSources panel; show row count + date range of cached data; spinner while fetching
 - [ ] Fit trigger button in study editor; show spinner while running
 - [ ] Prior vs posterior overlay in `PriorBlock.svelte` — show both mu±sigma when `fit_result` is present
 - [ ] Contributions log annotation: "prior: 13.4 → posterior: 11.2 (pulled by data)"

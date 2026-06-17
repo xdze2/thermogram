@@ -89,7 +89,7 @@ def test_rc_model_deterministic(study):
 
 def test_rc_model_all_parameters_present(study):
     r = _patch_room(study["id"], BRICK_ROOM)
-    assert {"H_env", "H_ve", "C_wall", "C_room", "alpha_eff"} == r.json().keys()
+    assert {"H_env", "H_ve", "C_wall", "C_room", "alpha_eff", "H_int"} == r.json().keys()
 
 
 def test_rc_model_c_wall_has_brick_contribution(study):
@@ -124,8 +124,11 @@ def test_rc_model_window_with_u_override(study):
     ]}
     r = _patch_room(study["id"], room)
     assert r.status_code == 200
-    h_env = r.json()["H_env"]
-    assert abs(h_env["mu"] - 1.4 * 2.0) < 0.01
+    data = r.json()
+    # Window loss appears in H_ve contributions (direct T_ext→T_room), not H_env (opaque sol-air path)
+    assert data["H_env"]["mu"] == 0.0
+    win_contrib = next(c for c in data["H_ve"]["contributions"] if "window" in c["label"].lower())
+    assert abs(win_contrib["value"] - 1.4 * 2.0) < 0.01
 
 
 # ---------------------------------------------------------------------------
