@@ -6,17 +6,31 @@ let SCHEMA = {};      // {element_types: [...], orientations: [...]}
 let elements = [];
 let elementIdSeq = 0;
 
+function escAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
 
 async function init() {
-  const [schema, materials] = await Promise.all([
-    fetch("/api/schema").then(r => r.json()),
-    fetch("/api/materials").then(r => r.json()),
-  ]);
-  SCHEMA = schema;
-  MATERIALS = materials;
+  try {
+    const fetchJson = async url => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
+      return r.json();
+    };
+    const [schema, materials] = await Promise.all([
+      fetchJson("/api/schema"),
+      fetchJson("/api/materials"),
+    ]);
+    SCHEMA = schema;
+    MATERIALS = materials;
+  } catch (e) {
+    setStatus(`Failed to load: ${e.message}`, true);
+    return;
+  }
 
   addElement();
   bindRoomFields();
@@ -76,11 +90,19 @@ function removeLayer(elemId, layerIdx) {
 
 function renderElements() {
   const list = document.getElementById("elements-list");
+  const openIds = new Set(
+    [...list.querySelectorAll(".element-card-body.open")].map(
+      b => parseInt(b.closest("[data-id]")?.dataset.id)
+    )
+  );
   list.innerHTML = "";
-  elements.forEach(el => list.appendChild(buildElementCard(el)));
+  elements.forEach(el => {
+    const wasOpen = openIds.size === 0 || openIds.has(el.id);
+    list.appendChild(buildElementCard(el, wasOpen));
+  });
 }
 
-function buildElementCard(el) {
+function buildElementCard(el, isOpen = true) {
   const card = document.createElement("div");
   card.className = "card card-border bg-base-200 card-compact";
   card.dataset.id = el.id;
@@ -88,13 +110,17 @@ function buildElementCard(el) {
   // Header (toggle)
   const header = document.createElement("div");
   header.className = "card-title px-3 py-2 cursor-pointer select-none flex justify-between items-center text-sm hover:bg-base-300 rounded-t";
-  header.innerHTML = `
-    <span class="el-name font-medium text-base-content">${el.name}</span>
-    <span class="el-meta text-xs text-base-content/40">${el.type} · ${el.orientation} · ${el.area_m2} m²</span>
-  `;
+  const elNameSpan = document.createElement("span");
+  elNameSpan.className = "el-name font-medium text-base-content";
+  elNameSpan.textContent = el.name;
+  const elMetaSpan = document.createElement("span");
+  elMetaSpan.className = "el-meta text-xs text-base-content/40";
+  elMetaSpan.textContent = `${el.type} · ${el.orientation} · ${el.area_m2} m²`;
+  header.appendChild(elNameSpan);
+  header.appendChild(elMetaSpan);
 
   const body = document.createElement("div");
-  body.className = "element-card-body card-body pt-2 open";
+  body.className = `element-card-body card-body pt-2${isOpen ? " open" : ""}`;
 
   header.addEventListener("click", () => body.classList.toggle("open"));
 
@@ -103,7 +129,7 @@ function buildElementCard(el) {
     <div class="flex flex-col gap-1">
       <label class="flex items-center gap-2">
         <span class="text-xs text-base-content/50 w-24 shrink-0">Name</span>
-        <input type="text" data-field="name" value="${el.name}"
+        <input type="text" data-field="name" value="${escAttr(el.name)}"
                class="input input-xs input-bordered w-full" />
       </label>
       <label class="flex items-center gap-2">
@@ -229,7 +255,7 @@ function buildRoom() {
       orientation:      el.orientation,
       area_m2:          el.area_m2,
       layers:           el.layers,
-      u_value_override: el.u_value_override || null,
+      u_value_override: el.u_value_override ?? null,
     })),
   };
 }
@@ -329,15 +355,20 @@ function buildPriorBlock(key, p) {
     const row = document.createElement("div");
     row.className = "grid items-center gap-2 py-0.5 text-xs text-base-content/50";
     row.style.gridTemplateColumns = "1fr 100px 80px";
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = c.label ?? "";
+    if (c.detail != null) labelSpan.setAttribute("title", c.detail);
+    const sigStr = c.sigma != null ? `±${fmt(cSig)}` : "";
     row.innerHTML = `
-      <span title="${c.detail}">${c.label}</span>
+      <span></span>
       <span class="text-right tabular-nums">
-        +${fmt(cVal)} <span class="text-base-content/30">±${fmt(cSig)}</span>
+        +${fmt(cVal)} <span class="text-base-content/30">${sigStr}</span>
       </span>
       <div class="contrib-bar-wrap">
         <div class="contrib-bar" style="width:${barPct.toFixed(1)}%"></div>
       </div>
     `;
+    row.replaceChild(labelSpan, row.firstElementChild);
     block.appendChild(row);
   });
 
