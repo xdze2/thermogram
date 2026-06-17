@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Run the dev server
 uv run uvicorn api:app --reload   # → http://localhost:8000
 
-# Frontend (Svelte + Vite) — run from frontend_svelte/
+# Frontend (Svelte + Vite) — run from frontend/
 npm run dev    # → http://localhost:5173 (proxied to FastAPI)
 npm run build  # → builds into frontend/dist/ (served by FastAPI)
 
@@ -47,7 +47,7 @@ Five parameters: `H_env` (W/K), `H_ve` (W/K), `C_wall` (J/K), `C_room` (J/K), `a
 
 ### Frontend
 
-Svelte + Vite app in `frontend_svelte/`, built into `frontend/dist/` (served by FastAPI). DaisyUI 5 + Tailwind CSS v4.
+Svelte + Vite app in `frontend/`, built into `frontend/dist/` (served by FastAPI). DaisyUI 5 + Tailwind CSS v4.
 
 - **`src/App.svelte`** — top-level layout, init, theme switcher, compute loop (debounced 180 ms POST)
 - **`src/lib/store.js`** — all state as Svelte stores + localStorage persistence

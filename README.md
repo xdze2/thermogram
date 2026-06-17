@@ -62,7 +62,7 @@ thermal/
   solar.py              # Solar geometry and surface irradiance
   data_src/influx.py    # InfluxDB wrapper: list_signals(), fetch_series()
 api.py                  # FastAPI app; serves frontend/dist/ as static files
-frontend_svelte/        # Svelte + Vite source (builds into frontend/dist/)
+frontend/        # Svelte + Vite source (builds into frontend/dist/)
   src/
     App.svelte          # Top-level layout + compute loop
     lib/store.js        # All state as Svelte stores + localStorage
@@ -81,7 +81,7 @@ Requires [uv](https://github.com/astral-sh/uv) and Node.js.
 uv run uvicorn api:app --reload   # → http://localhost:8000
 
 # Frontend (dev mode with HMR, proxies /api/* to FastAPI)
-cd frontend_svelte
+cd frontend
 npm install
 npm run dev                        # → http://localhost:5173
 
