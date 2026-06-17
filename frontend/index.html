@@ -22,9 +22,37 @@
 </head>
 <body class="bg-base-100 text-base-content min-h-screen">
 
-  <div class="bg-base-200 border-b border-base-300 py-2 px-4">
+  <div class="bg-base-200 border-b border-base-300 py-2 px-4 flex items-center justify-between">
     <span class="text-xs tracking-widest uppercase text-base-content/50">thermal nodes</span>
+    <div class="flex items-center gap-3">
+      <a href="/docs" target="_blank" class="text-xs text-base-content/40 hover:text-base-content/80 transition-colors">API docs</a>
+      <div class="relative">
+        <button id="theme-btn" class="text-xs text-base-content/40 hover:text-base-content/80 transition-colors">theme</button>
+        <div id="theme-menu" class="hidden absolute right-0 top-6 z-50 bg-base-200 border border-base-300 rounded shadow-lg py-1 min-w-28">
+          <button class="theme-option block w-full text-left px-3 py-1 text-xs hover:bg-base-300" data-theme="dark">dark</button>
+          <button class="theme-option block w-full text-left px-3 py-1 text-xs hover:bg-base-300" data-theme="light">light</button>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <script>
+    const themeBtn = document.getElementById('theme-btn');
+    const themeMenu = document.getElementById('theme-menu');
+    themeBtn.addEventListener('click', () => themeMenu.classList.toggle('hidden'));
+    document.addEventListener('click', e => {
+      if (!themeBtn.contains(e.target) && !themeMenu.contains(e.target)) themeMenu.classList.add('hidden');
+    });
+    document.querySelectorAll('.theme-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.documentElement.setAttribute('data-theme', btn.dataset.theme);
+        localStorage.setItem('theme', btn.dataset.theme);
+        themeMenu.classList.add('hidden');
+      });
+    });
+    const saved = localStorage.getItem('theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+  </script>
 
   <div id="app">
 
