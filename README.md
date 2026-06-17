@@ -55,29 +55,39 @@ Five parameters with Gaussian priors:
 
 ```
 thermal/
-  materials_db.py   # 30+ materials with λ, ρ, cp
-  api_models.py     # Pydantic v2 models (Room, EnvelopeElement, MaterialLayer, *Out)
-  priors.py         # build_priors(room) → Gaussian priors on RC parameters
-  iso6946.py        # U-value, surface resistances
-  solar.py          # Solar geometry and surface irradiance
-  weather.py        # Open-Meteo fetch and cache
-api.py              # FastAPI app (GET /api/schema, /api/materials, POST /api/room/rc_model)
-frontend/
-  index.html        # Two-column shell (DaisyUI night theme)
-  app.js            # Room editor + prior display; all dropdowns data-driven from API
+  materials_db.py       # 30+ materials with λ, ρ, cp
+  api_models.py         # Pydantic v2 models (Room, EnvelopeElement, MaterialLayer, *Out)
+  priors.py             # build_priors(room) → Gaussian priors on RC parameters
+  iso6946.py            # U-value, surface resistances
+  solar.py              # Solar geometry and surface irradiance
+  data_src/influx.py    # InfluxDB wrapper: list_signals(), fetch_series()
+api.py                  # FastAPI app; serves frontend/dist/ as static files
+frontend_svelte/        # Svelte + Vite source (builds into frontend/dist/)
+  src/
+    App.svelte          # Top-level layout + compute loop
+    lib/store.js        # All state as Svelte stores + localStorage
+    lib/*.svelte        # RoomFields, ElementCard, DataSources, SignalPicker,
+                        # PriorBlock, DataPreview
 tests/
-  test_api.py       # pytest + httpx round-trip tests
+  test_api.py           # pytest + httpx round-trip tests
 ```
 
 ## Running
 
-Requires [uv](https://github.com/astral-sh/uv).
+Requires [uv](https://github.com/astral-sh/uv) and Node.js.
 
 ```bash
-uv run uvicorn api:app --reload
-```
+# Backend
+uv run uvicorn api:app --reload   # → http://localhost:8000
 
-Then open `http://localhost:8000`.
+# Frontend (dev mode with HMR, proxies /api/* to FastAPI)
+cd frontend_svelte
+npm install
+npm run dev                        # → http://localhost:5173
+
+# Or build for production (output served by FastAPI at :8000)
+npm run build
+```
 
 ## API
 
@@ -85,6 +95,8 @@ Then open `http://localhost:8000`.
 |--------|------|-------------|
 | GET | `/api/schema` | Element types and orientations (enum values for dropdowns) |
 | GET | `/api/materials` | All materials with λ, ρ, cp, is_heavy |
+| GET | `/api/signals` | Available InfluxDB signal names (empty if unreachable) |
+| GET | `/api/data` | Fetch time-series for selected signals |
 | POST | `/api/room/rc_model` | `Room` → `RCModelOut` (five parameter priors) |
 
 Interactive docs at `http://localhost:8000/docs`.

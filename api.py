@@ -110,7 +110,9 @@ def post_rc_model(room: Room) -> RCModelOut:
 # Serve frontend static files
 # ---------------------------------------------------------------------------
 
-_FRONTEND = Path(__file__).parent / "frontend"
+_FRONTEND = Path(__file__).parent / "frontend" / "dist"
+if not _FRONTEND.exists():
+    _FRONTEND = Path(__file__).parent / "frontend"
 
 if _FRONTEND.exists():
     app.mount("/", StaticFiles(directory=_FRONTEND, html=True), name="frontend")

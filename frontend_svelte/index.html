@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thermal nodes</title>
+    <script>
+      // Apply saved theme before first paint
+      const t = localStorage.getItem('theme');
+      if (t) document.documentElement.setAttribute('data-theme', t);
+    </script>
+  </head>
+  <body class="bg-base-100 text-base-content min-h-screen">
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

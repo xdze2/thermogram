@@ -53,16 +53,14 @@ No static U-value path. No forward simulation endpoint.
 
 ---
 
-## Phase 1.6 — Svelte migration
+## Phase 1.6 — Svelte migration ← done
 
 Replace vanilla JS frontend with a Svelte + Vite app. FastAPI serves `frontend/dist/` as static files.
 
-- [ ] Scaffold Svelte + Vite app in `frontend/` (or `frontend_svelte/` during transition)
-      `npm create vite@latest frontend_svelte -- --template svelte`
-- [ ] Configure Vite to build into `frontend/dist/`; update `api.py` static mount to `frontend/dist/`
-- [ ] Port current UI to Svelte components (room editor, prior display, signal picker, data preview)
-      Keep feature parity with current `app.js` before adding anything new
-- [ ] Add `npm run build` / `npm run dev` to CLAUDE.md commands
+- [x] Scaffold Svelte + Vite app in `frontend_svelte/`
+- [x] Configure Vite to build into `frontend/dist/`; update `api.py` static mount to `frontend/dist/`
+- [x] Port current UI to Svelte components (room editor, prior display, signal picker, data preview)
+- [x] Add `npm run build` / `npm run dev` to CLAUDE.md commands
 
 ---
 

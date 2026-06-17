@@ -8,6 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Run the dev server
 uv run uvicorn api:app --reload   # → http://localhost:8000
 
+# Frontend (Svelte + Vite) — run from frontend_svelte/
+npm run dev    # → http://localhost:5173 (proxied to FastAPI)
+npm run build  # → builds into frontend/dist/ (served by FastAPI)
+
 # Run all tests
 uv run pytest
 
@@ -39,11 +43,24 @@ Five parameters: `H_env` (W/K), `H_ve` (W/K), `C_wall` (J/K), `C_room` (J/K), `a
 - **`thermal/iso6946.py`** — U-value from layer stack (EN ISO 6946:2017 series resistance). `element_u_value(element)` respects `u_value_override` if set.
 - **`thermal/materials_db.py`** — `MATERIALS: dict[str, MaterialSpec]`. `MaterialSpec` carries `lambda_`, `rho`, `cp`; `is_heavy` (ρ > 500 kg/m³) controls which layers count toward `C_wall`.
 - **`thermal/rc_simulation.py`** — Hourly Euler simulation (phase 2 use); not called by the prior endpoint.
-- **`api.py`** — Three endpoints: `GET /api/schema`, `GET /api/materials`, `POST /api/room/rc_model`. Also mounts `frontend/` as static files on `/`.
+- **`api.py`** — Endpoints: `GET /api/schema`, `GET /api/materials`, `GET /api/signals`, `GET /api/data`, `POST /api/room/rc_model`. Serves `frontend/dist/` as static files on `/` (falls back to `frontend/` if dist missing).
 
 ### Frontend
 
-Vanilla JS (`frontend/app.js`) with no build step. Dropdowns are data-driven from `/api/schema` and `/api/materials` fetched at init. Every field change triggers a debounced (180 ms) POST to recompute priors. Mermaid diagram rendered from jsDelivr CDN; re-rendered on theme toggle via `window._mermaid`.
+Svelte + Vite app in `frontend_svelte/`, built into `frontend/dist/` (served by FastAPI). DaisyUI 5 + Tailwind CSS v4.
+
+- **`src/App.svelte`** — top-level layout, init, theme switcher, compute loop (debounced 180 ms POST)
+- **`src/lib/store.js`** — all state as Svelte stores + localStorage persistence
+- **`src/lib/RoomFields.svelte`** — room name/area/height/ACH/lat/lon
+- **`src/lib/ElementCard.svelte`** — collapsible card per envelope element with layer stack editor
+- **`src/lib/DataSources.svelte`** — T_int/T_ext/Q_sol signal rows + time range selector
+- **`src/lib/SignalPicker.svelte`** — modal with search + select/clear
+- **`src/lib/PriorBlock.svelte`** — per-parameter prior display with contribution bars
+- **`src/lib/DataPreview.svelte`** — Plotly chart, reacts to store changes
+- **`src/lib/api.js`** — `fetchJson` / `postRcModel`
+- **`src/lib/format.js`** — `fmt` / `scaleUnits`
+
+Dev server (`npm run dev`) proxies `/api/*` to FastAPI on port 8000. Mermaid rendered via jsDelivr CDN, re-rendered on theme change.
 
 ### Prior uncertainties (1-sigma relative)
 

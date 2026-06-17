@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+body {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.contrib-bar-wrap {
+  height: 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: oklch(var(--b3));
+}
+.contrib-bar {
+  height: 100%;
+  background: oklch(var(--p));
+  border-radius: 2px;
+}
