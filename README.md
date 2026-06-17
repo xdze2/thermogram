@@ -1,41 +1,50 @@
 # Thermal Room Estimator
 
-A small engineering app for estimating the thermal parameters of a room, built on ISO standards and real weather data.
+A small engineering app for identifying the thermal parameters of a room from sensor data, using a 2R2C RC model and Bayesian inference.
 
 ## What it does
 
-The user describes a room **element by element** — walls, windows, roof, floor — specifying geometry, orientation, and material layers. The app computes steady-state thermal performance (ISO 6946 U-values) and runs an hourly dynamic simulation (ISO 52016 RC model) driven by real historical weather fetched automatically from Open-Meteo.
+The user describes a room **element by element** — walls, windows, roof, floor — specifying geometry, orientation, and material layers. The app builds Gaussian priors on the five RC model parameters from the room description (ISO 6946 physics), then updates those priors to a posterior by fitting an observed indoor temperature log against weather data.
 
-## Key outputs
+## Workflow
 
-**Static (per element and total)**
-- U-value [W/m²·K] computed from material layer stack
-- Total thermal resistance R [m²·K/W]
-- Heat loss coefficient UA [W/K] per element and total
-- Effective thermal mass κ [kJ/m²·K]
-- Time constant τ [h] of the zone
+1. **Describe** the room: envelope elements, ACH, location.
+2. **Inspect** the prior: H_env, H_ve, C_wall, C_room, α_eff with per-element breakdown and uncertainty.
+3. **Upload** an observed indoor temperature log (hourly CSV).
+4. **Fit**: Bayesian update yields a posterior — the data pulls the parameters away from the physics-based prior.
 
-**Dynamic (hourly, full year)**
-- Annual heating and cooling energy [kWh/yr and kWh/m²·yr]
-- Peak heating and cooling loads [W]
-- Monthly energy demand and mean temperatures
-- Hourly detail view for selected weeks
-- Annual energy balance: solar gains, internal gains, conduction losses, ventilation losses
+## RC model
 
-## Physics and standards
+The room is a 2R2C network driven by sol-air temperature:
+
+```
+T_sa(t) ──R_ext──[C_wall]──R_int──[C_room]
+                                      │
+                                Q_int + Q_sol_win
+                                R_ve ── T_out
+```
+
+Five parameters with Gaussian priors:
+
+| Symbol    | Meaning                        | Unit  |
+|-----------|-------------------------------|-------|
+| H_env     | Envelope conduction loss       | W/K   |
+| H_ve      | Ventilation heat loss          | W/K   |
+| C_wall    | Envelope thermal mass          | MJ/K  |
+| C_room    | Interior thermal mass          | MJ/K  |
+| α_eff     | Effective outer absorptivity   | —     |
+
+## Physics references
 
 | Module | Reference |
 |---|---|
-| U-value from material layers | EN ISO 6946:2017 |
+| Prior on H_env from layer stack | EN ISO 6946:2017 |
 | Surface resistances (Rsi, Rso) | EN ISO 6946:2017 Table 1 |
 | Material properties (λ, ρ, cp) | EN ISO 10456 / EN 1745 |
-| Solar declination & hour angle | Spencer (1971) |
-| Irradiance on tilted surface | Isotropic sky diffuse model (Hottel-Woertz) |
-| Hourly RC thermal simulation | ISO 52016-1:2017 simplified 1-node method |
-| Ventilation heat loss H_ve | ρ·cp·n·V (standard air properties) |
+| Solar irradiance on tilted surface | Isotropic sky diffuse model (Hottel-Woertz) |
+| Sol-air temperature | Spencer (1971) declination |
 | Weather data | Open-Meteo historical archive (ERA5-based) |
-
-The dynamic model represents the room as a single thermal node with a lumped capacitance C = κ · A_floor. At each hourly timestep an explicit Euler integration computes the free-float temperature, then ideal HVAC clamps it to the heating/cooling setpoint band. The HVAC demand at each step is the energy balance residual.
+| Likelihood for fit | Kalman filter on 2R2C state-space |
 
 ## Project structure
 
@@ -43,11 +52,13 @@ The dynamic model represents the room as a single thermal node with a lumped cap
 thermal/
   materials_db.py   # 30+ materials with λ, ρ, cp
   models.py         # Room, EnvelopeElement, MaterialLayer dataclasses
-  iso6946.py        # U-value, R, UA, thermal mass calculations
+  priors.py         # build_priors(room) → Gaussian priors on RC parameters
+  iso6946.py        # U-value, surface resistances (used only by priors.py)
   solar.py          # Solar geometry and surface irradiance
-  weather.py        # Open-Meteo fetch and statistics
-  rc_simulation.py  # Hourly RC simulation and annual summary
-app.py              # Streamlit UI
+  weather.py        # Open-Meteo fetch and cache
+  state_space.py    # 2R2C A/B matrices, ZOH, Kalman likelihood
+api.py              # FastAPI app
+frontend/           # HTML + vanilla JS + Plotly.js
 ```
 
 ## Running
@@ -55,15 +66,13 @@ app.py              # Streamlit UI
 Requires [uv](https://github.com/astral-sh/uv).
 
 ```bash
-uv run streamlit run app.py
+uv run fastapi dev api.py
 ```
-
-Weather data is fetched automatically (no API key needed) and cached in the session for the selected location and year.
 
 ## Scope and limitations
 
-- Single-zone model: one thermal node per room, no inter-room heat transfer
-- Opaque elements use the ISO 6946 series resistance method (no thermal bridging correction)
-- Ground-contact floor uses a simplified boundary condition (no ISO 13370 ground coupling)
+- Single-zone model: one thermal node per room
+- Opaque elements use ISO 6946 series resistance (no thermal bridging correction)
+- Ground-contact floor uses simplified boundary condition (no ISO 13370 ground coupling)
 - Solar model uses isotropic diffuse sky; no shading or horizon masking
-- HVAC is ideal (infinite capacity, 100% efficiency) — outputs are net energy demand, not primary energy
+- Fit assumes hourly resolution and complete weather coverage for the log period

@@ -111,7 +111,7 @@ class EnvelopeElementIn(BaseModel):
 class RoomIn(BaseModel):
     """
     Complete single-zone room description.
-    This is the primary input for all /api/room/* endpoints.
+    Used by POST /api/room/rc_model (priors) and POST /api/room/fit.
     """
 
     name: str = Field(default="Room", description="User-facing room label.")
@@ -134,9 +134,6 @@ class RoomIn(BaseModel):
         default=0.5, gt=0,
         description="Air changes per hour for infiltration/ventilation.",
     )
-
-    t_set_heating: float = Field(default=20.0, description="Heating setpoint in °C.")
-    t_set_cooling: float = Field(default=26.0, description="Cooling setpoint in °C.")
 
 
 # ---------------------------------------------------------------------------
@@ -206,18 +203,6 @@ class RCModelOut(BaseModel):
     C_wall:    ParameterPriorOut = Field(..., description="Envelope thermal mass [MJ/K].")
     C_room:    ParameterPriorOut = Field(..., description="Interior thermal mass [MJ/K].")
     alpha_eff: ParameterPriorOut = Field(..., description="Effective outer surface absorptivity [—].")
-
-    # Derived scalars useful for quick sanity checks
-    tau_fast_h: float = Field(
-        ...,
-        description="Fast time constant: C_room / (H_env + H_ve) in hours. "
-                    "Governs window/ventilation response.",
-    )
-    tau_slow_h: float = Field(
-        ...,
-        description="Slow time constant: (C_wall + C_room) / (H_env + H_ve) in hours. "
-                    "Governs wall thermal lag.",
-    )
 
 
 # ---------------------------------------------------------------------------
