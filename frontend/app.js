@@ -102,12 +102,12 @@ function buildElementCard(el) {
   const fieldsHtml = `
     <div class="flex flex-col gap-1">
       <label class="flex items-center gap-2">
-        <span class="text-xs text-base-content/40 w-24 shrink-0">Name</span>
+        <span class="text-xs text-base-content/50 w-24 shrink-0">Name</span>
         <input type="text" data-field="name" value="${el.name}"
                class="input input-xs input-bordered w-full" />
       </label>
       <label class="flex items-center gap-2">
-        <span class="text-xs text-base-content/40 w-24 shrink-0">Type</span>
+        <span class="text-xs text-base-content/50 w-24 shrink-0">Type</span>
         <select data-field="type" class="select select-xs select-bordered w-full">
           ${SCHEMA.element_types.map(t =>
             `<option value="${t.value}" ${t.value === el.type ? "selected" : ""}>${t.label}</option>`
@@ -115,7 +115,7 @@ function buildElementCard(el) {
         </select>
       </label>
       <label class="flex items-center gap-2">
-        <span class="text-xs text-base-content/40 w-24 shrink-0">Orientation</span>
+        <span class="text-xs text-base-content/50 w-24 shrink-0">Orientation</span>
         <select data-field="orientation" class="select select-xs select-bordered w-full">
           ${SCHEMA.orientations.map(o =>
             `<option value="${o.value}" ${o.value === el.orientation ? "selected" : ""}>${o.label}</option>`
@@ -123,15 +123,14 @@ function buildElementCard(el) {
         </select>
       </label>
       <label class="flex items-center gap-2">
-        <span class="text-xs text-base-content/40 w-24 shrink-0">Area (m²)</span>
-        <input type="number" data-field="area_m2" value="${el.area_m2}" min="0.1" step="0.5"
+        <span class="text-xs text-base-content/50 w-24 shrink-0">Area (m²)</span>
+        <input type="number" data-field="area_m2" value="${el.area_m2}"
                class="input input-xs input-bordered w-full" />
       </label>
       <label class="flex items-center gap-2">
-        <span class="text-xs text-base-content/40 w-24 shrink-0">U override</span>
+        <span class="text-xs text-base-content/50 w-24 shrink-0">U override</span>
         <input type="number" data-field="u_value_override" value="${el.u_value_override ?? ""}"
-               min="0.1" step="0.1" placeholder="auto (W/m²K)"
-               class="input input-xs input-bordered w-full" />
+               placeholder="auto (W/m²K)" class="input input-xs input-bordered w-full" />
       </label>
     </div>
   `;
@@ -157,7 +156,7 @@ function buildElementCard(el) {
         ).join("")}
       </select>
       <input type="number" data-layer="${idx}" data-lfield="thickness_m"
-             value="${layer.thickness_m}" min="0.001" step="0.01" placeholder="m"
+             value="${layer.thickness_m}" placeholder="m"
              class="input input-xs input-bordered w-full" />
       <button class="btn btn-xs btn-ghost text-error px-1" data-remove-layer="${idx}">✕</button>
     `;
