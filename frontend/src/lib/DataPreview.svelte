@@ -1,71 +1,41 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { dataSources, DATA_SOURCE_DEFS, rangeStart, rangeEnd, theme } from './store.js';
+  import { theme } from './store.js';
 
-  export let studyId;
+  // input_data: dict signal_name → [[iso_ts, value], ...]
+  export let inputData = null;
+  // dataSources: { T_int, T_ext, Q_sol } → signal names
+  export let dataSources = {};
 
   let chartDiv;
   let status = '';
   let Plotly = null;
-  let debounce = null;
 
   const TRACE_COLORS = { T_int: '#60a5fa', T_ext: '#34d399', Q_sol: '#fbbf24' };
   const TEMP_KEYS = ['T_int', 'T_ext'];
   const SOL_KEYS  = ['Q_sol'];
 
   onMount(async () => {
-    // Plotly loaded via CDN script tag in index.html
     Plotly = window.Plotly;
-    fetchPreview();
+    render();
   });
 
   onDestroy(() => {
     if (Plotly && chartDiv) Plotly.purge(chartDiv);
   });
 
-  // React to store changes
-  const unsub1 = dataSources.subscribe(() => schedulePreview());
-  const unsub2 = rangeStart.subscribe(() => schedulePreview());
-  const unsub3 = rangeEnd.subscribe(() => schedulePreview());
-  const unsub4 = theme.subscribe(() => schedulePreview());
-  onDestroy(() => { unsub1(); unsub2(); unsub3(); unsub4(); });
+  const unsubTheme = theme.subscribe(() => { if (Plotly) render(); });
+  onDestroy(unsubTheme);
 
-  export function schedulePreview() {
-    clearTimeout(debounce);
-    debounce = setTimeout(fetchPreview, 300);
-  }
+  // Re-render whenever inputData or dataSources change
+  $: if (Plotly && (inputData || dataSources)) render();
 
-  async function fetchPreview() {
-    if (!Plotly) return;
+  function render() {
+    if (!Plotly || !chartDiv) return;
 
-    const ds = $dataSources;
-    const selected = DATA_SOURCE_DEFS
-      .map(d => ({ key: d.key, signal: ds[d.key] }))
-      .filter(d => d.signal);
-
-    if (!selected.length) {
-      status = 'no signals selected';
+    if (!inputData) {
+      status = 'no cached data — click "Fetch data"';
       Plotly.purge(chartDiv);
-      return;
-    }
-
-    const start = $rangeStart;
-    const end   = $rangeEnd;
-    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
-    if (!isoRe.test(start) || !isoRe.test(end)) {
-      status = 'set start and end date (YYYY-MM-DD)';
-      return;
-    }
-
-    status = 'loading…';
-
-    let data;
-    try {
-      const r = await fetch(`/api/studies/${studyId}/data`);
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-      data = await r.json();
-    } catch (e) {
-      status = `error: ${e.message}`;
       return;
     }
 
@@ -75,13 +45,17 @@
     const gridCol = isDark ? '#2a323c' : '#e5e7eb';
     const textCol = isDark ? '#a6adba' : '#374151';
 
-    const tempSel = selected.filter(d => TEMP_KEYS.includes(d.key));
-    const solSel  = selected.filter(d => SOL_KEYS.includes(d.key));
-    const hasSol  = solSel.length > 0;
+    const tempSel = TEMP_KEYS
+      .map(k => ({ key: k, signal: dataSources[k] }))
+      .filter(d => d.signal && inputData[d.signal]);
+    const solSel = SOL_KEYS
+      .map(k => ({ key: k, signal: dataSources[k] }))
+      .filter(d => d.signal && inputData[d.signal]);
+    const hasSol = solSel.length > 0;
 
     const traces = [];
     tempSel.forEach(({ key, signal }) => {
-      const pairs = data[signal] ?? [];
+      const pairs = inputData[signal] ?? [];
       traces.push({
         type: 'scatter', mode: 'lines', name: key,
         x: pairs.map(p => p[0]), y: pairs.map(p => p[1]),
@@ -91,7 +65,7 @@
       });
     });
     solSel.forEach(({ key, signal }) => {
-      const pairs = data[signal] ?? [];
+      const pairs = inputData[signal] ?? [];
       const color = TRACE_COLORS[key];
       traces.push({
         type: 'scatter', mode: 'lines', name: key,
@@ -120,16 +94,18 @@
       }),
     };
 
-    const totalPts = Object.values(data).reduce((n, pairs) => n + pairs.length, 0);
-    if (!totalPts) {
-      status = 'no data in range';
+    const totalPts = Object.values(inputData).reduce((n, pairs) => n + pairs.length, 0);
+    if (!totalPts || traces.length === 0) {
+      status = 'no data to display';
       Plotly.purge(chartDiv);
       return;
     }
 
     chartDiv.style.height = hasSol ? '340px' : '220px';
     Plotly.react(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
-    status = `${totalPts} points`;
+    const firstPair = Object.values(inputData).find(p => p.length)?.[0];
+    const lastPair  = Object.values(inputData).find(p => p.length)?.at(-1);
+    status = `${totalPts} pts · ${firstPair?.[0]?.slice(0, 10)} → ${lastPair?.[0]?.slice(0, 10)}`;
   }
 </script>
 

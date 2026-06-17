@@ -14,16 +14,30 @@
   import DataSources from './DataSources.svelte';
   import PriorBlock from './PriorBlock.svelte';
   import DataPreview from './DataPreview.svelte';
+  import FitResultChart from './FitResultChart.svelte';
 
   export let studyId;
 
   const PARAM_ORDER = ['H_env', 'H_ve', 'C_wall', 'C_room', 'alpha_eff'];
+  const PARAM_UNITS = { H_env: 'W/K', H_ve: 'W/K', C_wall: 'MJ/K', C_room: 'MJ/K', alpha_eff: '—' };
+  const PARAM_SCALE = { H_env: 1, H_ve: 1, C_wall: 1e-6, C_room: 1e-6, alpha_eff: 1 };
 
-  let previewComp;
   let loadError = '';
   let studyName = '';
   let editingName = false;
   let nameInput = '';
+
+  let inputData = null;   // cached from study.input_data or after fetch
+  let fitResult = null;
+  let fitting = false;
+  let fitStatus = '';
+
+  // T_int pairs for fit chart (aligned timestamps)
+  $: tObsPairs = (() => {
+    if (!inputData || !$dataSources) return null;
+    const sig = $dataSources['T_int'];
+    return sig && inputData[sig] ? inputData[sig] : null;
+  })();
 
   // --- Load study on mount ---
   onMount(async () => {
@@ -54,7 +68,6 @@
           latitude: study.room.latitude,
           longitude: study.room.longitude,
         });
-        // Restore elements from room
         const m2 = get(materials);
         const restored = (study.room.elements ?? []).map((el, i) => ({
           id: i,
@@ -77,6 +90,9 @@
         if (study.data_spec.start) rangeStart.set(study.data_spec.start);
         if (study.data_spec.end) rangeEnd.set(study.data_spec.end);
       }
+
+      if (study.input_data) inputData = study.input_data;
+      if (study.fit_result) fitResult = study.fit_result;
     } catch (e) {
       loadError = `Failed to load study: ${e.message}`;
       return;
@@ -93,8 +109,6 @@
   });
 
   // --- Room patch (debounced) ---
-  // Long delay for text/numeric fields (user still typing); short for discrete
-  // changes like add/remove element or orientation dropdown.
   let _roomDebounce = null;
   function scheduleRoomPatch(delay = 600) {
     clearTimeout(_roomDebounce);
@@ -142,12 +156,10 @@
     }
   }
 
-  // compute() is an alias for immediate patch
   function compute() { patchRoom(); }
 
   // --- Data spec patch ---
   async function onDataChange() {
-    previewComp?.schedulePreview();
     const spec = {
       data_spec: {
         signals: get(dataSources),
@@ -162,6 +174,35 @@
         body: JSON.stringify(spec),
       });
     } catch (_) {}
+  }
+
+  // Called when DataSources emits 'fetched'
+  function onFetched(e) {
+    inputData = e.detail;
+    fitResult = null; // stale fit after new data
+    fitStatus = '';
+  }
+
+  // --- Fit ---
+  async function runFit() {
+    fitting = true;
+    fitStatus = 'running…';
+    try {
+      const r = await fetch(`/api/studies/${studyId}/fit`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        fitStatus = `error: ${err.detail ?? r.statusText}`;
+        return;
+      }
+      fitResult = await r.json();
+      fitStatus = fitResult.success
+        ? `RMSE ${fitResult.residual_rmse?.toFixed(3)} °C · ${fitResult.n_obs} obs`
+        : `converged with warning: ${fitResult.message}`;
+    } catch (e) {
+      fitStatus = `error: ${e.message}`;
+    } finally {
+      fitting = false;
+    }
   }
 
   // --- Name editing ---
@@ -247,7 +288,7 @@
 
     <div class="divider my-0"></div>
 
-    <DataSources on:change={onDataChange} />
+    <DataSources {studyId} on:change={onDataChange} on:fetched={onFetched} />
 
     <div class="divider my-0"></div>
 
@@ -264,7 +305,7 @@
     </div>
   </div>
 
-  <!-- Right: priors + diagram + data preview -->
+  <!-- Right: priors + diagram + data preview + fit -->
   <div class="p-4 overflow-y-auto">
 
     <!-- RC diagram -->
@@ -292,6 +333,71 @@
 
     <div class="divider my-4"></div>
 
-    <DataPreview bind:this={previewComp} {studyId} />
+    <DataPreview {inputData} dataSources={$dataSources} />
+
+    <div class="divider my-4"></div>
+
+    <!-- Fit section -->
+    <div>
+      <p class="text-xs uppercase tracking-widest text-base-content/30 mb-3">Bayesian fit</p>
+      <div class="flex items-center gap-3 mb-3">
+        <button
+          class="btn btn-xs btn-outline"
+          class:loading={fitting}
+          disabled={fitting || !inputData}
+          on:click={runFit}
+        >
+          {fitting ? 'fitting…' : 'Run fit'}
+        </button>
+        {#if fitStatus}
+          <span class="text-xs text-base-content/40">{fitStatus}</span>
+        {/if}
+      </div>
+
+      {#if fitResult}
+        <!-- Parameter table: param | prior mu ± σ | posterior -->
+        <table class="text-xs font-mono w-full mb-4" style="border-collapse:collapse">
+          <thead>
+            <tr class="text-base-content/30 text-left">
+              <th class="pr-4 pb-1 font-normal">param</th>
+              <th class="pr-4 pb-1 font-normal">unit</th>
+              <th class="pr-4 pb-1 font-normal">prior μ ± σ</th>
+              <th class="pb-1 font-normal">posterior</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each PARAM_ORDER as k}
+              {@const scale = PARAM_SCALE[k]}
+              {@const unit  = PARAM_UNITS[k]}
+              {@const prior = $rcResult?.[k]}
+              {@const post  = fitResult[k]}
+              <tr class="border-t border-base-300/40">
+                <td class="pr-4 py-0.5 text-base-content/50">{k}</td>
+                <td class="pr-4 py-0.5 text-base-content/30">{unit}</td>
+                <td class="pr-4 py-0.5 text-base-content/40">
+                  {#if prior}
+                    {(prior.mu * scale).toPrecision(3)} ± {(prior.sigma * scale).toPrecision(2)}
+                  {:else}—{/if}
+                </td>
+                <td class="py-0.5 text-base-content/70 font-semibold">
+                  {typeof post === 'number' ? (post * scale).toPrecision(4) : '—'}
+                </td>
+              </tr>
+            {/each}
+            <tr class="border-t border-base-300/40">
+              <td class="pr-4 py-0.5 text-base-content/30" colspan="3">RMSE</td>
+              <td class="py-0.5 text-base-content/70">{fitResult.residual_rmse?.toFixed(3)} °C</td>
+            </tr>
+            <tr>
+              <td class="pr-4 py-0.5 text-base-content/30" colspan="3">n obs</td>
+              <td class="py-0.5 text-base-content/70">{fitResult.n_obs}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Fit chart: T_obs / T_room_pred / T_wall_pred + residuals -->
+        <FitResultChart {fitResult} {tObsPairs} />
+      {/if}
+    </div>
   </div>
 </div>

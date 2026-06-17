@@ -125,7 +125,7 @@ Notes:
 - [x] Update `priors.py` — `H_env` opaque-only; window U·A in `H_ve` contributions; `H_int` returned in `RCModelOut`
 - [x] Update README mermaid diagram to match revised model
 - [x] `thermal/fit.py` — MAP via `scipy.optimize.minimize` (L-BFGS-B); log/logit-space params; returns `FitResult`
-### Input data caching (replaces live-fetch preview)
+### Input data caching (replaces live-fetch preview) ← done
 
 Store fetched time-series inside the study JSON as `input_data`. Preview and fit both read from it — no live InfluxDB query at fit or render time.
 
@@ -137,19 +137,31 @@ study.input_data = {
 
 Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/studies/{id}/fetch_data` pulls from InfluxDB and writes `input_data` into study file → preview renders from cached data → fit reads same array.
 
-- [ ] Add `input_data` field to `Study` model (`dict[str, list[list]] | None`)
-- [ ] `POST /api/studies/{id}/fetch_data` — reads `data_spec`, pulls from InfluxDB, saves `input_data` in study, returns it
-- [ ] Remove `GET /api/studies/{id}/data` (replaced by fetch_data + cached field)
-- [ ] Update `DataPreview.svelte` — render from `study.input_data` (loaded with study), trigger re-render on fetch; replace live-fetch with "Fetch data" button
-- [ ] `POST /api/studies/{id}/fit` — read `study.input_data`, run `fit.run_fit()`, store result in `study.fit_result`, return `FitResult`
-- [ ] `GET  /api/studies/{id}/fit` — return cached `fit_result` (or 404 if not yet run)
+- [x] Add `input_data` field to `Study` model (`dict[str, list[list]] | None`)
+- [x] `POST /api/studies/{id}/fetch_data` — reads `data_spec`, pulls from InfluxDB, saves `input_data` in study, returns it
+- [x] Remove `GET /api/studies/{id}/data` (replaced by fetch_data + cached field)
+- [x] Update `DataPreview.svelte` — render from `study.input_data` (loaded with study), trigger re-render on fetch; replace live-fetch with "Fetch data" button
+- [x] `POST /api/studies/{id}/fit` — read `study.input_data`, run `fit.run_fit()`, store result in `study.fit_result`, return `FitResult`
+- [x] `GET  /api/studies/{id}/fit` — return cached `fit_result` (or 404 if not yet run)
 
-### Frontend
+### Frontend ← done
 
-- [ ] "Fetch data" button in DataSources panel; show row count + date range of cached data; spinner while fetching
-- [ ] Fit trigger button in study editor; show spinner while running
+- [x] "Fetch data" button in DataSources panel; show row count + date range of cached data; spinner while fetching
+- [x] Fit trigger button in study editor; show spinner while running
 - [ ] Prior vs posterior overlay in `PriorBlock.svelte` — show both mu±sigma when `fit_result` is present
 - [ ] Contributions log annotation: "prior: 13.4 → posterior: 11.2 (pulled by data)"
+
+### Fit results display
+
+The fit endpoint already returns `T_room_pred` series via a forward sim stored in `fit_result`.
+Return it from `POST /api/studies/{id}/fit` so the frontend can plot it.
+
+- [ ] Add `T_room_pred` and `T_wall_pred` arrays to `FitResult.to_dict()` (timestamps aligned with T_int signal)
+- [ ] `FitResultChart.svelte` — Plotly chart with 3 subplots:
+      top: T_obs (blue) + T_room_pred (orange) + T_wall_pred (dashed)
+      bottom: residuals (T_obs − T_room_pred), zero line
+- [ ] Show chart in StudyEditor right column below the fit parameter table when `fit_result` present
+- [ ] Posterior column in fit parameter table: prior row (mu ± σ) alongside posterior value
 
 ---
 

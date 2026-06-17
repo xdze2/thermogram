@@ -3,10 +3,14 @@
   import SignalPicker from './SignalPicker.svelte';
   import { createEventDispatcher } from 'svelte';
 
+  export let studyId;
+
   const dispatch = createEventDispatcher();
 
   let pickerOpen = false;
   let pickerTarget = null;
+  let fetching = false;
+  let fetchStatus = '';
 
   function openPicker(key) {
     pickerTarget = key;
@@ -21,6 +25,27 @@
     const cur = $rangeEnd || todayISO();
     rangeEnd.set(addDays(cur, days));
     dispatch('change');
+  }
+
+  async function fetchData() {
+    fetching = true;
+    fetchStatus = 'fetching…';
+    try {
+      const r = await fetch(`/api/studies/${studyId}/fetch_data`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        fetchStatus = `error: ${err.detail ?? r.statusText}`;
+        return;
+      }
+      const data = await r.json();
+      const totalPts = Object.values(data).reduce((n, pairs) => n + pairs.length, 0);
+      fetchStatus = `${totalPts} pts cached`;
+      dispatch('fetched', data);
+    } catch (e) {
+      fetchStatus = `error: ${e.message}`;
+    } finally {
+      fetching = false;
+    }
   }
 </script>
 
@@ -70,6 +95,21 @@
       <button class="btn btn-xs btn-ghost" on:click={() => extendEnd(90)}>+90 d</button>
     </div>
   </div>
+</div>
+
+<!-- Fetch button -->
+<div class="flex items-center gap-2">
+  <button
+    class="btn btn-xs btn-outline"
+    class:loading={fetching}
+    disabled={fetching}
+    on:click={fetchData}
+  >
+    {fetching ? 'fetching…' : 'Fetch data'}
+  </button>
+  {#if fetchStatus}
+    <span class="text-xs text-base-content/40">{fetchStatus}</span>
+  {/if}
 </div>
 
 <SignalPicker bind:open={pickerOpen} targetKey={pickerTarget} on:picked={onPicked} />

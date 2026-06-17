@@ -5,6 +5,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import numpy as np
+
 from thermal.api_models import (
     ElementType,
     MaterialOut,
@@ -23,6 +25,7 @@ from thermal.study_store import (
     load_study,
     save_study,
 )
+from thermal.fit import run_fit
 
 try:
     from thermal.data_src.influx import list_signals, fetch_series
@@ -166,14 +169,16 @@ def patch_study_data_spec(study_id: str, body: PatchDataSpecBody) -> DataSpec:
     return study.data_spec
 
 
-@app.get("/api/studies/{study_id}/data")
-def get_study_data(study_id: str) -> dict[str, list[list]]:
-    """Fetch live data for the study's data_spec."""
+@app.post("/api/studies/{study_id}/fetch_data")
+def post_fetch_data(study_id: str) -> dict[str, list[list]]:
+    """Pull data from InfluxDB for the study's data_spec and cache it in the study."""
     study = _load_or_raise(study_id)
     spec = study.data_spec
     signals = [v for v in spec.signals.values() if v]
-    if not _HAS_INFLUX or not signals or not spec.start or not spec.end:
-        return {}
+    if not _HAS_INFLUX:
+        raise HTTPException(status_code=503, detail="InfluxDB not configured")
+    if not signals or not spec.start or not spec.end:
+        raise HTTPException(status_code=400, detail="No signals or date range configured")
     result: dict[str, list[list]] = {}
     for sig in signals:
         try:
@@ -182,9 +187,88 @@ def get_study_data(study_id: str) -> dict[str, list[list]]:
                 [ts.isoformat(), None if (v != v) else float(v)]
                 for ts, v in s.items()
             ]
-        except Exception:
-            result[sig] = []
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"InfluxDB error for {sig}: {e}")
+    study.input_data = result
+    save_study(study)
     return result
+
+
+@app.post("/api/studies/{study_id}/fit")
+def post_fit(study_id: str) -> dict:
+    """Run MAP fit using cached input_data and store fit_result in study."""
+    study = _load_or_raise(study_id)
+    if not study.input_data:
+        raise HTTPException(status_code=400, detail="No cached input data — run fetch_data first")
+    if not study.rc_prior:
+        raise HTTPException(status_code=400, detail="No RC prior — define room first")
+    if not study.room:
+        raise HTTPException(status_code=400, detail="No room definition")
+
+    spec = study.data_spec
+    t_int_key = spec.signals.get("T_int")
+    t_ext_key = spec.signals.get("T_ext")
+    q_sol_key = spec.signals.get("Q_sol")
+
+    if not t_int_key or t_int_key not in study.input_data:
+        raise HTTPException(status_code=400, detail="T_int signal not in cached data")
+    if not t_ext_key or t_ext_key not in study.input_data:
+        raise HTTPException(status_code=400, detail="T_ext signal not in cached data")
+
+    # Align all series on T_int timestamps
+    t_int_pairs = study.input_data[t_int_key]
+    t_ext_pairs = study.input_data[t_ext_key]
+
+    timestamps = [p[0] for p in t_int_pairs]
+    T_obs = np.array([p[1] for p in t_int_pairs], dtype=float)
+    T_ext_map = {p[0]: p[1] for p in t_ext_pairs}
+    T_ext_arr = np.array([T_ext_map.get(ts, float("nan")) for ts in timestamps], dtype=float)
+
+    if q_sol_key and q_sol_key in study.input_data:
+        q_sol_map = {p[0]: p[1] for p in study.input_data[q_sol_key]}
+        G_opaque = np.array([q_sol_map.get(ts, 0.0) for ts in timestamps], dtype=float)
+        G_opaque = np.where(np.isnan(G_opaque), 0.0, G_opaque)
+    else:
+        G_opaque = np.zeros(len(timestamps))
+
+    # Remove rows with NaN T_obs or T_ext
+    mask = ~(np.isnan(T_obs) | np.isnan(T_ext_arr))
+    timestamps_clean = [ts for ts, m in zip(timestamps, mask) if m]
+    T_obs = T_obs[mask]
+    T_ext_arr = T_ext_arr[mask]
+    G_opaque = G_opaque[mask]
+
+    if len(T_obs) < 10:
+        raise HTTPException(status_code=400, detail=f"Too few valid observations ({len(T_obs)})")
+
+    # Infer dt from timestamp spacing (assume uniform)
+    from datetime import datetime
+    ts_dt = [datetime.fromisoformat(t) for t in timestamps_clean[:2]]
+    dt = (ts_dt[1] - ts_dt[0]).total_seconds() if len(ts_dt) >= 2 else 3600.0
+
+    Q_room = np.zeros(len(T_obs))  # no Q_int; Q_sol_win not yet separated
+
+    fit = run_fit(
+        prior=study.rc_prior,
+        dt=dt,
+        T_ext=T_ext_arr,
+        G_opaque=G_opaque,
+        Q_room=Q_room,
+        T_obs=T_obs,
+        timestamps=timestamps_clean,
+    )
+    study.fit_result = fit.to_dict()
+    save_study(study)
+    return study.fit_result
+
+
+@app.get("/api/studies/{study_id}/fit")
+def get_fit(study_id: str) -> dict:
+    """Return cached fit_result, or 404 if not yet run."""
+    study = _load_or_raise(study_id)
+    if not study.fit_result:
+        raise HTTPException(status_code=404, detail="No fit result yet")
+    return study.fit_result
 
 
 # ---------------------------------------------------------------------------

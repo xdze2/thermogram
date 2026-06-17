@@ -19,7 +19,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from .api_models import RCModelOut
-from .state_space import build_state_space, discretize, forward_sim, sol_air_temperature
+from .state_space import build_state_space, discretize, forward_sim, forward_sim_full, sol_air_temperature
 
 
 # Observation noise (assumed, 1-sigma) [°C]
@@ -41,6 +41,9 @@ class FitResult:
         message: str,
         n_obs: int,
         residual_rmse: float,
+        timestamps: list[str] | None = None,
+        T_room_pred: list[float] | None = None,
+        T_wall_pred: list[float] | None = None,
     ):
         self.H_env      = H_env
         self.H_ve       = H_ve
@@ -52,6 +55,9 @@ class FitResult:
         self.message    = message
         self.n_obs      = n_obs
         self.residual_rmse = residual_rmse
+        self.timestamps  = timestamps or []
+        self.T_room_pred = T_room_pred or []
+        self.T_wall_pred = T_wall_pred or []
 
     def to_dict(self) -> dict:
         return {
@@ -65,6 +71,9 @@ class FitResult:
             "message":   self.message,
             "n_obs":     self.n_obs,
             "residual_rmse": self.residual_rmse,
+            "timestamps":  self.timestamps,
+            "T_room_pred": self.T_room_pred,
+            "T_wall_pred": self.T_wall_pred,
         }
 
 
@@ -147,6 +156,7 @@ def run_fit(
     Q_room: np.ndarray,
     T_obs: np.ndarray,
     sigma_obs: float = _SIGMA_OBS,
+    timestamps: list[str] | None = None,
 ) -> FitResult:
     """
     Run MAP fit of the 2R2C model.
@@ -194,8 +204,8 @@ def run_fit(
     A, B = build_state_space(H_env, H_ve, C_wall, C_room, H_int, H_win)
     A_d, B_d = discretize(A, B, dt)
     T_sa = sol_air_temperature(T_ext, G_opaque, alpha_eff)
-    T_pred = forward_sim(A_d, B_d, T_sa, T_ext, Q_room)
-    rmse = float(np.sqrt(np.mean((T_pred - T_obs) ** 2)))
+    T_wall_arr, T_room_arr = forward_sim_full(A_d, B_d, T_sa, T_ext, Q_room)
+    rmse = float(np.sqrt(np.mean((T_room_arr - T_obs) ** 2)))
 
     return FitResult(
         H_env=H_env,
@@ -208,4 +218,7 @@ def run_fit(
         message=result.message,
         n_obs=len(T_obs),
         residual_rmse=rmse,
+        timestamps=timestamps or [],
+        T_room_pred=[round(float(v), 4) for v in T_room_arr],
+        T_wall_pred=[round(float(v), 4) for v in T_wall_arr],
     )

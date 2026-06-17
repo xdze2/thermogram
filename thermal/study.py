@@ -37,7 +37,8 @@ class Study(BaseModel):
     room: Room | None = Field(default=None)
     data_spec: DataSpec = Field(default_factory=DataSpec)
     rc_prior: RCModelOut | None = Field(default=None, description="Cached result of build_priors(room).")
-    fit_result: Any = Field(default=None, description="Reserved for Phase 2 posterior.")
+    input_data: dict[str, list[list]] | None = Field(default=None, description="Cached fetched time-series keyed by signal name.")
+    fit_result: Any = Field(default=None, description="Phase 2 MAP posterior (FitResult.to_dict()).")
 
 
 class StudyStub(BaseModel):
