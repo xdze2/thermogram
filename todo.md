@@ -183,10 +183,10 @@ Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/
 - [x] `thermal/irradiance.py` — given GPS + timestamps + GHI + optional direct/diffuse → `dict[orient_key, G(t)]` per orientation group present in room; `orientation_key(elem)` maps element to its group key
 - [x] `DataSpec.signals` extended with `GHI`, `direct`, `diffuse` roles (legacy `Q_sol` still accepted as GHI fallback)
 - [x] `POST /api/studies/{id}/fetch_data` — after InfluxDB pull, runs pvlib POA and appends `G_{orient}` series to `input_data`
-- [x] `POST /api/studies/{id}/fit` — builds area-weighted `G_opaque` from per-orientation `G_*` arrays in `input_data`
-- [ ] Extend `state_space.py` / `fit.py` to accept per-orientation `G_i` arrays and fit one `α_i` per opaque orientation group
-- [ ] Wire `Q_room` from window solar gains (`SHGC · A · G_i` per window, direct into C_room)
-- [ ] Update `run_fit` / `FitResult` to carry per-orientation `alpha` posteriors
+- [x] `POST /api/studies/{id}/fit` — builds per-orientation `G_by_orient` / `areas_by_orient` dicts and `Q_sol_win` from `input_data`; passes them to `run_fit`
+- [x] Extend `fit.py` to accept per-orientation `G_i` arrays and fit one `α_i` per opaque orientation group
+- [x] Wire `Q_room` from window solar gains (`SHGC · A · G_i` per window, direct into C_room)
+- [x] Update `run_fit` / `FitResult` to carry per-orientation `alpha` posteriors (`alpha_by_orient`)
 
 ### Frontend
 
@@ -194,7 +194,7 @@ Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/
 - [x] `DataPreview.svelte` — raw irradiance as dotted lines; per-orientation `G_*` keys auto-detected from `input_data` and plotted as filled area traces with distinct colors
 - [x] Fix `lifecycle_outside_component` crash: move store subscriptions out of async `onMount`, guard with `_loaded` flag
 - [x] City search modal — `api-adresse.data.gouv.fr` (France open data, no key) autocomplete → fills lat/lon in room form
-- [ ] Show per-orientation α in fit results table
+- [x] Show per-orientation α in fit results table (when more than one group present)
 
 ---
 

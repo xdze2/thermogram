@@ -387,6 +387,18 @@
                 </td>
               </tr>
             {/each}
+            {#if fitResult.alpha_by_orient && Object.keys(fitResult.alpha_by_orient).length > 1}
+              {#each Object.entries(fitResult.alpha_by_orient) as [orient, alpha]}
+                <tr class="border-t border-base-300/20">
+                  <td class="pr-4 py-0.5 text-base-content/40 pl-3">α_{orient}</td>
+                  <td class="pr-4 py-0.5 text-base-content/30">—</td>
+                  <td class="pr-4 py-0.5 text-base-content/30">—</td>
+                  <td class="py-0.5 text-base-content/60 font-semibold">
+                    {typeof alpha === 'number' ? alpha.toPrecision(3) : '—'}
+                  </td>
+                </tr>
+              {/each}
+            {/if}
             {#each [['T_wall_0', 'T_wall₀'], ['T_room_0', 'T_room₀']] as [key, label]}
               <tr class="border-t border-base-300/40">
                 <td class="pr-4 py-0.5 text-base-content/50">{label}</td>

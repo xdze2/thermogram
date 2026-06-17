@@ -263,26 +263,41 @@ def post_fit(study_id: str) -> dict:
     T_ext_map = {p[0]: p[1] for p in t_ext_pairs}
     T_ext_arr = np.array([T_ext_map.get(ts, float("nan")) for ts in timestamps], dtype=float)
 
-    # Build area-weighted G_opaque from per-orientation POA irradiance (computed at fetch time)
-    from thermal.state_space import opaque_elements
+    # Build per-orientation G arrays and area maps for opaque elements
+    from thermal.state_space import opaque_elements, window_elements
     opaque_elems = opaque_elements(study.room)
-    total_opaque_area = sum(e.area_m2 for e in opaque_elems)
-    G_opaque = np.zeros(len(timestamps))
-    if total_opaque_area > 0:
-        for elem in opaque_elems:
-            g_key = f"G_{orientation_key(elem)}"
-            if g_key in study.input_data:
-                g_map = {p[0]: p[1] for p in study.input_data[g_key]}
-                g_arr = np.array([g_map.get(ts, 0.0) for ts in timestamps], dtype=float)
-                g_arr = np.where(np.isnan(g_arr), 0.0, g_arr)
-                G_opaque += (elem.area_m2 / total_opaque_area) * g_arr
+    win_elems = window_elements(study.room)
+
+    # {orient_key: (N,) G array} and {orient_key: total area}
+    G_by_orient: dict[str, np.ndarray] = {}
+    areas_by_orient: dict[str, float] = {}
+    for elem in opaque_elems:
+        g_key = f"G_{orientation_key(elem)}"
+        ok = orientation_key(elem)
+        areas_by_orient[ok] = areas_by_orient.get(ok, 0.0) + elem.area_m2
+        if g_key in study.input_data and ok not in G_by_orient:
+            g_map = {p[0]: p[1] for p in study.input_data[g_key]}
+            g_arr = np.array([g_map.get(ts, 0.0) for ts in timestamps], dtype=float)
+            g_arr = np.where(np.isnan(g_arr), 0.0, g_arr)
+            G_by_orient[ok] = g_arr
+
+    # Q_sol_win = Σ SHGC * A * G_i per window (direct gain into room air)
+    Q_sol_win = np.zeros(len(timestamps))
+    for elem in win_elems:
+        g_key = f"G_{orientation_key(elem)}"
+        if g_key in study.input_data:
+            g_map = {p[0]: p[1] for p in study.input_data[g_key]}
+            g_arr = np.array([g_map.get(ts, 0.0) for ts in timestamps], dtype=float)
+            g_arr = np.where(np.isnan(g_arr), 0.0, g_arr)
+            Q_sol_win += elem.shgc * elem.area_m2 * g_arr
 
     # Remove rows with NaN T_obs or T_ext
     mask = ~(np.isnan(T_obs) | np.isnan(T_ext_arr))
     timestamps_clean = [ts for ts, m in zip(timestamps, mask) if m]
     T_obs = T_obs[mask]
     T_ext_arr = T_ext_arr[mask]
-    G_opaque = G_opaque[mask]
+    Q_sol_win = Q_sol_win[mask]
+    G_by_orient = {k: v[mask] for k, v in G_by_orient.items()}
 
     if len(T_obs) < 10:
         raise HTTPException(status_code=400, detail=f"Too few valid observations ({len(T_obs)})")
@@ -292,13 +307,14 @@ def post_fit(study_id: str) -> dict:
     ts_dt = [datetime.fromisoformat(t) for t in timestamps_clean[:2]]
     dt = (ts_dt[1] - ts_dt[0]).total_seconds() if len(ts_dt) >= 2 else 3600.0
 
-    Q_room = np.zeros(len(T_obs))  # no Q_int; Q_sol_win not yet separated
+    Q_room = Q_sol_win  # Q_int not yet supported; Q_sol_win wired in
 
     fit = run_fit(
         prior=study.rc_prior,
         dt=dt,
         T_ext=T_ext_arr,
-        G_opaque=G_opaque,
+        G_by_orient=G_by_orient,
+        areas_by_orient=areas_by_orient,
         Q_room=Q_room,
         T_obs=T_obs,
         timestamps=timestamps_clean,
