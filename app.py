@@ -6,7 +6,7 @@ Phase 1: room description → RC model priors display.
 
 import streamlit as st
 
-from thermal.models import Room, EnvelopeElement, MaterialLayer, ElementType, Orientation
+from thermal.api_models import Room, EnvelopeElement, MaterialLayer, ElementType, Orientation
 from thermal.materials_db import MATERIALS
 from thermal.priors import build_priors, ParameterPrior
 
@@ -87,12 +87,12 @@ with col_left:
         is_ground = st.checkbox("Ground contact (floor/basement)")
 
         if st.form_submit_button("Add element", type="primary"):
-            layers = [MaterialLayer(material_key(m), t) for m, t in layers_data]
+            layers = [MaterialLayer(material_key=material_key(m), thickness_m=t) for m, t in layers_data]
             elem = EnvelopeElement(
                 name=el_name,
                 type=ElementType(el_type),
                 orientation=Orientation(el_orient),
-                area=el_area,
+                area_m2=el_area,
                 layers=layers,
                 u_value_override=el_u_override if el_u_override > 0 else None,
                 shgc=el_shgc,
@@ -109,35 +109,35 @@ with col_left:
         st.session_state.elements.append(elem)
 
     if c1.button("Brick wall 30cm"):
-        _add(EnvelopeElement("Brick wall", ElementType.WALL, Orientation.S, 10.0,
-            [MaterialLayer("gypsum_board", 0.013),
-             MaterialLayer("brick_common", 0.30),
-             MaterialLayer("cement_plaster", 0.015)]))
+        _add(EnvelopeElement(name="Brick wall", type=ElementType.wall, orientation=Orientation.S, area_m2=10.0,
+            layers=[MaterialLayer(material_key="gypsum_board", thickness_m=0.013),
+                    MaterialLayer(material_key="brick_common", thickness_m=0.30),
+                    MaterialLayer(material_key="cement_plaster", thickness_m=0.015)]))
 
     if c2.button("Insulated wall"):
-        _add(EnvelopeElement("Insulated wall", ElementType.WALL, Orientation.W, 8.0,
-            [MaterialLayer("gypsum_board", 0.013),
-             MaterialLayer("mineral_wool", 0.14),
-             MaterialLayer("brick_common", 0.15),
-             MaterialLayer("cement_plaster", 0.015)]))
+        _add(EnvelopeElement(name="Insulated wall", type=ElementType.wall, orientation=Orientation.W, area_m2=8.0,
+            layers=[MaterialLayer(material_key="gypsum_board", thickness_m=0.013),
+                    MaterialLayer(material_key="mineral_wool", thickness_m=0.14),
+                    MaterialLayer(material_key="brick_common", thickness_m=0.15),
+                    MaterialLayer(material_key="cement_plaster", thickness_m=0.015)]))
 
     if c1.button("Double-pane window"):
-        _add(EnvelopeElement("Window", ElementType.WINDOW, Orientation.S, 2.0,
-            [], u_value_override=1.4, shgc=0.6))
+        _add(EnvelopeElement(name="Window", type=ElementType.window, orientation=Orientation.S, area_m2=2.0,
+            layers=[], u_value_override=1.4, shgc=0.6))
 
     if c2.button("Flat roof (insulated)"):
-        _add(EnvelopeElement("Flat roof", ElementType.ROOF, Orientation.HORIZONTAL, 25.0,
-            [MaterialLayer("gypsum_board", 0.013),
-             MaterialLayer("mineral_wool", 0.20),
-             MaterialLayer("concrete_dense", 0.15),
-             MaterialLayer("bitumen_membrane", 0.005)]))
+        _add(EnvelopeElement(name="Flat roof", type=ElementType.roof, orientation=Orientation.HORIZONTAL, area_m2=25.0,
+            layers=[MaterialLayer(material_key="gypsum_board", thickness_m=0.013),
+                    MaterialLayer(material_key="mineral_wool", thickness_m=0.20),
+                    MaterialLayer(material_key="concrete_dense", thickness_m=0.15),
+                    MaterialLayer(material_key="bitumen_membrane", thickness_m=0.005)]))
 
     # Elements list
     if st.session_state.elements:
         st.divider()
         for i, elem in enumerate(st.session_state.elements):
             c1, c2 = st.columns([4, 1])
-            c1.markdown(f"**{elem.name}** — {elem.type.value} — {elem.area} m²")
+            c1.markdown(f"**{elem.name}** — {elem.type.value} — {elem.area_m2} m²")
             if c2.button("✕", key=f"del_{i}"):
                 st.session_state.elements.pop(i)
                 st.rerun()
@@ -156,8 +156,8 @@ with col_right:
 
     room = Room(
         name=room_name,
-        floor_area=floor_area,
-        height=height,
+        floor_area_m2=floor_area,
+        height_m=height,
         latitude=lat,
         longitude=lon,
         elements=st.session_state.elements,

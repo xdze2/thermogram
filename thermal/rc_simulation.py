@@ -17,7 +17,7 @@ HVAC is ideal (maintains setpoint when needed) so we output Q_HVAC demand.
 import numpy as np
 import pandas as pd
 
-from .models import Room, ElementType
+from .api_models import Room, ElementType
 from .iso6946 import element_u_value, ua_total
 from .solar import solar_gains_series
 
@@ -42,7 +42,7 @@ def effective_capacitance(room: Room) -> float:
     C_eff [J/K] — effective thermal capacitance of the zone.
     ISO 52016-1 uses κ [kJ/(m²·K)] × floor area.
     """
-    return room.kappa * 1000 * room.floor_area  # J/K
+    return room.kappa * 1000 * room.floor_area_m2  # J/K
 
 
 def run_simulation(
@@ -73,15 +73,15 @@ def run_simulation(
     # Pre-compute solar gains for each window element
     q_solar_total = pd.Series(0.0, index=weather_df.index)
     for elem in room.elements:
-        if elem.type == ElementType.WINDOW:
+        if elem.type == ElementType.window:
             gains = solar_gains_series(
                 weather_df,
                 room.latitude,
                 room.longitude,
-                elem.tilt,
+                elem.tilt_deg,
                 elem.orientation.value,
                 elem.shgc,
-                elem.area,
+                elem.area_m2,
             )
             q_solar_total = q_solar_total + gains
 
@@ -89,9 +89,9 @@ def run_simulation(
     q_solar_arr = q_solar_total.values
     n_steps     = len(t_out_arr)
 
-    t_in_arr     = np.zeros(n_steps)
-    q_heat_arr   = np.zeros(n_steps)
-    q_cool_arr   = np.zeros(n_steps)
+    t_in_arr   = np.zeros(n_steps)
+    q_heat_arr = np.zeros(n_steps)
+    q_cool_arr = np.zeros(n_steps)
 
     # Initial condition: start at heating setpoint
     t_in = room.t_set_heating
@@ -143,15 +143,15 @@ def annual_summary(sim: pd.DataFrame, room: Room) -> dict:
     E_cool = sim["q_cooling"].sum() / 1000
 
     return {
-        "E_heating_kWh":          round(E_heat, 0),
-        "E_cooling_kWh":          round(E_cool, 0),
-        "E_heating_kWh_m2":       round(E_heat / room.floor_area, 1),
-        "E_cooling_kWh_m2":       round(E_cool / room.floor_area, 1),
-        "peak_heating_W":         round(sim["q_heating"].max(), 0),
-        "peak_cooling_W":         round(sim["q_cooling"].max(), 0),
-        "t_in_mean":              round(sim["t_in"].mean(), 1),
-        "solar_gains_kWh":        round(sim["q_solar"].sum() / 1000, 0),
-        "internal_gains_kWh":     round(sim["q_internal"].sum() / 1000, 0),
-        "cond_losses_kWh":        round(sim["q_cond_loss"].clip(lower=0).sum() / 1000, 0),
-        "vent_losses_kWh":        round(sim["q_vent_loss"].clip(lower=0).sum() / 1000, 0),
+        "E_heating_kWh":      round(E_heat, 0),
+        "E_cooling_kWh":      round(E_cool, 0),
+        "E_heating_kWh_m2":   round(E_heat / room.floor_area_m2, 1),
+        "E_cooling_kWh_m2":   round(E_cool / room.floor_area_m2, 1),
+        "peak_heating_W":     round(sim["q_heating"].max(), 0),
+        "peak_cooling_W":     round(sim["q_cooling"].max(), 0),
+        "t_in_mean":          round(sim["t_in"].mean(), 1),
+        "solar_gains_kWh":    round(sim["q_solar"].sum() / 1000, 0),
+        "internal_gains_kWh": round(sim["q_internal"].sum() / 1000, 0),
+        "cond_losses_kWh":    round(sim["q_cond_loss"].clip(lower=0).sum() / 1000, 0),
+        "vent_losses_kWh":    round(sim["q_vent_loss"].clip(lower=0).sum() / 1000, 0),
     }

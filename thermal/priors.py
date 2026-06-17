@@ -24,18 +24,19 @@ All sigmas combine in quadrature across independent elements.
 """
 
 import math
-from dataclasses import dataclass
 
-from .models import Room, EnvelopeElement, ElementType
+from pydantic import BaseModel, Field
+
+from .api_models import Room, EnvelopeElement, ElementType
 from .iso6946 import element_u_value, layer_resistance, surface_resistances
 from .materials_db import MATERIALS
 
 
 # Relative uncertainty (1-sigma / mean) per parameter source
-_REL_SIGMA_H_ENV = 0.15   # ISO 6946: ±15%
-_REL_SIGMA_H_VE  = 0.40   # ACH estimate: ±40%
-_REL_SIGMA_C_WALL = 0.25  # penetration depth: ±25%
-_REL_SIGMA_C_ROOM = 0.60  # furnishing unknown: ±60%
+_REL_SIGMA_H_ENV  = 0.15   # ISO 6946: ±15%
+_REL_SIGMA_H_VE   = 0.40   # ACH estimate: ±40%
+_REL_SIGMA_C_WALL = 0.25   # penetration depth: ±25%
+_REL_SIGMA_C_ROOM = 0.60   # furnishing unknown: ±60%
 
 # Solar absorptivity table by material key suffix / type
 _ALPHA_TABLE: dict[str, tuple[float, float]] = {
@@ -54,6 +55,23 @@ _ALPHA_TABLE: dict[str, tuple[float, float]] = {
     "metal_sheet":     (0.70, 0.15),
 }
 _ALPHA_DEFAULT = (0.65, 0.15)
+
+
+class Contribution(BaseModel):
+    label: str         # e.g. "Wall S (brick 30cm)"
+    value: float       # contribution to the parameter
+    sigma: float       # 1-sigma uncertainty on this contribution
+    detail: str = ""   # optional extra info shown to user
+
+
+class ParameterPrior(BaseModel):
+    name: str
+    symbol: str
+    unit: str
+    description: str
+    mu: float
+    sigma: float
+    contributions: list[Contribution]
 
 
 def _outer_material_key(element: EnvelopeElement) -> str | None:
@@ -84,28 +102,9 @@ def _heavy_layer_mass(element: EnvelopeElement) -> float:
         mat = MATERIALS.get(layer.material_key)
         if mat is None:
             continue
-        if mat.rho > 500:  # heavy material threshold
-            total += mat.rho * mat.cp * layer.thickness * element.area
+        if mat.rho > 500:
+            total += mat.rho * mat.cp * layer.thickness_m * element.area_m2
     return total
-
-
-@dataclass
-class Contribution:
-    label: str         # e.g. "Wall S (brick 30cm)"
-    value: float       # contribution to the parameter
-    sigma: float       # 1-sigma uncertainty on this contribution
-    detail: str = ""   # optional extra info shown to user
-
-
-@dataclass
-class ParameterPrior:
-    name: str          # e.g. "H_env"
-    symbol: str        # e.g. "H_env"
-    unit: str
-    description: str
-    mu: float          # total best estimate
-    sigma: float       # total 1-sigma (quadrature sum)
-    contributions: list[Contribution]
 
 
 def build_priors(room: Room) -> dict[str, ParameterPrior]:
@@ -115,35 +114,22 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
     """
     h_env_contribs: list[Contribution] = []
     c_wall_contribs: list[Contribution] = []
-    alpha_contribs: list[Contribution] = []   # area-weighted for alpha_eff
 
     total_opaque_area = 0.0
     alpha_area_sum = 0.0
-    alpha_var_sum = 0.0
+    alpha_var_sum  = 0.0
 
     for elem in room.elements:
-        if elem.type == ElementType.WINDOW:
-            # Windows contribute to H_env but not C_wall or alpha
-            ua = element_u_value(elem) * elem.area
-            sigma = ua * _REL_SIGMA_H_ENV
-            h_env_contribs.append(Contribution(
-                label=f"{elem.name}  [{elem.orientation.value}]",
-                value=ua,
-                sigma=sigma,
-                detail=f"U={element_u_value(elem):.2f} W/m²K  ×  {elem.area} m²",
-            ))
-        else:
-            # Opaque element
-            ua = element_u_value(elem) * elem.area
-            sigma_h = ua * _REL_SIGMA_H_ENV
-            h_env_contribs.append(Contribution(
-                label=f"{elem.name}  [{elem.orientation.value}]",
-                value=ua,
-                sigma=sigma_h,
-                detail=f"U={element_u_value(elem):.2f} W/m²K  ×  {elem.area} m²",
-            ))
+        ua = element_u_value(elem) * elem.area_m2
+        sigma_h = ua * _REL_SIGMA_H_ENV
+        h_env_contribs.append(Contribution(
+            label=f"{elem.name}  [{elem.orientation.value}]",
+            value=ua,
+            sigma=sigma_h,
+            detail=f"U={element_u_value(elem):.2f} W/m²K  ×  {elem.area_m2} m²",
+        ))
 
-            # Thermal mass of heavy layers
+        if elem.type != ElementType.window:
             c = _heavy_layer_mass(elem)
             if c > 0:
                 sigma_c = c * _REL_SIGMA_C_WALL
@@ -154,11 +140,10 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
                     detail=f"{c/1e6:.2f} MJ/K from heavy layers",
                 ))
 
-            # Solar absorptivity (area-weighted mean)
             alpha_mu, alpha_sig = _alpha_for_element(elem)
-            alpha_area_sum += alpha_mu * elem.area
-            alpha_var_sum  += (alpha_sig * elem.area) ** 2
-            total_opaque_area += elem.area
+            alpha_area_sum += alpha_mu * elem.area_m2
+            alpha_var_sum  += (alpha_sig * elem.area_m2) ** 2
+            total_opaque_area += elem.area_m2
 
     # H_env
     h_env_mu    = sum(c.value for c in h_env_contribs)
@@ -173,7 +158,7 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
     c_wall_sigma = math.sqrt(sum(c.sigma**2 for c in c_wall_contribs)) if c_wall_contribs else 0.0
 
     # C_room (furniture + air + finishes — not described by user, weak prior)
-    c_room_mu    = 20e3 * room.floor_area   # 20 kJ/(m²·K) × floor area [J/K]
+    c_room_mu    = 20e3 * room.floor_area_m2   # 20 kJ/(m²·K) × floor area [J/K]
     c_room_sigma = c_room_mu * _REL_SIGMA_C_ROOM
 
     # alpha_eff (area-weighted mean over opaque elements)
@@ -185,13 +170,13 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
 
     alpha_contribs = []
     for elem in room.elements:
-        if elem.type != ElementType.WINDOW:
+        if elem.type != ElementType.window:
             a_mu, a_sig = _alpha_for_element(elem)
             alpha_contribs.append(Contribution(
                 label=f"{elem.name}  [{elem.orientation.value}]",
                 value=a_mu,
                 sigma=a_sig,
-                detail=f"outer layer: {_outer_material_key(elem) or 'unknown'}  ×  {elem.area} m²",
+                detail=f"outer layer: {_outer_material_key(elem) or 'unknown'}  ×  {elem.area_m2} m²",
             ))
 
     return {
@@ -235,10 +220,10 @@ def build_priors(room: Room) -> dict[str, ParameterPrior]:
             mu=c_room_mu,
             sigma=c_room_sigma,
             contributions=[Contribution(
-                label=f"Interior estimate  ({room.floor_area} m² floor)",
+                label=f"Interior estimate  ({room.floor_area_m2} m² floor)",
                 value=c_room_mu,
                 sigma=c_room_sigma,
-                detail=f"20 kJ/(m²·K) × {room.floor_area} m²  (weak prior)",
+                detail=f"20 kJ/(m²·K) × {room.floor_area_m2} m²  (weak prior)",
             )],
         ),
         "alpha_eff": ParameterPrior(
