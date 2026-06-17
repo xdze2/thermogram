@@ -44,6 +44,8 @@ class FitResult:
         timestamps: list[str] | None = None,
         T_room_pred: list[float] | None = None,
         T_wall_pred: list[float] | None = None,
+        T_wall_0: float = 0.0,
+        T_room_0: float = 0.0,
     ):
         self.H_env      = H_env
         self.H_ve       = H_ve
@@ -58,6 +60,8 @@ class FitResult:
         self.timestamps  = timestamps or []
         self.T_room_pred = T_room_pred or []
         self.T_wall_pred = T_wall_pred or []
+        self.T_wall_0    = T_wall_0
+        self.T_room_0    = T_room_0
 
     def to_dict(self) -> dict:
         return {
@@ -67,6 +71,8 @@ class FitResult:
             "C_room":    self.C_room,
             "alpha_eff": self.alpha_eff,
             "H_int":     self.H_int,
+            "T_wall_0":  self.T_wall_0,
+            "T_room_0":  self.T_room_0,
             "success":   self.success,
             "message":   self.message,
             "n_obs":     self.n_obs,
@@ -81,7 +87,7 @@ class FitResult:
 # Parameter transforms (unconstrained ↔ physical)
 # ---------------------------------------------------------------------------
 
-def _to_unconstrained(H_env, H_ve, C_wall, C_room, alpha_eff) -> np.ndarray:
+def _to_unconstrained(H_env, H_ve, C_wall, C_room, alpha_eff, T_wall_0, T_room_0) -> np.ndarray:
     """Map physical params to unconstrained space for the optimizer."""
     return np.array([
         np.log(H_env),
@@ -89,22 +95,29 @@ def _to_unconstrained(H_env, H_ve, C_wall, C_room, alpha_eff) -> np.ndarray:
         np.log(C_wall),
         np.log(C_room),
         np.log(alpha_eff / (1.0 - alpha_eff)),   # logit
+        T_wall_0,   # °C — no transform needed
+        T_room_0,   # °C — no transform needed
     ])
 
 
-def _to_physical(p: np.ndarray) -> tuple[float, float, float, float, float]:
+def _to_physical(p: np.ndarray) -> tuple[float, float, float, float, float, float, float]:
     """Map unconstrained optimizer vector back to physical parameters."""
     H_env     = float(np.exp(p[0]))
     H_ve      = float(np.exp(p[1]))
     C_wall    = float(np.exp(p[2]))
     C_room    = float(np.exp(p[3]))
     alpha_eff = float(1.0 / (1.0 + np.exp(-p[4])))   # sigmoid
-    return H_env, H_ve, C_wall, C_room, alpha_eff
+    T_wall_0  = float(p[5])
+    T_room_0  = float(p[6])
+    return H_env, H_ve, C_wall, C_room, alpha_eff, T_wall_0, T_room_0
 
 
 # ---------------------------------------------------------------------------
 # Loss function
 # ---------------------------------------------------------------------------
+
+_SIGMA_IC = 3.0   # prior sigma on initial temperatures [°C]
+
 
 def _neg_log_posterior(
     p: np.ndarray,
@@ -118,7 +131,7 @@ def _neg_log_posterior(
     T_obs: np.ndarray,
     sigma_obs: float,
 ) -> float:
-    H_env, H_ve, C_wall, C_room, alpha_eff = _to_physical(p)
+    H_env, H_ve, C_wall, C_room, alpha_eff, T_wall_0, T_room_0 = _to_physical(p)
 
     # --- prior ---
     def _gauss_nll(mu_pr, sigma_pr, value):
@@ -130,13 +143,16 @@ def _neg_log_posterior(
         + _gauss_nll(prior.C_wall.mu,  prior.C_wall.sigma,    C_wall)
         + _gauss_nll(prior.C_room.mu,  prior.C_room.sigma,    C_room)
         + _gauss_nll(prior.alpha_eff.mu, prior.alpha_eff.sigma, alpha_eff)
+        + _gauss_nll(T_obs[0], _SIGMA_IC, T_wall_0)
+        + _gauss_nll(T_obs[0], _SIGMA_IC, T_room_0)
     )
 
     # --- likelihood ---
     A, B = build_state_space(H_env, H_ve, C_wall, C_room, H_int, H_win)
     A_d, B_d = discretize(A, B, dt)
     T_sa_with_alpha = sol_air_temperature(T_ext, T_sa, alpha_eff)
-    T_pred = forward_sim(A_d, B_d, T_sa_with_alpha, T_ext, Q_room)
+    x0 = np.array([T_wall_0, T_room_0])
+    T_pred = forward_sim(A_d, B_d, T_sa_with_alpha, T_ext, Q_room, x0=x0)
 
     residuals = T_pred - T_obs
     nll_obs = 0.5 * np.sum(residuals ** 2) / sigma_obs ** 2
@@ -183,12 +199,15 @@ def run_fit(
 
     # Initial guess from prior means (clamp alpha away from boundaries)
     alpha0 = float(np.clip(prior.alpha_eff.mu, 0.05, 0.95))
+    T0 = float(T_obs[0])
     p0 = _to_unconstrained(
         prior.H_env.mu or 1.0,
         prior.H_ve.mu  or 1.0,
         prior.C_wall.mu or 1e6,
         prior.C_room.mu or 1e6,
         alpha0,
+        T0,   # T_wall_0 = T_obs[0]
+        T0,   # T_room_0 = T_obs[0]
     )
 
     result = minimize(
@@ -199,12 +218,13 @@ def run_fit(
         options={"maxiter": 500, "ftol": 1e-10},
     )
 
-    H_env, H_ve, C_wall, C_room, alpha_eff = _to_physical(result.x)
+    H_env, H_ve, C_wall, C_room, alpha_eff, T_wall_0, T_room_0 = _to_physical(result.x)
 
     A, B = build_state_space(H_env, H_ve, C_wall, C_room, H_int, H_win)
     A_d, B_d = discretize(A, B, dt)
     T_sa = sol_air_temperature(T_ext, G_opaque, alpha_eff)
-    T_wall_arr, T_room_arr = forward_sim_full(A_d, B_d, T_sa, T_ext, Q_room)
+    x0 = np.array([T_wall_0, T_room_0])
+    T_wall_arr, T_room_arr = forward_sim_full(A_d, B_d, T_sa, T_ext, Q_room, x0=x0)
     rmse = float(np.sqrt(np.mean((T_room_arr - T_obs) ** 2)))
 
     return FitResult(
@@ -214,6 +234,8 @@ def run_fit(
         C_room=C_room,
         alpha_eff=alpha_eff,
         H_int=H_int,
+        T_wall_0=T_wall_0,
+        T_room_0=T_room_0,
         success=result.success,
         message=result.message,
         n_obs=len(T_obs),

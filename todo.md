@@ -153,15 +153,17 @@ Workflow: user sets signals + date range → clicks "Fetch data" → `POST /api/
 
 ### Fit results display
 
-The fit endpoint already returns `T_room_pred` series via a forward sim stored in `fit_result`.
-Return it from `POST /api/studies/{id}/fit` so the frontend can plot it.
-
-- [ ] Add `T_room_pred` and `T_wall_pred` arrays to `FitResult.to_dict()` (timestamps aligned with T_int signal)
-- [ ] `FitResultChart.svelte` — Plotly chart with 3 subplots:
+- [x] Add `T_room_pred` and `T_wall_pred` arrays to `FitResult.to_dict()` (timestamps aligned with T_int signal)
+- [x] `FitResultChart.svelte` — Plotly chart with 3 subplots:
       top: T_obs (blue) + T_room_pred (orange) + T_wall_pred (dashed)
       bottom: residuals (T_obs − T_room_pred), zero line
-- [ ] Show chart in StudyEditor right column below the fit parameter table when `fit_result` present
-- [ ] Posterior column in fit parameter table: prior row (mu ± σ) alongside posterior value
+- [x] Show chart in StudyEditor right column below the fit parameter table when `fit_result` present
+- [x] Posterior column in fit parameter table: prior row (mu ± σ) alongside posterior value
+
+### Initial conditions
+
+- [x] Fit `T_wall_0` and `T_room_0` as free parameters (weak Gaussian prior N(T_obs[0], 3°C)) — eliminates transient spike in residuals
+- [x] Show `T_wall₀` and `T_room₀` in the fit result table
 
 ---
 

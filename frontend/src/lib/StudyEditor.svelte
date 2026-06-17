@@ -384,6 +384,16 @@
                 </td>
               </tr>
             {/each}
+            {#each [['T_wall_0', 'T_wall₀'], ['T_room_0', 'T_room₀']] as [key, label]}
+              <tr class="border-t border-base-300/40">
+                <td class="pr-4 py-0.5 text-base-content/50">{label}</td>
+                <td class="pr-4 py-0.5 text-base-content/30">°C</td>
+                <td class="pr-4 py-0.5 text-base-content/40">—</td>
+                <td class="py-0.5 text-base-content/70 font-semibold">
+                  {typeof fitResult[key] === 'number' ? fitResult[key].toFixed(2) : '—'}
+                </td>
+              </tr>
+            {/each}
             <tr class="border-t border-base-300/40">
               <td class="pr-4 py-0.5 text-base-content/30" colspan="3">RMSE</td>
               <td class="py-0.5 text-base-content/70">{fitResult.residual_rmse?.toFixed(3)} °C</td>
