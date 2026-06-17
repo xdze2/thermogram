@@ -11,3 +11,6 @@ wheels/
 
 # Environment variables
 .env
+
+# User study data
+user_data/

@@ -1,5 +1,26 @@
 import { writable, derived, get } from 'svelte/store';
 
+// --- Router (hash-based) ---
+// Routes: '' → studies list, 'study/:id' → study editor
+
+function parseHash(hash) {
+  const h = hash.replace(/^#\/?/, '');
+  if (!h) return { page: 'list' };
+  const m = h.match(/^study\/([a-f0-9]+)$/);
+  if (m) return { page: 'study', id: m[1] };
+  return { page: 'list' };
+}
+
+export const route = writable(parseHash(window.location.hash));
+
+window.addEventListener('hashchange', () => {
+  route.set(parseHash(window.location.hash));
+});
+
+export function navigate(path) {
+  window.location.hash = path ? `/${path}` : '';
+}
+
 // --- API data fetched on init ---
 export const materials = writable([]);
 export const schema = writable({ element_types: [], orientations: [] });

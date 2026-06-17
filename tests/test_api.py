@@ -116,3 +116,153 @@ def test_rc_model_window_with_u_override():
     assert r.status_code == 200
     h_env = r.json()["H_env"]
     assert abs(h_env["mu"] - 1.4 * 2.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Studies CRUD
+# ---------------------------------------------------------------------------
+
+def test_studies_create_and_list():
+    r = client.post("/api/studies", json={"name": "My study"})
+    assert r.status_code == 201
+    study = r.json()
+    assert study["name"] == "My study"
+    sid = study["id"]
+
+    r = client.get("/api/studies")
+    assert r.status_code == 200
+    ids = [s["id"] for s in r.json()]
+    assert sid in ids
+
+    # cleanup
+    client.delete(f"/api/studies/{sid}")
+
+
+def test_studies_get():
+    r = client.post("/api/studies", json={"name": "Get test"})
+    sid = r.json()["id"]
+
+    r = client.get(f"/api/studies/{sid}")
+    assert r.status_code == 200
+    assert r.json()["id"] == sid
+
+    client.delete(f"/api/studies/{sid}")
+
+
+def test_studies_get_missing_returns_404():
+    r = client.get("/api/studies/doesnotexist")
+    assert r.status_code == 404
+
+
+def test_studies_rename():
+    r = client.post("/api/studies", json={"name": "Old name"})
+    sid = r.json()["id"]
+
+    r = client.patch(f"/api/studies/{sid}/name", json={"name": "New name"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "New name"
+
+    r = client.get(f"/api/studies/{sid}")
+    assert r.json()["name"] == "New name"
+
+    client.delete(f"/api/studies/{sid}")
+
+
+def test_studies_patch_room_returns_rc_prior():
+    r = client.post("/api/studies", json={"name": "Room patch"})
+    sid = r.json()["id"]
+
+    payload = {"room": BRICK_ROOM}
+    r = client.patch(f"/api/studies/{sid}/room", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert "H_env" in body
+    assert body["H_env"]["mu"] > 0
+
+    # rc_prior is persisted in the study
+    study = client.get(f"/api/studies/{sid}").json()
+    assert study["rc_prior"] is not None
+    assert study["rc_prior"]["H_env"]["mu"] == body["H_env"]["mu"]
+
+    client.delete(f"/api/studies/{sid}")
+
+
+def test_studies_patch_data_spec():
+    r = client.post("/api/studies", json={"name": "Data spec"})
+    sid = r.json()["id"]
+
+    spec = {"data_spec": {"signals": {"T_int": "sensor_a", "T_ext": None, "Q_sol": None}, "start": "2024-01-01", "end": "2024-01-31"}}
+    r = client.patch(f"/api/studies/{sid}/data_spec", json=spec)
+    assert r.status_code == 200
+    assert r.json()["signals"]["T_int"] == "sensor_a"
+
+    study = client.get(f"/api/studies/{sid}").json()
+    assert study["data_spec"]["start"] == "2024-01-01"
+
+    client.delete(f"/api/studies/{sid}")
+
+
+def test_studies_duplicate():
+    r = client.post("/api/studies", json={"name": "Original"})
+    sid = r.json()["id"]
+
+    r = client.post(f"/api/studies/{sid}/duplicate")
+    assert r.status_code == 201
+    dup = r.json()
+    assert dup["id"] != sid
+    assert "copy" in dup["name"].lower()
+
+    client.delete(f"/api/studies/{sid}")
+    client.delete(f"/api/studies/{dup['id']}")
+
+
+def test_studies_delete():
+    r = client.post("/api/studies", json={"name": "To delete"})
+    sid = r.json()["id"]
+
+    r = client.delete(f"/api/studies/{sid}")
+    assert r.status_code == 204
+
+    r = client.get(f"/api/studies/{sid}")
+    assert r.status_code == 404
+
+
+def test_studies_delete_missing_returns_404():
+    r = client.delete("/api/studies/doesnotexist")
+    assert r.status_code == 404
+
+
+def test_studies_schema_version_present():
+    r = client.post("/api/studies", json={"name": "Version check"})
+    sid = r.json()["id"]
+    assert r.json()["schema_version"] == 1
+
+    r = client.get(f"/api/studies/{sid}")
+    assert r.json()["schema_version"] == 1
+
+    client.delete(f"/api/studies/{sid}")
+
+
+def test_studies_schema_version_mismatch_returns_409(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    from thermal import study_store
+
+    # Point the store at a temp dir with a study that has an old version
+    monkeypatch.setattr(study_store, "_DATA_DIR", tmp_path)
+    stale = {
+        "schema_version": 0,
+        "id": "aabbccdd",
+        "name": "Stale study",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "room": None,
+        "data_spec": {"signals": {}, "start": None, "end": None},
+        "rc_prior": None,
+        "fit_result": None,
+    }
+    (tmp_path / "aabbccdd.json").write_text(json.dumps(stale))
+
+    r = client.get("/api/studies/aabbccdd")
+    assert r.status_code == 409
+    assert "schema_version" in r.json()["detail"]
