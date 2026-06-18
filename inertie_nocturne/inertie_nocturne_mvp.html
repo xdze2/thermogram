@@ -138,15 +138,10 @@
         grid-template-columns: repeat(3, 1fr);
         gap: 8px;
       }
-      .chip-grid-4 {
+      .chip-grid-room {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 8px;
-      }
-      @media (min-width: 520px) {
-        .chip-grid-4 {
-          grid-template-columns: repeat(4, 1fr);
-        }
       }
 
       /* Sliders (kept for temperatures only) */
@@ -457,6 +452,10 @@
   <body>
     <main>
       <h1>Inertie nocturne <span class="dim">— v0.3 · vibe coded</span></h1>
+      <p style="margin: -10px 0 18px; color: var(--dim); font-size: 13px; max-width: 600px;">
+        Combien de temps faut-il pour rafraîchir une pièce la nuit avec un bon ventilateur ?
+        (en particulier extraire la chaleur accumulée dans les murs)
+      </p>
 
       <div class="grid">
         <!-- ============ LEFT: inputs ============ -->
@@ -467,7 +466,7 @@
               <h2>Pièce</h2>
               <div class="derived" id="room-derived"></div>
             </div>
-            <div class="chips chip-grid-4" id="room-chips"></div>
+            <div class="chips chip-grid-room" id="room-chips"></div>
           </section>
 
           <!-- Matériau -->
@@ -562,6 +561,38 @@
 
         <!-- ============ RIGHT: derived ============ -->
         <div>
+          <!-- Énergie stockée -->
+          <section>
+            <h2>Énergie stockée dans les murs</h2>
+            <table class="facts">
+              <tr>
+                <td class="k">Épaisseur active <span style="font-size:11px">(d = √(λ·T / ρ·c·π), T = 24 h)</span></td>
+                <td class="v" id="dact2">—</td>
+                <td class="u">cm</td>
+              </tr>
+              <tr>
+                <td class="k">Masse active <span style="font-size:11px">(m = ρ·A·d)</span></td>
+                <td class="v" id="mwall2">—</td>
+                <td class="u">kg</td>
+              </tr>
+              <tr>
+                <td class="k">Capacité thermique <span style="font-size:11px">(C = m·c)</span></td>
+                <td class="v" id="cwall2">—</td>
+                <td class="u">kJ/K</td>
+              </tr>
+              <tr>
+                <td class="k">ΔT = T<sub>int</sub> − T<sub>ext</sub></td>
+                <td class="v" id="dt2">—</td>
+                <td class="u">°C</td>
+              </tr>
+              <tr style="border-top: 1px solid var(--line);">
+                <td class="k" style="padding-top:8px">Énergie totale <span style="font-size:11px">(C·ΔT)</span></td>
+                <td class="v" id="ewall2" style="padding-top:8px">—</td>
+                <td class="u" style="padding-top:8px">kWh</td>
+              </tr>
+            </table>
+          </section>
+
           <!-- Refroidissement -->
           <section>
             <h2>Refroidissement</h2>
@@ -578,13 +609,13 @@
             <svg id="curve" viewBox="0 0 400 200"></svg>
             <div class="outcome">
               <div class="card">
-                <div class="lbl">Dans 6 h</div>
+                <div class="lbl">Temps pour −3 °C</div>
                 <div class="big">
-                  <span id="t6">—</span><span class="unit">°C</span>
+                  <span id="t3h">—</span><span class="unit">h</span>
                 </div>
               </div>
               <div class="card">
-                <div class="lbl">Énergie extraite à 6 h</div>
+                <div class="lbl">Énergie extraite (−3 °C)</div>
                 <div class="big">
                   <span id="eout">—</span><span class="unit">kWh</span>
                 </div>
@@ -603,12 +634,7 @@
                 <td class="u">m²</td>
               </tr>
               <tr>
-                <td class="k">Épaisseur active</td>
-                <td class="v" id="dact">—</td>
-                <td class="u">cm</td>
-              </tr>
-              <tr>
-                <td class="k">Masse</td>
+                <td class="k">Masse active</td>
                 <td class="v" id="mwall">—</td>
                 <td class="u">kg</td>
               </tr>
@@ -616,11 +642,6 @@
                 <td class="k">Capacité therm.</td>
                 <td class="v" id="cwall">—</td>
                 <td class="u">kJ/K</td>
-              </tr>
-              <tr>
-                <td class="k">Énergie totale (asymptote)</td>
-                <td class="v" id="ewall">—</td>
-                <td class="u">kWh</td>
               </tr>
             </table>
             <h3>Air de la pièce</h3>
@@ -707,6 +728,7 @@
           sub: "plâtre / bois",
           rho: 600,
           c: 1600,
+          lambda: 0.19,
           alpha: 0.2e-6,
         },
         brique: {
@@ -714,6 +736,7 @@
           sub: "briques pleines",
           rho: 1800,
           c: 840,
+          lambda: 0.76,
           alpha: 0.5e-6,
         },
         pierre: {
@@ -721,6 +744,7 @@
           sub: "moellon, béton",
           rho: 2300,
           c: 880,
+          lambda: 1.50,
           alpha: 0.75e-6,
         },
       };
@@ -729,14 +753,6 @@
       const C_AIR = 1005;
 
       const ROOM_PRESETS = [
-        {
-          id: "petite",
-          name: "Petite",
-          sub: "3 × 3 × 2.4",
-          a: 3,
-          b: 3,
-          h: 2.4,
-        },
         {
           id: "standard",
           name: "Standard",
@@ -902,8 +918,10 @@
           const T = tex + (tin - tex) * Math.exp(-tH / tauH);
           pts.push({ tH, T });
         }
-        const t6 = tex + (tin - tex) * Math.exp(-6 / tauH);
-        const eOut6 = Cwall * (tin - t6);
+        const DROP = 3;
+        const t3H = dT > DROP ? tauH * Math.log(dT / (dT - DROP)) : null;
+        const T_at_t3 = t3H !== null ? tex + DROP : null;
+        const eOut3 = t3H !== null ? Cwall * DROP : null;
 
         return {
           V,
@@ -922,8 +940,9 @@
           tau,
           tauH,
           pts,
-          t6,
-          eOut6,
+          t3H,
+          T_at_t3,
+          eOut3,
           ach,
         };
       }
@@ -968,11 +987,10 @@
         const wrap = $("mat-chips");
         wrap.innerHTML = Object.entries(MATERIALS)
           .map(([id, m]) => {
-            const d = Math.sqrt((m.alpha * PERIOD_24H) / Math.PI) * 100;
             return `
       <button class="chip ${state.mat === id ? "on" : ""}" data-mat="${id}">
         <span class="title">${m.name}</span>
-        <span class="sub">ρ ${m.rho} · d ${d.toFixed(0)} cm</span>
+        <span class="sub">ρ ${m.rho} kg/m³ · λ ${m.lambda} W/mK · c ${m.c} J/kgK</span>
       </button>
     `;
           })
@@ -1130,7 +1148,7 @@
         $("room-derived").innerHTML =
           `${fmt(state.a, 1)} × ${fmt(state.b, 1)} × ${fmt(state.h, 2)} m — <b>${fmt(r.V, 0)} m³</b>`;
         $("mat-derived").innerHTML =
-          `${MATERIALS[state.mat].name.toLowerCase()} — peau <b>${fmt(r.d * 100, 0)} cm</b>`;
+          `${MATERIALS[state.mat].sub}`;
         $("temp-derived").innerHTML =
           `ΔT = <b>${fmt(Math.max(0, state.tin - state.tex), 1)} °C</b>`;
         $("vent-derived").innerHTML =
@@ -1141,12 +1159,17 @@
         $("vjet").textContent = fmt(r.vJet, 1);
         $("hconv").textContent = fmt(r.hConv, 1);
 
+        // Énergie stockée card
+        $("dact2").textContent = fmt(r.d * 100, 1);
+        $("mwall2").textContent = fmtInt(r.mWall);
+        $("cwall2").textContent = fmtInt(r.Cwall / 1000);
+        $("dt2").textContent = fmt(Math.max(0, state.tin - state.tex), 1);
+        $("ewall2").textContent = fmt(r.Ewall / 3.6e6, 1);
+
         // Walls
         $("awall").textContent = fmt(r.Awall, 1);
-        $("dact").textContent = fmt(r.d * 100, 1);
         $("mwall").textContent = fmtInt(r.mWall);
         $("cwall").textContent = fmtInt(r.Cwall / 1000);
-        $("ewall").textContent = fmt(r.Ewall / 3.6e6, 1);
 
         // Air
         $("vair2").textContent = fmt(r.V, 1);
@@ -1156,8 +1179,8 @@
 
         // τ + outcome
         $("tau").textContent = fmt(r.tauH, 1);
-        $("t6").textContent = fmt(r.t6, 1);
-        $("eout").textContent = fmt(r.eOut6 / 3.6e6, 1);
+        $("t3h").textContent = r.t3H !== null ? fmt(r.t3H, 1) : "—";
+        $("eout").textContent = r.eOut3 !== null ? fmt(r.eOut3 / 3.6e6, 1) : "—";
 
         // Repaint chips so .on follows state
         renderRoomChips();
@@ -1199,19 +1222,41 @@
           grid += `<text x="${x}" y="${H - PAD_B + 14}" fill="#aab4c0" font-size="10" text-anchor="middle">${hMark}h</text>`;
         }
         [yBot, (yBot + yTop) / 2, yTop].forEach((T) => {
-          grid += `<text x="${PAD_L - 6}" y="${ys(T) + 3}" fill="#aab4c0" font-size="10" text-anchor="end">${T.toFixed(0)}°</text>`;
+          grid += `<text x="${PAD_L - 6}" y="${ys(T) + 3}" fill="#aab4c0" font-size="10" text-anchor="end">${T.toFixed(0)}°C</text>`;
         });
 
-        const x6 = PAD_L + (W - PAD_L - PAD_R) * (6 / HORIZON_H);
-        const y6 = ys(r.t6);
+        // Legend (top-right corner)
+        const LX = W - PAD_R - 4, LY = PAD_T + 4;
+        const legend = `
+    <line x1="${LX - 22}" y1="${LY + 4}" x2="${LX - 6}" y2="${LY + 4}" stroke="#ff9b6c" stroke-width="2"/>
+    <text x="${LX - 24}" y="${LY + 8}" fill="#aab4c0" font-size="9" text-anchor="end">T intérieur</text>
+    <line x1="${LX - 22}" y1="${LY + 16}" x2="${LX - 6}" y2="${LY + 16}" stroke="#6cb6ff" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="${LX - 24}" y="${LY + 20}" fill="#aab4c0" font-size="9" text-anchor="end">T extérieur</text>`;
+
+        let markerSvg = "";
+        if (r.t3H !== null && r.t3H <= HORIZON_H) {
+          const xm = PAD_L + (W - PAD_L - PAD_R) * (r.t3H / HORIZON_H);
+          const yTop3 = ys(state.tin);      // curve at t=0
+          const yBot3 = ys(state.tin - 3);  // curve at t=t3
+          const xArrow = xm + 14;
+          const yMid = (yTop3 + yBot3) / 2;
+          markerSvg = `
+    <line x1="${xArrow}" y1="${yTop3}" x2="${xArrow}" y2="${yBot3 - 6}"
+          stroke="#e6e9ec" stroke-width="1" opacity="0.7"/>
+    <polygon points="${xArrow},${yBot3} ${xArrow - 3},${yBot3 - 7} ${xArrow + 3},${yBot3 - 7}"
+             fill="#e6e9ec" opacity="0.7"/>
+    <text x="${xArrow + 4}" y="${yMid + 3}" fill="#e6e9ec" font-size="9" text-anchor="start" opacity="0.9">−3°C</text>
+    <circle cx="${xm}" cy="${yBot3}" r="4" fill="#e6e9ec"/>
+    <text x="${xm}" y="${yBot3 + 14}" fill="#e6e9ec" font-size="9" text-anchor="middle">${fmt(r.t3H, 1)} h</text>`;
+        }
 
         $("curve").innerHTML = `
     ${grid}
     <line x1="${PAD_L}" y1="${yAsym}" x2="${W - PAD_R}" y2="${yAsym}"
           stroke="#6cb6ff" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.6"/>
     <path d="${path}" fill="none" stroke="#ff9b6c" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="${x6}" y1="${PAD_T}" x2="${x6}" y2="${H - PAD_B}" stroke="#e6e9ec" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.5"/>
-    <circle cx="${x6}" cy="${y6}" r="4" fill="#e6e9ec"/>
+    ${markerSvg}
+    ${legend}
   `;
       }
 
