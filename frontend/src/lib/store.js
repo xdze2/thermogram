@@ -52,6 +52,8 @@ export function addElement() {
     type: s.element_types?.[0]?.value ?? 'wall',
     orientation: 'S',
     area_m2: 10,
+    dim_a: 5,
+    dim_b: 2,
     u_value_override: null,
     layers: [{ material_key: m[0]?.key ?? 'brick_common', thickness_m: 0.20 }],
   }]);

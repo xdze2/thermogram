@@ -5,6 +5,11 @@
 
   let open = true;
 
+  function onDim(a, b) {
+    const area = a * b;
+    if (area > 0) updateElement(el.id, { dim_a: a, dim_b: b, area_m2: +area.toFixed(4) });
+  }
+
   function onField(field, value) {
     updateElement(el.id, { [field]: value });
   }
@@ -69,12 +74,17 @@
           </select>
         </label>
 
-        <label class="flex items-center gap-2">
-          <span class="text-xs text-base-content/50 w-24 shrink-0">Area (m²)</span>
-          <input type="number" value={el.area_m2}
-            on:input={e => onField('area_m2', parseFloat(e.target.value))}
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-base-content/50 w-24 shrink-0">Size (m)</span>
+          <input type="number" value={el.dim_a} min="0.01" step="0.1"
+            on:input={e => onDim(parseFloat(e.target.value), el.dim_b)}
             class="input input-xs input-bordered w-full" />
-        </label>
+          <span class="text-xs text-base-content/40">×</span>
+          <input type="number" value={el.dim_b} min="0.01" step="0.1"
+            on:input={e => onDim(el.dim_a, parseFloat(e.target.value))}
+            class="input input-xs input-bordered w-full" />
+          <span class="text-xs text-base-content/30 whitespace-nowrap">{el.area_m2} m²</span>
+        </div>
 
         <label class="flex items-center gap-2">
           <span class="text-xs text-base-content/50 w-24 shrink-0">U override</span>

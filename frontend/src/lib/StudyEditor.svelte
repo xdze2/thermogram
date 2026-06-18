@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import {
     materials, schema, allSignals,
-    room, elements, addElement,
+    room, elements, addElement, nextId,
     dataSources, rangeStart, rangeEnd,
     rcResult, rcStatus, rcError,
     theme, navigate,
@@ -78,12 +78,14 @@
           longitude: study.room.longitude,
         });
         const m2 = get(materials);
-        const restored = (study.room.elements ?? []).map((el, i) => ({
-          id: i,
+        const restored = (study.room.elements ?? []).map((el) => ({
+          id: nextId(),
           name: el.name,
           type: el.type,
           orientation: el.orientation,
           area_m2: el.area_m2,
+          dim_a: el.dim_a ?? +(Math.sqrt(el.area_m2).toFixed(2)),
+          dim_b: el.dim_b ?? +(Math.sqrt(el.area_m2).toFixed(2)),
           u_value_override: el.u_value_override ?? null,
           layers: el.layers ?? [],
         }));
