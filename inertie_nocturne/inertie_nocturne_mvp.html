@@ -1,0 +1,1412 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Inertie nocturne</title>
+    <style>
+      :root {
+        --bg: #0f1419;
+        --panel: #1a2129;
+        --panel-2: #131920;
+        --ink: #e6e9ec;
+        --dim: #aab4c0;
+        --dim-2: #6a7682;
+        --accent: #6cb6ff;
+        --warm: #ff9b6c;
+        --line: #2a333d;
+        --chip: #1f262e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.45 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 18px 18px 60px;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 4px 0 18px;
+        letter-spacing: 0.2px;
+      }
+      h1 .dim {
+        color: var(--dim);
+        font-weight: 400;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 760px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      section h2 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: var(--dim);
+        margin: 0 0 12px;
+        font-weight: 600;
+      }
+      section h3 {
+        font-size: 13px;
+        color: var(--dim);
+        margin: 14px 0 8px;
+        font-weight: 500;
+      }
+
+      /* Chips (presets) */
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .chip {
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        color: var(--ink);
+        font: inherit;
+        cursor: pointer;
+        text-align: left;
+        min-width: 0;
+        transition:
+          border-color 80ms,
+          background 80ms;
+      }
+      .chip:hover {
+        border-color: var(--dim-2);
+      }
+      .chip.on {
+        border-color: var(--accent);
+        background: rgba(108, 182, 255, 0.1);
+      }
+      .chip .title {
+        display: block;
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .chip .sub {
+        display: block;
+        font-size: 11px;
+        color: var(--dim);
+        margin-top: 2px;
+        font-variant-numeric: tabular-nums;
+      }
+      .chip.custom {
+        font-style: italic;
+        color: var(--dim);
+      }
+      .chip.on.custom {
+        color: var(--ink);
+        font-style: normal;
+      }
+
+      .chip-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .chip-grid-4 {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      @media (min-width: 520px) {
+        .chip-grid-4 {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+
+      /* Sliders (kept for temperatures only) */
+      .slider-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 10px 0;
+      }
+      .slider-row label {
+        flex: 0 0 150px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      .slider-row .val {
+        flex: 0 0 80px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        flex: 1;
+        height: 28px;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 4px;
+        background: var(--line);
+        border-radius: 2px;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 4px;
+        background: var(--line);
+        border-radius: 2px;
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 22px;
+        height: 22px;
+        margin-top: -9px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 0;
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 0;
+      }
+
+      /* Facts table */
+      table.facts {
+        width: 100%;
+        font-variant-numeric: tabular-nums;
+        border-collapse: collapse;
+      }
+      table.facts td {
+        padding: 4px 0;
+        font-size: 14px;
+      }
+      table.facts td.k {
+        color: var(--dim);
+      }
+      table.facts td.v {
+        text-align: right;
+        font-weight: 600;
+      }
+      table.facts td.u {
+        color: var(--dim);
+        width: 56px;
+        padding-left: 8px;
+        font-size: 12px;
+      }
+
+      .ratio {
+        color: var(--dim);
+        font-size: 12px;
+        margin-top: 8px;
+      }
+      .ratio b {
+        color: var(--warm);
+      }
+
+      svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .frieze-wrap {
+        margin-top: 10px;
+      }
+      .frieze-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--dim);
+        margin-top: 2px;
+      }
+      .fan-hint {
+        text-align: center;
+        margin-top: 8px;
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      .big {
+        font-size: 26px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .big .unit {
+        font-size: 13px;
+        color: var(--dim);
+        font-weight: 400;
+        margin-left: 2px;
+      }
+
+      .outcome {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .outcome .card {
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .outcome .card .lbl {
+        font-size: 10px;
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+      }
+
+      .tau-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .tau-row .formula {
+        color: var(--dim);
+        font-size: 12px;
+        text-align: right;
+      }
+
+      /* Footnote / model assumptions */
+      .notes {
+        margin-top: 32px;
+        padding: 20px;
+        border-top: 1px solid var(--line);
+        color: var(--dim);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .notes h2 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: var(--dim-2);
+        margin: 0 0 10px;
+        font-weight: 600;
+      }
+      .notes h3 {
+        font-size: 12px;
+        color: var(--ink);
+        margin: 14px 0 4px;
+        font-weight: 600;
+      }
+      .notes p {
+        margin: 4px 0;
+      }
+      .notes code {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 11px;
+        color: var(--ink);
+      }
+      .notes ul {
+        margin: 4px 0;
+        padding-left: 18px;
+      }
+      .notes li {
+        margin: 2px 0;
+      }
+      .notes .caveat {
+        color: var(--warm);
+        font-weight: 600;
+      }
+
+      /* Modal */
+      .modal-bg {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+      .modal-bg.on {
+        display: flex;
+      }
+      .modal {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 18px;
+        min-width: 280px;
+        max-width: 90vw;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      }
+      .modal h3 {
+        margin: 0 0 12px;
+        font-size: 14px;
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .modal .fields {
+        display: grid;
+        gap: 10px;
+      }
+      .modal .field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .modal .field label {
+        flex: 0 0 90px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      .modal input[type="number"] {
+        flex: 1;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--ink);
+        font: inherit;
+        padding: 8px 10px;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .modal input[type="number"]:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .modal .field .unit {
+        color: var(--dim);
+        font-size: 12px;
+        width: 30px;
+      }
+      .modal .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .modal button {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        padding: 8px 14px;
+        border-radius: 6px;
+        font: inherit;
+        cursor: pointer;
+      }
+      .modal button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #0a1018;
+        font-weight: 600;
+      }
+
+      /* Section title with inline derived hint */
+      .section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .section-head h2 {
+        margin: 0;
+      }
+      .section-head .derived {
+        font-size: 12px;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+      }
+      .section-head .derived b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Inertie nocturne <span class="dim">— v0.3 · vibe coded</span></h1>
+
+      <div class="grid">
+        <!-- ============ LEFT: inputs ============ -->
+        <div>
+          <!-- Pièce -->
+          <section>
+            <div class="section-head">
+              <h2>Pièce</h2>
+              <div class="derived" id="room-derived"></div>
+            </div>
+            <div class="chips chip-grid-4" id="room-chips"></div>
+          </section>
+
+          <!-- Matériau -->
+          <section>
+            <div class="section-head">
+              <h2>Matériau des murs</h2>
+              <div class="derived" id="mat-derived"></div>
+            </div>
+            <div class="chips chip-grid-3" id="mat-chips"></div>
+          </section>
+
+          <!-- Températures -->
+          <section>
+            <div class="section-head">
+              <h2>Températures</h2>
+              <div class="derived" id="temp-derived"></div>
+            </div>
+            <div class="slider-row">
+              <label>Intérieure</label>
+              <input
+                id="tin"
+                type="range"
+                min="18"
+                max="35"
+                step="0.5"
+                value="28"
+              />
+              <span class="val"><span id="tin-v">28.0</span> °C</span>
+            </div>
+            <div class="slider-row">
+              <label>Extérieure (nuit)</label>
+              <input
+                id="tex"
+                type="range"
+                min="10"
+                max="28"
+                step="0.5"
+                value="18"
+              />
+              <span class="val"><span id="tex-v">18.0</span> °C</span>
+            </div>
+          </section>
+
+          <!-- Ventilation -->
+          <section>
+            <div class="section-head">
+              <h2>Ventilation</h2>
+              <div class="derived" id="vent-derived"></div>
+            </div>
+            <div class="chips chip-grid-3" id="fan-chips"></div>
+            <div class="frieze-wrap">
+              <svg
+                id="frieze"
+                viewBox="0 0 400 90"
+                preserveAspectRatio="none"
+              ></svg>
+            </div>
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                margin-top: 10px;
+                font-size: 12px;
+                color: var(--dim);
+              "
+            >
+              <span
+                >Couverture :
+                <span id="cov" style="color: var(--ink); font-weight: 600"
+                  >—</span
+                >
+                m² (<span
+                  id="covpct"
+                  style="color: var(--ink); font-weight: 600"
+                  >—</span
+                >% des murs)</span
+              >
+              <span
+                >v<sub>jet</sub> =
+                <span id="vjet" style="color: var(--ink); font-weight: 600"
+                  >—</span
+                >
+                m/s &nbsp;·&nbsp; h̄ =
+                <span id="hconv" style="color: var(--ink); font-weight: 600"
+                  >—</span
+                >
+                W/m²K</span
+              >
+            </div>
+          </section>
+        </div>
+
+        <!-- ============ RIGHT: derived ============ -->
+        <div>
+          <!-- Refroidissement -->
+          <section>
+            <h2>Refroidissement</h2>
+            <div class="tau-row">
+              <span class="big"
+                ><span id="tau">—</span><span class="unit">h</span></span
+              >
+              <span class="formula"
+                >constante de temps τ<br /><span style="font-size: 11px"
+                  >τ = m·c / (h·A)</span
+                ></span
+              >
+            </div>
+            <svg id="curve" viewBox="0 0 400 200"></svg>
+            <div class="outcome">
+              <div class="card">
+                <div class="lbl">Dans 6 h</div>
+                <div class="big">
+                  <span id="t6">—</span><span class="unit">°C</span>
+                </div>
+              </div>
+              <div class="card">
+                <div class="lbl">Énergie extraite à 6 h</div>
+                <div class="big">
+                  <span id="eout">—</span><span class="unit">kWh</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Masses -->
+          <section>
+            <h2>L'air est une plume, les murs sont un camion</h2>
+            <h3>Murs actifs</h3>
+            <table class="facts">
+              <tr>
+                <td class="k">Surface (murs verticaux)</td>
+                <td class="v" id="awall">—</td>
+                <td class="u">m²</td>
+              </tr>
+              <tr>
+                <td class="k">Épaisseur active</td>
+                <td class="v" id="dact">—</td>
+                <td class="u">cm</td>
+              </tr>
+              <tr>
+                <td class="k">Masse</td>
+                <td class="v" id="mwall">—</td>
+                <td class="u">kg</td>
+              </tr>
+              <tr>
+                <td class="k">Capacité therm.</td>
+                <td class="v" id="cwall">—</td>
+                <td class="u">kJ/K</td>
+              </tr>
+              <tr>
+                <td class="k">Énergie totale (asymptote)</td>
+                <td class="v" id="ewall">—</td>
+                <td class="u">kWh</td>
+              </tr>
+            </table>
+            <h3>Air de la pièce</h3>
+            <table class="facts">
+              <tr>
+                <td class="k">Volume</td>
+                <td class="v" id="vair2">—</td>
+                <td class="u">m³</td>
+              </tr>
+              <tr>
+                <td class="k">Masse</td>
+                <td class="v" id="mair">—</td>
+                <td class="u">kg</td>
+              </tr>
+              <tr>
+                <td class="k">Capacité therm.</td>
+                <td class="v" id="cair">—</td>
+                <td class="u">kJ/K</td>
+              </tr>
+            </table>
+            <div class="ratio">
+              L'air pèse <b><span id="ratio">—</span>× moins</b> que la peau
+              active des murs.
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <footer class="notes">
+        <h2>Hypothèses physiques</h2>
+        <ul>
+          <li>
+            <b>Peau active des murs</b> :
+            <code>d = √(α·T / π)</code>, <code>T = 24 h</code>.
+            Au-delà, le mur ne suit plus le cycle jour-nuit.
+            Masse <code>m = ρ·A·d</code>, capacité <code>C = m·c</code>.
+          </li>
+          <li>
+            <b>Convection aire-pondérée</b> :
+            <code>h·A = h_nat·(A_wall − A_cov) + h_forc(v_jet)·A_cov</code>,
+            avec <code>h_nat ≈ 3 W/m²K</code> et
+            <code>h_forc = 3 + 3.8·v</code> (Jürges, &lt; 5 m/s).
+            <code>A_cov</code> plafonné à <code>A_wall</code>.
+          </li>
+          <li>
+            <b>Trajectoire</b> :
+            <code>τ = m·c / (h·A)</code>,
+            <code>T(t) = T_ext + ΔT·exp(−t/τ)</code>
+            (un nœud, <code>T_ext</code> constante).
+          </li>
+          <li>
+            <b>Surfaces</b> : murs verticaux seuls
+            (<code>A_wall = 2·(a+b)·h</code>). Sol, plafond, fenêtres,
+            cloisons internes ignorés.
+          </li>
+        </ul>
+        <p>
+          <span class="caveat">Non modélisé</span> : enthalpie du flux d'air
+          (air supposé à <code>T_ext</code>), conduction interne du mur
+          (Biot → 0), <code>T_ext</code> variable, gains solaires, humidité.
+          Les couples <code>(A_cov, v_jet)</code> par ventilateur sont calibrés
+          à l'œil.
+        </p>
+      </footer>
+    </main>
+
+    <!-- Generic numeric popup -->
+    <div class="modal-bg" id="modal">
+      <div class="modal">
+        <h3 id="modal-title">Personnaliser</h3>
+        <div class="fields" id="modal-fields"></div>
+        <div class="actions">
+          <button id="modal-cancel">Annuler</button>
+          <button class="primary" id="modal-ok">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---------- Constants ----------
+      const MATERIALS = {
+        leger: {
+          name: "Léger",
+          sub: "plâtre / bois",
+          rho: 600,
+          c: 1600,
+          alpha: 0.2e-6,
+        },
+        brique: {
+          name: "Brique",
+          sub: "briques pleines",
+          rho: 1800,
+          c: 840,
+          alpha: 0.5e-6,
+        },
+        pierre: {
+          name: "Pierre/béton",
+          sub: "moellon, béton",
+          rho: 2300,
+          c: 880,
+          alpha: 0.75e-6,
+        },
+      };
+      const PERIOD_24H = 24 * 3600;
+      const RHO_AIR = 1.2;
+      const C_AIR = 1005;
+
+      const ROOM_PRESETS = [
+        {
+          id: "petite",
+          name: "Petite",
+          sub: "3 × 3 × 2.4",
+          a: 3,
+          b: 3,
+          h: 2.4,
+        },
+        {
+          id: "standard",
+          name: "Standard",
+          sub: "5 × 4 × 2.4",
+          a: 5,
+          b: 4,
+          h: 2.4,
+        },
+        {
+          id: "grande",
+          name: "Grande",
+          sub: "7 × 5 × 2.5",
+          a: 7,
+          b: 5,
+          h: 2.5,
+        },
+        { id: "loft", name: "Loft", sub: "8 × 6 × 3.0", a: 8, b: 6, h: 3.0 },
+      ];
+
+      // Pour chaque preset, deux paramètres physiques en plus du débit :
+      //   Acov  (m²) : aire de mur balayée par le jet/plume avec une vitesse
+      //                tangentielle significative. Propriété du ventilo et de
+      //                son orientation, indépendante de la pièce. Saturée à
+      //                A_wall pour les grandes couvertures.
+      //   vJet  (m/s): vitesse tangentielle moyenne dans cette zone couverte.
+      // Calibration grossière contre les ancres du doc.
+      const FAN_PRESETS = [
+        {
+          id: "fenetre",
+          q: 30,
+          Acov: 0,
+          vJet: 0,
+          name: "Fenêtre",
+          sub: "entrouverte",
+        },
+        {
+          id: "vmc",
+          q: 90,
+          Acov: 0,
+          vJet: 0,
+          name: "VMC",
+          sub: "ou ventilo PC",
+        },
+        {
+          id: "table",
+          q: 500,
+          Acov: 4,
+          vJet: 1.5,
+          name: "Ventilo de table",
+          sub: "30 cm",
+        },
+        {
+          id: "plafond",
+          q: 2000,
+          Acov: 40,
+          vJet: 1.5,
+          name: "Brasseur plafond",
+          sub: "",
+        },
+        {
+          id: "drum",
+          q: 3300,
+          Acov: 12,
+          vJet: 2.5,
+          name: "Brasseur drum",
+          sub: "30 cm",
+        },
+        {
+          id: "industriel",
+          q: 5000,
+          Acov: 25,
+          vJet: 3.0,
+          name: "Extracteur",
+          sub: "industriel",
+        },
+      ];
+
+      const FRIEZE_TICKS = [30, 90, 500, 2000, 5000];
+
+      // ---------- State ----------
+      const state = {
+        roomPreset: "standard",
+        a: 5,
+        b: 4,
+        h: 2.4,
+        mat: "brique",
+        tin: 28,
+        tex: 18,
+        fanPreset: "table",
+        q: 500,
+        Acov: 4,
+        vJet: 1.5,
+      };
+
+      // Pour un débit custom : on s'aligne sur le preset le plus proche en Q.
+      // L'utilisateur ne peut pas raisonnablement estimer la couverture ou la
+      // vitesse de jet — on hérite du ventilo qui ressemble le plus.
+      function fanArchetype(q) {
+        let best = FAN_PRESETS[0];
+        let bestDist = Infinity;
+        for (const f of FAN_PRESETS) {
+          const d = Math.abs(
+            Math.log(Math.max(1, q)) - Math.log(Math.max(1, f.q)),
+          );
+          if (d < bestDist) {
+            bestDist = d;
+            best = f;
+          }
+        }
+        return best;
+      }
+
+      // ---------- Helpers ----------
+      const $ = (id) => document.getElementById(id);
+      const fmt = (x, d = 1) => {
+        if (!isFinite(x)) return "—";
+        if (Math.abs(x) >= 1000) return Math.round(x).toLocaleString("fr-FR");
+        return x.toFixed(d);
+      };
+      const fmtInt = (x) => Math.round(x).toLocaleString("fr-FR");
+
+      // ---------- Physics ----------
+      function compute() {
+        const { a, b, h, mat, tin, tex, q, Acov, vJet } = state;
+        const m = MATERIALS[mat];
+
+        const V = a * b * h;
+        const Awall = 2 * (a + b) * h; // walls only (V2 adds floor/ceiling)
+        const mAir = RHO_AIR * V;
+        const Cair = mAir * C_AIR;
+
+        const d = Math.sqrt((m.alpha * PERIOD_24H) / Math.PI);
+        const mWall = m.rho * Awall * d;
+        const Cwall = mWall * m.c;
+        const dT = Math.max(0, tin - tex);
+        const Ewall = Cwall * dT;
+
+        const ach = q / V;
+        // Couverture : aire de mur effectivement balayée par le ventilo,
+        // saturée à A_wall (un brasseur plafond enveloppe une petite pièce
+        // entièrement, mais ne s'étend pas dans un loft).
+        const Aeff = Math.min(Acov, Awall);
+        const covFrac = Awall > 0 ? Aeff / Awall : 0;
+
+        // h_nat ≈ 3 W/m²K : convection naturelle sur paroi verticale, ΔT~10°C
+        // (corrélations Churchill-Chu, ordre de grandeur).
+        // h_forc(v) = 3.0 + 3.8·v : forme Jürges, valable jusqu'à ~5 m/s.
+        // On mélange par aire : (h·A)_total = h_nat·(A_wall - A_eff) + h_forc(vJet)·A_eff
+        const hNat = 3.0;
+        const hForc = 3.0 + 3.8 * vJet;
+        const hA = hNat * (Awall - Aeff) + hForc * Aeff;
+        const hConv = Awall > 0 ? hA / Awall : hNat;
+        const turbulent = vJet > 0.3 && Aeff > 0;
+
+        const tau = Cwall / hA;
+        const tauH = tau / 3600;
+
+        const HORIZON_H = 12,
+          STEPS = 80;
+        const pts = [];
+        for (let i = 0; i <= STEPS; i++) {
+          const tH = (HORIZON_H * i) / STEPS;
+          const T = tex + (tin - tex) * Math.exp(-tH / tauH);
+          pts.push({ tH, T });
+        }
+        const t6 = tex + (tin - tex) * Math.exp(-6 / tauH);
+        const eOut6 = Cwall * (tin - t6);
+
+        return {
+          V,
+          Awall,
+          mAir,
+          Cair,
+          d,
+          mWall,
+          Cwall,
+          Ewall,
+          Aeff,
+          covFrac,
+          vJet,
+          turbulent,
+          hConv,
+          tau,
+          tauH,
+          pts,
+          t6,
+          eOut6,
+          ach,
+        };
+      }
+
+      // ---------- Chip rendering ----------
+      function renderRoomChips() {
+        const wrap = $("room-chips");
+        const isCustom = !ROOM_PRESETS.find((p) => p.id === state.roomPreset);
+        wrap.innerHTML =
+          ROOM_PRESETS.map(
+            (p) => `
+    <button class="chip ${state.roomPreset === p.id ? "on" : ""}" data-room="${p.id}">
+      <span class="title">${p.name}</span>
+      <span class="sub">${p.sub} m</span>
+    </button>
+  `,
+          ).join("") +
+          `
+    <button class="chip custom ${isCustom ? "on" : ""}" data-room="custom">
+      <span class="title">${isCustom ? `${state.a} × ${state.b} × ${state.h}` : "Personnalisée"}</span>
+      <span class="sub">${isCustom ? `${fmt(state.a * state.b * state.h, 0)} m³` : "modifier…"}</span>
+    </button>
+  `;
+        wrap.querySelectorAll(".chip").forEach((b) => {
+          b.addEventListener("click", () => {
+            const id = b.dataset.room;
+            if (id === "custom") {
+              openCustomRoom();
+            } else {
+              const p = ROOM_PRESETS.find((x) => x.id === id);
+              state.roomPreset = id;
+              state.a = p.a;
+              state.b = p.b;
+              state.h = p.h;
+              render();
+            }
+          });
+        });
+      }
+
+      function renderMatChips() {
+        const wrap = $("mat-chips");
+        wrap.innerHTML = Object.entries(MATERIALS)
+          .map(([id, m]) => {
+            const d = Math.sqrt((m.alpha * PERIOD_24H) / Math.PI) * 100;
+            return `
+      <button class="chip ${state.mat === id ? "on" : ""}" data-mat="${id}">
+        <span class="title">${m.name}</span>
+        <span class="sub">ρ ${m.rho} · d ${d.toFixed(0)} cm</span>
+      </button>
+    `;
+          })
+          .join("");
+        wrap.querySelectorAll(".chip").forEach((b) => {
+          b.addEventListener("click", () => {
+            state.mat = b.dataset.mat;
+            render();
+          });
+        });
+      }
+
+      function renderFanChips() {
+        const wrap = $("fan-chips");
+        const isCustom = state.fanPreset === "custom";
+        wrap.innerHTML =
+          FAN_PRESETS.map(
+            (p) => `
+    <button class="chip ${state.fanPreset === p.id ? "on" : ""}" data-fan="${p.id}">
+      <span class="title">${p.name}</span>
+      <span class="sub">${p.q.toLocaleString("fr-FR")} m³/h${p.sub ? " · " + p.sub : ""}</span>
+    </button>
+  `,
+          ).join("") +
+          `
+    <button class="chip custom ${isCustom ? "on" : ""}" data-fan="custom">
+      <span class="title">${isCustom ? state.q.toLocaleString("fr-FR") + " m³/h" : "Personnalisé"}</span>
+      <span class="sub">${isCustom ? "modifier…" : "saisir un débit"}</span>
+    </button>
+  `;
+        wrap.querySelectorAll(".chip").forEach((b) => {
+          b.addEventListener("click", () => {
+            const id = b.dataset.fan;
+            if (id === "custom") {
+              openCustomFan();
+            } else {
+              const p = FAN_PRESETS.find((x) => x.id === id);
+              state.fanPreset = id;
+              state.q = p.q;
+              state.Acov = p.Acov;
+              state.vJet = p.vJet;
+              render();
+            }
+          });
+        });
+      }
+
+      // ---------- Modal ----------
+      function openModal(title, fields, onOk) {
+        $("modal-title").textContent = title;
+        const html = fields
+          .map(
+            (f) => `
+    <div class="field">
+      <label>${f.label}</label>
+      <input type="number" id="mf-${f.id}" value="${f.value}" step="${f.step ?? 1}" min="${f.min ?? 0}">
+      <span class="unit">${f.unit ?? ""}</span>
+    </div>
+  `,
+          )
+          .join("");
+        $("modal-fields").innerHTML = html;
+        $("modal").classList.add("on");
+        const close = () => $("modal").classList.remove("on");
+        $("modal-cancel").onclick = close;
+        $("modal-ok").onclick = () => {
+          const vals = {};
+          for (const f of fields)
+            vals[f.id] = parseFloat($(`mf-${f.id}`).value);
+          close();
+          onOk(vals);
+        };
+        // first input focus
+        setTimeout(() => {
+          const first = $("modal-fields").querySelector("input");
+          if (first) {
+            first.focus();
+            first.select();
+          }
+        }, 50);
+      }
+
+      function openCustomRoom() {
+        openModal(
+          "Pièce personnalisée",
+          [
+            {
+              id: "a",
+              label: "Longueur",
+              value: state.a,
+              step: 0.1,
+              min: 1,
+              unit: "m",
+            },
+            {
+              id: "b",
+              label: "Largeur",
+              value: state.b,
+              step: 0.1,
+              min: 1,
+              unit: "m",
+            },
+            {
+              id: "h",
+              label: "Hauteur",
+              value: state.h,
+              step: 0.05,
+              min: 2,
+              unit: "m",
+            },
+          ],
+          (v) => {
+            state.roomPreset = "custom";
+            state.a = v.a;
+            state.b = v.b;
+            state.h = v.h;
+            render();
+          },
+        );
+      }
+
+      function openCustomFan() {
+        openModal(
+          "Débit personnalisé",
+          [
+            {
+              id: "q",
+              label: "Débit",
+              value: state.q,
+              step: 10,
+              min: 1,
+              unit: "m³/h",
+            },
+          ],
+          (v) => {
+            state.fanPreset = "custom";
+            state.q = Math.max(1, v.q || 1);
+            const arch = fanArchetype(state.q);
+            state.Acov = arch.Acov;
+            state.vJet = arch.vJet;
+            render();
+          },
+        );
+      }
+
+      // ---------- Render ----------
+      function render() {
+        const r = compute();
+
+        // Temperatures (live)
+        $("tin-v").textContent = state.tin.toFixed(1);
+        $("tex-v").textContent = state.tex.toFixed(1);
+
+        // Inline derived hints next to section titles
+        $("room-derived").innerHTML =
+          `${fmt(state.a, 1)} × ${fmt(state.b, 1)} × ${fmt(state.h, 2)} m — <b>${fmt(r.V, 0)} m³</b>`;
+        $("mat-derived").innerHTML =
+          `${MATERIALS[state.mat].name.toLowerCase()} — peau <b>${fmt(r.d * 100, 0)} cm</b>`;
+        $("temp-derived").innerHTML =
+          `ΔT = <b>${fmt(Math.max(0, state.tin - state.tex), 1)} °C</b>`;
+        $("vent-derived").innerHTML =
+          `<b>${fmtInt(state.q)}</b> m³/h — <b>${fmt(r.ach, 1)}</b> vol/h`;
+
+        $("cov").textContent = fmt(r.Aeff, 1);
+        $("covpct").textContent = fmt(r.covFrac * 100, 0);
+        $("vjet").textContent = fmt(r.vJet, 1);
+        $("hconv").textContent = fmt(r.hConv, 1);
+
+        // Walls
+        $("awall").textContent = fmt(r.Awall, 1);
+        $("dact").textContent = fmt(r.d * 100, 1);
+        $("mwall").textContent = fmtInt(r.mWall);
+        $("cwall").textContent = fmtInt(r.Cwall / 1000);
+        $("ewall").textContent = fmt(r.Ewall / 3.6e6, 1);
+
+        // Air
+        $("vair2").textContent = fmt(r.V, 1);
+        $("mair").textContent = fmt(r.mAir, 1);
+        $("cair").textContent = fmt(r.Cair / 1000, 1);
+        $("ratio").textContent = fmt(r.mWall / r.mAir, 0);
+
+        // τ + outcome
+        $("tau").textContent = fmt(r.tauH, 1);
+        $("t6").textContent = fmt(r.t6, 1);
+        $("eout").textContent = fmt(r.eOut6 / 3.6e6, 1);
+
+        // Repaint chips so .on follows state
+        renderRoomChips();
+        renderMatChips();
+        renderFanChips();
+
+        drawCurve(r);
+        drawFrieze(r);
+      }
+
+      function drawCurve(r) {
+        const W = 400,
+          H = 200,
+          PAD_L = 36,
+          PAD_R = 10,
+          PAD_T = 12,
+          PAD_B = 24;
+        const HORIZON_H = 12;
+        const tMin = Math.min(state.tex, ...r.pts.map((p) => p.T));
+        const tMax = Math.max(state.tin, ...r.pts.map((p) => p.T));
+        const yTop = tMax + 0.5,
+          yBot = tMin - 0.5;
+        const xs = (i) =>
+          PAD_L + (W - PAD_L - PAD_R) * (r.pts[i].tH / HORIZON_H);
+        const ys = (T) =>
+          PAD_T + (H - PAD_T - PAD_B) * (1 - (T - yBot) / (yTop - yBot));
+
+        let path = "";
+        r.pts.forEach((p, i) => {
+          path +=
+            (i === 0 ? "M" : "L") + xs(i).toFixed(1) + " " + ys(p.T).toFixed(1);
+        });
+        const yAsym = ys(state.tex);
+
+        let grid = "";
+        for (let hMark = 0; hMark <= HORIZON_H; hMark += 3) {
+          const x = PAD_L + (W - PAD_L - PAD_R) * (hMark / HORIZON_H);
+          grid += `<line x1="${x}" y1="${PAD_T}" x2="${x}" y2="${H - PAD_B}" stroke="#2a333d" stroke-width="0.5"/>`;
+          grid += `<text x="${x}" y="${H - PAD_B + 14}" fill="#aab4c0" font-size="10" text-anchor="middle">${hMark}h</text>`;
+        }
+        [yBot, (yBot + yTop) / 2, yTop].forEach((T) => {
+          grid += `<text x="${PAD_L - 6}" y="${ys(T) + 3}" fill="#aab4c0" font-size="10" text-anchor="end">${T.toFixed(0)}°</text>`;
+        });
+
+        const x6 = PAD_L + (W - PAD_L - PAD_R) * (6 / HORIZON_H);
+        const y6 = ys(r.t6);
+
+        $("curve").innerHTML = `
+    ${grid}
+    <line x1="${PAD_L}" y1="${yAsym}" x2="${W - PAD_R}" y2="${yAsym}"
+          stroke="#6cb6ff" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.6"/>
+    <path d="${path}" fill="none" stroke="#ff9b6c" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="${x6}" y1="${PAD_T}" x2="${x6}" y2="${H - PAD_B}" stroke="#e6e9ec" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.5"/>
+    <circle cx="${x6}" cy="${y6}" r="4" fill="#e6e9ec"/>
+  `;
+      }
+
+      function drawFrieze(r) {
+        const W = 400,
+          PAD = 12;
+        const Y_Q = 22,
+          Y_V = 66;
+
+        // Top: m³/h (log)
+        const qMin = 30,
+          qMax = 5000;
+        const xQ = (q) =>
+          PAD + (W - 2 * PAD) * (Math.log(q / qMin) / Math.log(qMax / qMin));
+        const qTicks = [
+          { q: 30, lbl: "30" },
+          { q: 90, lbl: "90" },
+          { q: 500, lbl: "500" },
+          { q: 2000, lbl: "2k" },
+          { q: 5000, lbl: "5k m³/h" },
+        ];
+
+        // Bottom: couverture (% des murs balayés), linéaire 0 → 100
+        const cMin = 0,
+          cMax = 100;
+        const xV = (c) => PAD + (W - 2 * PAD) * ((c - cMin) / (cMax - cMin));
+        const vTicks = [
+          { v: 0, lbl: "0", note: "aucun balayage" },
+          { v: 10, lbl: "10 %", note: "un mur partiel" },
+          { v: 30, lbl: "30 %", note: "" },
+          { v: 60, lbl: "60 %", note: "circulation large" },
+          { v: 100, lbl: "100 % murs", note: "enveloppe complète" },
+        ];
+
+        let s = "";
+
+        // m³/h axis
+        s += `<line x1="${PAD}" y1="${Y_Q}" x2="${W - PAD}" y2="${Y_Q}" stroke="#2a333d" stroke-width="2"/>`;
+        for (const t of qTicks) {
+          const x = xQ(t.q);
+          s += `<line x1="${x}" y1="${Y_Q - 5}" x2="${x}" y2="${Y_Q + 5}" stroke="#aab4c0" stroke-width="1"/>`;
+          s += `<text x="${x}" y="${Y_Q - 8}" fill="#aab4c0" font-size="9" text-anchor="middle">${t.lbl}</text>`;
+        }
+        const xc = xQ(Math.min(qMax, Math.max(qMin, state.q)));
+        s += `<circle cx="${xc}" cy="${Y_Q}" r="7" fill="#6cb6ff"/>`;
+        s += `<circle cx="${xc}" cy="${Y_Q}" r="2.5" fill="#0f1419"/>`;
+
+        // m/s axis (Beaufort indoor flavour)
+        s += `<line x1="${PAD}" y1="${Y_V}" x2="${W - PAD}" y2="${Y_V}" stroke="#2a333d" stroke-width="2"/>`;
+        for (const t of vTicks) {
+          const x = xV(t.v);
+          s += `<line x1="${x}" y1="${Y_V - 5}" x2="${x}" y2="${Y_V + 5}" stroke="#aab4c0" stroke-width="1"/>`;
+          s += `<text x="${x}" y="${Y_V + 16}" fill="#aab4c0" font-size="9" text-anchor="middle">${t.lbl}</text>`;
+          if (t.note) {
+            s += `<text x="${x}" y="${Y_V - 8}" fill="#aab4c0" font-size="8" text-anchor="middle" opacity="0.7">${t.note}</text>`;
+          }
+        }
+        const cPct = Math.min(cMax, Math.max(0, r.covFrac * 100));
+        const xvc = xV(cPct);
+        s += `<circle cx="${xvc}" cy="${Y_V}" r="7" fill="#ff9b6c"/>`;
+        s += `<circle cx="${xvc}" cy="${Y_V}" r="2.5" fill="#0f1419"/>`;
+
+        $("frieze").innerHTML = s;
+      }
+
+      // ---------- Wiring ----------
+      ["tin", "tex"].forEach((id) => {
+        $(id).addEventListener("input", (e) => {
+          state[id] = parseFloat(e.target.value);
+          render();
+        });
+      });
+      $("modal").addEventListener("click", (e) => {
+        if (e.target.id === "modal") $("modal").classList.remove("on");
+      });
+
+      render();
+
+      // ---------- Sanity checks (console) ----------
+      // Each check runs compute() in a snapshot of state and asserts an order-of-magnitude property.
+      (function sanityChecks() {
+        const snapshot = { ...state };
+        const restore = () => Object.assign(state, snapshot);
+        const setFan = (id) => {
+          const p = FAN_PRESETS.find((x) => x.id === id);
+          state.fanPreset = id;
+          state.q = p.q;
+        };
+
+        const results = [];
+        const check = (name, ok, info) => results.push({ name, ok, info });
+
+        // 1. Default (standard room, table fan, brique) → τ around 10-20 h
+        //    (table fan ne balaie qu'une petite portion des murs)
+        state.a = 5;
+        state.b = 4;
+        state.h = 2.4;
+        state.mat = "brique";
+        state.tin = 28;
+        state.tex = 18;
+        setFan("table");
+        let r = compute();
+        check(
+          "τ par défaut entre 10 et 20 h",
+          r.tauH >= 10 && r.tauH <= 20,
+          `τ = ${r.tauH.toFixed(1)} h`,
+        );
+
+        // 2. Brasseur plafond bien plus rapide que ventilo de table : couverture +++
+        state.a = 5;
+        state.b = 4;
+        state.h = 2.4;
+        setFan("table");
+        const rTable = compute();
+        setFan("plafond");
+        const rPlafond = compute();
+        check(
+          "Brasseur plafond > ventilo de table (couverture)",
+          rPlafond.tauH < rTable.tauH * 0.6,
+          `τ table = ${rTable.tauH.toFixed(1)} h, τ plafond = ${rPlafond.tauH.toFixed(1)} h`,
+        );
+
+        // 3. Brasseur de plafond → τ around 4-9 h (couverture ~ tous les murs)
+        r = rPlafond;
+        check(
+          "Brasseur plafond → τ ≈ 5-8 h",
+          r.tauH >= 4 && r.tauH <= 9,
+          `τ = ${r.tauH.toFixed(1)} h, h̄ = ${r.hConv.toFixed(1)}`,
+        );
+
+        // 4. Fenêtre seule (Acov=0) → convection purement naturelle, τ long
+        setFan("fenetre");
+        r = compute();
+        check(
+          "Fenêtre seule → τ > 12 h",
+          r.tauH > 12,
+          `τ = ${r.tauH.toFixed(1)} h, h̄ = ${r.hConv.toFixed(1)}`,
+        );
+
+        // 4b. Brasseur dans un loft : couverture diluée → τ plus long que dans petit
+        state.a = 5;
+        state.b = 4;
+        state.h = 2.4;
+        setFan("plafond");
+        const rPlafSmall = compute();
+        state.a = 10;
+        state.b = 8;
+        state.h = 4.8;
+        const rPlafLoft = compute();
+        check(
+          "Brasseur dilué dans loft → τ plus long",
+          rPlafLoft.tauH > rPlafSmall.tauH * 1.3,
+          `τ petit = ${rPlafSmall.tauH.toFixed(1)} h, τ loft = ${rPlafLoft.tauH.toFixed(1)} h`,
+        );
+
+        // 5. Pierre/béton vs léger : plus lourd → τ plus long
+        state.a = 5;
+        state.b = 4;
+        state.h = 2.4;
+        setFan("table");
+        state.mat = "leger";
+        const rL = compute();
+        state.mat = "pierre";
+        const rP = compute();
+        check(
+          "Pierre/béton → τ plus long que léger",
+          rP.tauH > rL.tauH,
+          `τ léger = ${rL.tauH.toFixed(1)} h, τ pierre = ${rP.tauH.toFixed(1)} h`,
+        );
+
+        // 6. Air ~150× plus léger que la peau active (brique)
+        state.mat = "brique";
+        r = compute();
+        const ratio = r.mWall / r.mAir;
+        check(
+          "Air vs murs : ratio ~100–300",
+          ratio > 100 && ratio < 300,
+          `ratio = ${ratio.toFixed(0)}×`,
+        );
+
+        restore();
+        render();
+
+        // Pretty-print
+        console.group(
+          "%cInertie nocturne — sanity checks",
+          "color:#6cb6ff; font-weight:bold;",
+        );
+        for (const c of results) {
+          const tag = c.ok ? "%c✓" : "%c✗";
+          const col = c.ok ? "color:#7ed957" : "color:#ff6c6c";
+          console.log(`${tag} ${c.name} — ${c.info}`, col);
+        }
+        console.groupEnd();
+      })();
+    </script>
+  </body>
+</html>
