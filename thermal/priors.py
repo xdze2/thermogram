@@ -103,7 +103,7 @@ def build_priors(room: Room) -> RCModelOut:
         ua = element_u_value(elem) * elem.area_m2
         sigma_h = ua * _REL_SIGMA_H_ENV
         contrib = ContributionOut(
-            label=f"{elem.name}  [{elem.orientation.value}]",
+            label=f"{elem.name or elem.uid}  [{elem.orientation.value}]",
             value=ua,
             sigma=sigma_h,
             detail=f"U={element_u_value(elem):.2f} W/m²K  ×  {elem.area_m2} m²",
@@ -120,7 +120,7 @@ def build_priors(room: Room) -> RCModelOut:
             if c > 0:
                 sigma_c = c * _REL_SIGMA_C_WALL
                 c_wall_contribs.append(ContributionOut(
-                    label=f"{elem.name}  [{elem.orientation.value}]",
+                    label=f"{elem.name or elem.uid}  [{elem.orientation.value}]",
                     value=c,
                     sigma=sigma_c,
                     detail=f"{c/1e6:.2f} MJ/K from heavy layers",
@@ -175,7 +175,7 @@ def build_priors(room: Room) -> RCModelOut:
         if elem.type != ElementType.window:
             a_mu, a_sig = _alpha_for_element(elem)
             alpha_contribs.append(ContributionOut(
-                label=f"{elem.name}  [{elem.orientation.value}]",
+                label=f"{elem.name or elem.uid}  [{elem.orientation.value}]",
                 value=a_mu,
                 sigma=a_sig,
                 detail=f"outer layer: {_outer_material_key(elem) or 'unknown'}  ×  {elem.area_m2} m²",

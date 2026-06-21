@@ -42,13 +42,37 @@ export const elements = writable([]);
 
 export function nextId() { return _idSeq++; }
 
+export function genUid() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(4)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Build a display name from element properties when name is left blank.
+// Format: Type_Orientation_Area  e.g. "Wall_SE_10m2"
+// If the element has exactly one non-trivial layer material, use it instead of area:
+// "Wall_SE_brick"
+export function autoName(el, materialsArr) {
+  const typeLabel = (el.type ?? 'element').replace(/[^a-zA-Z0-9]/g, '');
+  const orient = el.orientation ?? '';
+  // pick material slug: use first layer's key, strip underscores to a short word
+  const layerKey = el.layers?.[0]?.material_key ?? '';
+  const matEntry = materialsArr.find(m => m.key === layerKey);
+  const matSlug = matEntry
+    ? matEntry.name.split(/[\s(]/)[0]  // first word of the material name
+    : '';
+  const areaSlug = `${el.area_m2 ?? 0}m2`;
+  const suffix = matSlug || areaSlug;
+  return [typeLabel, orient, suffix].filter(Boolean).join('_');
+}
+
 export function addElement() {
   const s = get(schema);
   const m = get(materials);
   const id = nextId();
   elements.update(els => [...els, {
     id,
-    name: `Element ${id + 1}`,
+    uid: genUid(),
+    name: null,
     type: s.element_types?.[0]?.value ?? 'wall',
     orientation: 'S',
     area_m2: 10,

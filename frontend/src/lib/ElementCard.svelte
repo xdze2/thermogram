@@ -1,9 +1,12 @@
 <script>
-  import { schema, materials, updateElement, addLayer, removeLayer, updateLayer, removeElement } from './store.js';
+  import { schema, materials, autoName, updateElement, addLayer, removeLayer, updateLayer, removeElement } from './store.js';
 
   export let el;
 
   let open = true;
+
+  $: displayName = el.name || autoName(el, $materials);
+
 
   function onDim(a, b) {
     const area = a * b;
@@ -37,7 +40,7 @@
     tabindex="0"
     on:keydown={e => e.key === 'Enter' && (open = !open)}
   >
-    <span class="font-medium text-base-content">{el.name}</span>
+    <span class="font-medium text-base-content">{displayName}</span>
     <span class="text-xs text-base-content/40">{el.type} · {el.orientation} · {el.area_m2} m²</span>
   </div>
 
@@ -47,8 +50,9 @@
       <div class="flex flex-col gap-1">
         <label class="flex items-center gap-2">
           <span class="text-xs text-base-content/50 w-24 shrink-0">Name</span>
-          <input type="text" value={el.name}
-            on:input={e => onField('name', e.target.value)}
+          <input type="text" value={el.name ?? ''}
+            placeholder={autoName(el, $materials)}
+            on:input={e => onField('name', e.target.value || null)}
             class="input input-xs input-bordered w-full" />
         </label>
 
