@@ -1,5 +1,5 @@
 <script>
-  import { dataSources, DATA_SOURCE_DEFS, rangeStart, rangeEnd, addDays, todayISO } from './store.js';
+  import { dataSources, DATA_SOURCE_DEFS, rangeStart, rangeEnd, addDays } from './store.js';
   import SignalPicker from './SignalPicker.svelte';
   import { createEventDispatcher } from 'svelte';
 
@@ -21,9 +21,17 @@
     dispatch('change');
   }
 
-  function extendEnd(days) {
-    const cur = $rangeEnd || todayISO();
-    rangeEnd.set(addDays(cur, days));
+  const DAY_OPTIONS = [1, 2, 3, 4, 5, 10];
+  let nbDays = 7;
+
+  function setDuration(n) {
+    nbDays = n;
+    rangeEnd.set(addDays($rangeStart, n));
+    dispatch('change');
+  }
+
+  function onStartChange() {
+    rangeEnd.set(addDays($rangeStart, nbDays));
     dispatch('change');
   }
 
@@ -74,25 +82,27 @@
 <!-- Time range -->
 <div>
   <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">Time range</p>
-  <div class="flex flex-col gap-1">
+  <div class="flex flex-col gap-1.5">
     <label class="flex items-center gap-2">
       <span class="text-xs text-base-content/50 w-10 shrink-0">Start</span>
-      <input type="text" placeholder="YYYY-MM-DD"
+      <input type="date"
         bind:value={$rangeStart}
-        on:input={() => dispatch('change')}
+        on:change={onStartChange}
         class="input input-xs input-bordered flex-1 font-mono" />
     </label>
-    <label class="flex items-center gap-2">
+    <div class="flex items-center gap-1 flex-wrap">
+      <span class="text-xs text-base-content/50 w-10 shrink-0">Days</span>
+      {#each DAY_OPTIONS as n}
+        <button
+          class="btn btn-xs"
+          class:btn-primary={nbDays === n}
+          class:btn-ghost={nbDays !== n}
+          on:click={() => setDuration(n)}>{n}</button>
+      {/each}
+    </div>
+    <div class="flex items-center gap-2">
       <span class="text-xs text-base-content/50 w-10 shrink-0">End</span>
-      <input type="text" placeholder="YYYY-MM-DD"
-        bind:value={$rangeEnd}
-        on:input={() => dispatch('change')}
-        class="input input-xs input-bordered flex-1 font-mono" />
-    </label>
-    <div class="flex gap-1 mt-0.5">
-      <button class="btn btn-xs btn-ghost" on:click={() => extendEnd(7)}>+7 d</button>
-      <button class="btn btn-xs btn-ghost" on:click={() => extendEnd(30)}>+30 d</button>
-      <button class="btn btn-xs btn-ghost" on:click={() => extendEnd(90)}>+90 d</button>
+      <span class="text-xs font-mono text-base-content/40">{$rangeEnd}</span>
     </div>
   </div>
 </div>
