@@ -138,7 +138,8 @@ def fetch_series(
     s.index = pd.to_datetime(s.index, utc=True)
     s.name = signal
 
-    # resample to uniform grid — mean aggregation, forward-fill short gaps
+    # resample to uniform grid — mean for dense sensor data, interpolate for sparse (e.g. hourly meteo)
     s = s.resample(resample).mean()
-    s = s.ffill(limit=4)  # fill gaps up to 4 × resample interval
+    s = s.interpolate(method="time", limit=4)  # linear interpolation up to 4 × resample interval
+    s = s.ffill(limit=4)  # fill remaining edge gaps (e.g. start of series)
     return s
