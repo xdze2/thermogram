@@ -33,6 +33,12 @@
   const TEMP_KEYS = ["T_int", "T_ext"];
   const RAW_SOL_KEYS = ["GHI", "direct", "diffuse"];
 
+  const H_TEMP = 300; // temperature graph
+  const H_SOL = 150; // solar irradiance graph
+  const H_FIT = 400; // fit results (temperature) — phase 2
+  const H_RESID = 250; // residuals — phase 2
+  void H_FIT, H_RESID; // reserved for phase 2 subplots
+
   onMount(async () => {
     Plotly = window.Plotly;
     render();
@@ -83,7 +89,47 @@
 
     const hasSol = rawSolSel.length > 0 || gOrientKeys.length > 0;
 
-    const traces = [];
+    const traces = /** @type {object[]} */ ([]);
+
+    // GHI background: full-height rectangles with opacity ∝ irradiance
+    const ds = /** @type {Record<string, string>} */ (dataSources);
+    const ghiKey = ds["GHI"];
+    const ghiPairs = /** @type {[string, number][]|null} */ (
+      ghiKey ? (inputData[ghiKey] ?? null) : null
+    );
+    const ghiShapes = [];
+    if (ghiPairs && ghiPairs.length > 1) {
+      const ghiMax = Math.max(...ghiPairs.map((p) => p[1]));
+      for (let i = 0; i < ghiPairs.length; i++) {
+        const val = ghiPairs[i][1];
+        if (val <= 0) continue;
+        const opacity = Math.min(val / ghiMax, 1) * 0.35;
+        // bar width: half-step on each side
+        const tMs = new Date(ghiPairs[i][0]).getTime();
+        const prevMs =
+          i > 0 ? new Date(ghiPairs[i - 1][0]).getTime() : tMs;
+        const nextMs =
+          i < ghiPairs.length - 1
+            ? new Date(ghiPairs[i + 1][0]).getTime()
+            : tMs;
+        const halfStep = (nextMs - prevMs) / 4; // half of avg neighbour spacing
+        const x0 = new Date(tMs - halfStep).toISOString();
+        const x1 = new Date(tMs + halfStep).toISOString();
+        ghiShapes.push({
+          type: "rect",
+          xref: "x",
+          yref: "y domain",
+          x0,
+          x1,
+          y0: 0,
+          y1: 1,
+          fillcolor: `rgba(251,191,36,${opacity.toFixed(3)})`,
+          line: { width: 0 },
+          layer: "below",
+        });
+      }
+    }
+
     tempSel.forEach(({ key, signal }) => {
       const pairs = inputData[signal] ?? [];
       const s = TRACE_STYLES[key] ?? TRACE_STYLES.T_int;
@@ -138,18 +184,29 @@
       });
     });
 
-    const rowHeights = hasSol ? [0.6, 0.4] : [1];
-    const chartHeight = hasSol ? 380 : 440;
+    const legendH = 40; // px reserved at bottom for horizontal legend
+    const gap = 20; // px gap between subplots
+    const totalHeight = H_TEMP + (hasSol ? H_SOL + gap : 0) + legendH;
+
+    // Convert pixel heights to [0,1] domain fractions (bottom-up in Plotly)
+    const solBottom = legendH / totalHeight;
+    const solTop = (legendH + (hasSol ? H_SOL : 0)) / totalHeight;
+    const tempBottom = hasSol
+      ? (legendH + H_SOL + gap) / totalHeight
+      : legendH / totalHeight;
+    const tempTop = 1;
+
     const layout = {
-      height: chartHeight,
+      height: totalHeight,
       paper_bgcolor: paperBg,
       plot_bgcolor: plotBg,
-      margin: { t: 8, r: 10, b: 36, l: 45 },
+      margin: { t: 8, r: 10, b: 0, l: 45 },
       legend: {
         font: { size: 10, color: textCol },
         bgcolor: "transparent",
         orientation: "h",
-        y: -0.12,
+        y: solBottom - 0.01,
+        yanchor: "top",
       },
       font: { family: "ui-monospace, monospace", color: textCol },
       xaxis: {
@@ -158,6 +215,8 @@
         gridcolor: gridCol,
         tickfont: { size: 9 },
         showticklabels: !hasSol,
+        domain: [0, 1],
+        anchor: "y",
       },
       yaxis: {
         color: textCol,
@@ -165,20 +224,17 @@
         tickfont: { size: 9 },
         zeroline: false,
         title: { text: "°C", font: { size: 9 } },
+        domain: [tempBottom, tempTop],
       },
+      shapes: ghiShapes,
       ...(hasSol && {
-        grid: {
-          rows: 2,
-          columns: 1,
-          pattern: "independent",
-          roworder: "top to bottom",
-          rowheights: rowHeights,
-        },
         xaxis2: {
           type: "date",
           color: textCol,
           gridcolor: gridCol,
           tickfont: { size: 9 },
+          domain: [0, 1],
+          anchor: "y2",
         },
         yaxis2: {
           color: textCol,
@@ -187,6 +243,7 @@
           zeroline: true,
           zerolinecolor: gridCol,
           title: { text: "W/m²", font: { size: 9 } },
+          domain: [solBottom, solTop],
         },
       }),
     };
