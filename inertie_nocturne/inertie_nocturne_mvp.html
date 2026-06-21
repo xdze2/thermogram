@@ -491,10 +491,10 @@
                 type="range"
                 min="18"
                 max="35"
-                step="0.5"
+                step="1"
                 value="28"
               />
-              <span class="val"><span id="tin-v">28.0</span> °C</span>
+              <span class="val"><span id="tin-v">28</span> °C</span>
             </div>
             <div class="slider-row">
               <label>Extérieure (nuit)</label>
@@ -503,10 +503,10 @@
                 type="range"
                 min="10"
                 max="28"
-                step="0.5"
+                step="1"
                 value="18"
               />
-              <span class="val"><span id="tex-v">18.0</span> °C</span>
+              <span class="val"><span id="tex-v">18</span> °C</span>
             </div>
           </section>
 
@@ -524,38 +524,28 @@
                 preserveAspectRatio="none"
               ></svg>
             </div>
-            <div
-              style="
-                display: flex;
-                justify-content: space-between;
-                margin-top: 10px;
-                font-size: 12px;
-                color: var(--dim);
-              "
-            >
-              <span
-                >Couverture :
-                <span id="cov" style="color: var(--ink); font-weight: 600"
-                  >—</span
-                >
-                m² (<span
-                  id="covpct"
-                  style="color: var(--ink); font-weight: 600"
-                  >—</span
-                >% des murs)</span
-              >
-              <span
-                >v<sub>jet</sub> =
-                <span id="vjet" style="color: var(--ink); font-weight: 600"
-                  >—</span
-                >
-                m/s &nbsp;·&nbsp; h̄ =
-                <span id="hconv" style="color: var(--ink); font-weight: 600"
-                  >—</span
-                >
-                W/m²K</span
-              >
-            </div>
+            <table class="facts" style="margin-top:10px">
+              <tr>
+                <td class="k">Couverture <span style="font-size:11px">(aire de mur balayée)</span></td>
+                <td class="v" id="cov">—</td>
+                <td class="u">m²</td>
+              </tr>
+              <tr>
+                <td class="k">Couverture <span style="font-size:11px">(% des murs)</span></td>
+                <td class="v" id="covpct">—</td>
+                <td class="u">%</td>
+              </tr>
+              <tr>
+                <td class="k">Vitesse jet v<sub>jet</sub></td>
+                <td class="v" id="vjet">—</td>
+                <td class="u">m/s</td>
+              </tr>
+              <tr>
+                <td class="k">Coeff. convection moyen h̄ <span style="font-size:11px">(h·A / A<sub>wall</sub>)</span></td>
+                <td class="v" id="hconv">—</td>
+                <td class="u">W/m²K</td>
+              </tr>
+            </table>
           </section>
         </div>
 
@@ -596,16 +586,13 @@
           <!-- Refroidissement -->
           <section>
             <h2>Refroidissement</h2>
-            <div class="tau-row">
-              <span class="big"
-                ><span id="tau">—</span><span class="unit">h</span></span
-              >
-              <span class="formula"
-                >constante de temps τ<br /><span style="font-size: 11px"
-                  >τ = m·c / (h·A)</span
-                ></span
-              >
-            </div>
+            <table class="facts">
+              <tr>
+                <td class="k">constante de temps τ <span style="font-size:11px">(τ = m·c / (h·A))</span></td>
+                <td class="v" id="tau">—</td>
+                <td class="u">h</td>
+              </tr>
+            </table>
             <svg id="curve" viewBox="0 0 400 200"></svg>
             <div class="outcome">
               <div class="card">
@@ -1141,8 +1128,8 @@
         const r = compute();
 
         // Temperatures (live)
-        $("tin-v").textContent = state.tin.toFixed(1);
-        $("tex-v").textContent = state.tex.toFixed(1);
+        $("tin-v").textContent = Math.round(state.tin);
+        $("tex-v").textContent = Math.round(state.tex);
 
         // Inline derived hints next to section titles
         $("room-derived").innerHTML =
@@ -1150,7 +1137,7 @@
         $("mat-derived").innerHTML =
           `${MATERIALS[state.mat].sub}`;
         $("temp-derived").innerHTML =
-          `ΔT = <b>${fmt(Math.max(0, state.tin - state.tex), 1)} °C</b>`;
+          `ΔT = <b>${Math.round(Math.max(0, state.tin - state.tex))} °C</b>`;
         $("vent-derived").innerHTML =
           `<b>${fmtInt(state.q)}</b> m³/h — <b>${fmt(r.ach, 1)}</b> vol/h`;
 
@@ -1163,7 +1150,7 @@
         $("dact2").textContent = fmt(r.d * 100, 1);
         $("mwall2").textContent = fmtInt(r.mWall);
         $("cwall2").textContent = fmtInt(r.Cwall / 1000);
-        $("dt2").textContent = fmt(Math.max(0, state.tin - state.tex), 1);
+        $("dt2").textContent = Math.round(Math.max(0, state.tin - state.tex));
         $("ewall2").textContent = fmt(r.Ewall / 3.6e6, 1);
 
         // Walls
