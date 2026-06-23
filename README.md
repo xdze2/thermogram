@@ -122,6 +122,10 @@ npm run build
 
 Interactive docs at `http://localhost:8000/docs`.
 
+## Side projects
+
+- [Inertie nocturne](inertie_nocturne/inertie_nocturne_mvp.html) — standalone HTML tool for estimating overnight room cool-down from thermal inertia.
+
 ## Scope and limitations
 
 - Single-zone model: one thermal node per room
