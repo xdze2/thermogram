@@ -19,10 +19,7 @@ import numpy as np
 import pandas as pd
 import pvlib
 
-from .api_models import ElementType, Orientation, Room
-
-# Fixed roof tilt [degrees from horizontal]
-ROOF_TILT_DEG = 30.0
+from .api_models import Orientation, Room
 
 # pvlib azimuth convention: 0=N, 90=E, 180=S, 270=W
 _ORIENTATION_AZIMUTH: dict[str, float] = {
@@ -40,30 +37,16 @@ _ORIENTATION_AZIMUTH: dict[str, float] = {
 }
 
 
-def _tilt_for_element_type(etype: ElementType) -> float:
-    if etype == ElementType.roof:
-        return ROOF_TILT_DEG
-    if etype == ElementType.floor:
-        return 0.0
-    return 90.0  # wall, door, window
-
-
 def orientation_key(elem) -> str:
-    """Return the G_i dict key for an element: orientation for walls/doors/windows, 'roof' for roofs, 'floor' for floors."""
-    if elem.type == ElementType.roof:
-        return "roof"
-    if elem.type == ElementType.floor:
-        return "floor"
-    return elem.orientation.value
+    """G_i dict key for an element: orientation for walls/doors/windows, 'roof'/'floor' otherwise."""
+    return elem.irradiance_key()
 
 
 def orientations_in_room(room: Room) -> dict[str, float]:
     """Return {G_key: surface_tilt_deg} for all elements in room (opaque and windows)."""
     result: dict[str, float] = {}
     for elem in room.elements:
-        key = orientation_key(elem)
-        tilt = _tilt_for_element_type(elem.type)
-        result.setdefault(key, tilt)
+        result.setdefault(elem.irradiance_key(), elem.solar_tilt_deg())
     return result
 
 

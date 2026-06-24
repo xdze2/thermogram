@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import cont2discrete
 
-from .api_models import EnvelopeElement, ElementType, Room
+from .api_models import EnvelopeElement, Room
 from .iso6946 import surface_resistances, layer_resistance, element_u_value
 
 
@@ -33,11 +33,11 @@ H_EXT = 25.0
 
 
 def opaque_elements(room: Room) -> list[EnvelopeElement]:
-    return [e for e in room.elements if e.type != ElementType.window]
+    return [e for e in room.elements if e.is_opaque]
 
 
 def window_elements(room: Room) -> list[EnvelopeElement]:
-    return [e for e in room.elements if e.type == ElementType.window]
+    return [e for e in room.elements if not e.is_opaque]
 
 
 def h_env_opaque(room: Room) -> float:

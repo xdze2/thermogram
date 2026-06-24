@@ -3,20 +3,12 @@ U-value and thermal resistance calculations per ISO 6946:2017.
 """
 
 from .materials_db import MATERIALS
-from .api_models import EnvelopeElement, ElementType, Orientation, MaterialLayer
+from .api_models import EnvelopeElement, MaterialLayer
 
 
 def surface_resistances(element: EnvelopeElement) -> tuple[float, float]:
     """Return (Rsi, Rso) in m²·K/W based on element type and heat flow direction."""
-    if element.type in (ElementType.wall, ElementType.window, ElementType.door):
-        return 0.13, 0.04
-    elif element.type == ElementType.roof:
-        return 0.10, 0.04
-    elif element.type == ElementType.floor:
-        if element.is_ground_contact:
-            return 0.17, 0.00  # ground contact: no Rso (ISO 13370)
-        return 0.17, 0.04
-    raise ValueError(f"Unhandled element type: {element.type!r}")
+    return element.surface_resistances()
 
 
 def layer_resistance(layer: MaterialLayer) -> float:

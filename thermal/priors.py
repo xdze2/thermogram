@@ -25,7 +25,7 @@ All sigmas combine in quadrature across independent elements.
 
 import math
 
-from .api_models import Room, EnvelopeElement, ElementType, ContributionOut, ParameterPriorOut, RCModelOut
+from .api_models import Room, EnvelopeElement, ContributionOut, ParameterPriorOut, RCModelOut
 from .iso6946 import element_u_value, layer_resistance, surface_resistances
 from .materials_db import MATERIALS
 from .state_space import h_int_from_room
@@ -109,7 +109,7 @@ def build_priors(room: Room) -> RCModelOut:
             detail=f"U={element_u_value(elem):.2f} W/m²K  ×  {elem.area_m2} m²",
         )
 
-        if elem.type == ElementType.window:
+        if not elem.is_opaque:
             # Windows: direct T_ext→T_room loss, shown separately from H_env
             h_win_contribs.append(contrib)
         else:
@@ -172,7 +172,7 @@ def build_priors(room: Room) -> RCModelOut:
 
     alpha_contribs = []
     for elem in room.elements:
-        if elem.type != ElementType.window:
+        if elem.is_opaque:
             a_mu, a_sig = _alpha_for_element(elem)
             alpha_contribs.append(ContributionOut(
                 label=f"{elem.name or elem.uid}  [{elem.orientation.value}]",
