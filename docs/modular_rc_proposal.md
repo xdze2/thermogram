@@ -36,44 +36,64 @@ state vector. All other modules are memoryless fluxes directly into C_room.
 
 ---
 
+## Four canonical flux forms
+
+All physical terms in the energy balance reduce to one of four mathematical forms:
+
+| Form | Class | Flux into T_room | Parameters | Signals | Extra state |
+|---|---|---|---|---|---|
+| conductance to a reference temperature | `Conductance` | `H × (T_ref − T_room)` | H | T_ref | — |
+| irradiance-driven source | `SolarGain` | `alpha × A × G` | alpha·A | G_sol | — |
+| conductance through a thermal mass node | `DelayedConductance` | `H_in × (T_node − T_room)` | H_out, H_in, C_node, alpha | T_ref, G_sol | T_node |
+| prescribed heat input | `SourceFlux` | `Q(t)` | — | Q | — |
+
+The discriminator is: **does it have memory?**
+- Memoryless → `Conductance`, `SolarGain`, or `SourceFlux`
+- With thermal mass → `DelayedConductance`
+
+`SolarGain` is kept separate from `SourceFlux` because its prior is structured (SHGC × A
+per orientation), whereas `SourceFlux` is a raw measured signal with no prior on magnitude.
+
+---
+
 ## Module catalogue
 
 ### Always present
 
-| Module | Flux | Parameters | Signals | Extra state |
+| Module | Class | T_ref / signal | Elements it reads | Prior logic |
 |---|---|---|---|---|
-| `RoomMass` | — | C_room | — | — |
+| `RoomMass` | — | — | floor area | 20 kJ/(m²·K) × area, ±60% |
 
-`RoomMass` is the base: it provides C_room and the room temperature node. Every model
-includes it. Prior: 20 kJ/(m²·K) × floor area, ±60%.
+`RoomMass` is the base node. Every model includes it.
 
 ---
 
-### Memoryless flux modules (no extra state)
+### Memoryless modules
 
-| Module | Flux into T_room | Parameters | Signals needed |
-|---|---|---|---|
-| `FastLoss` | `H_fast × (T_ext − T_room)` | H_fast | T_ext |
-| `DirectSolar` | `Σ alpha_i × A_i × G_i` | alpha_i per orientation | G_sol per orientation |
-| `GroundSlab` | `H_floor × (T_ground − T_room)` | H_floor | T_ground |
-| `AdjacentRoom` | `H_adj × (T_adj − T_room)` | H_adj | T_adj |
-| `Heater` | `Q_hvac(t)` | — (signal only) | Q_hvac |
-| `Ventilation` | `H_ve × (T_ext − T_room)` | H_ve | T_ext |
+| Module | Class | T_ref / signal | Elements it reads | Prior logic |
+|---|---|---|---|---|
+| `DirectLoss` | `Conductance` | T_ext | windows + ACH | Σ U×A (windows) + 0.34×ACH×V (vent) |
+| `GroundLoss` | `Conductance` | T_ground | floor-on-ground | Σ U×A for ground-contact floor |
+| `AdjacentLoss` | `Conductance` | T_adj | partition walls | Σ U×A for partitions |
+| `SolarGain` | `SolarGain` | G_sol | windows | Σ SHGC×A per orientation |
+| `InternalGains` | `SourceFlux` | Q_int | — | user-supplied constant or schedule |
+| `HVAC` | `SourceFlux` | Q_hvac | — | measured signal, no prior |
 
-`FastLoss` covers window conduction + infiltration. `Ventilation` covers ACH-driven loss.
-They could be merged into a single `H_direct` or kept separate depending on available data.
+`DirectLoss` merges window conduction and ACH ventilation: both are `H × (T_ext − T_room)`
+with the same signal, so splitting them into two modules brings no modelling benefit.
 
 ---
 
 ### Modules with an extra state
 
-| Module | Extra state | Flux into T_room | ODE for extra state | Parameters | Signals |
-|---|---|---|---|---|---|
-| `HeavyWall` | T_wall | `H_slow × (T_wall − T_room)` | `C_wall · dT_wall/dt = H_env×(T_sa − T_wall) − H_slow×(T_wall − T_room)` | H_env, H_slow, C_wall, alpha | T_ext, G_sol |
-| `HeavySlab` | T_slab | `H_slab_in × (T_slab − T_room)` | `C_slab · dT_slab/dt = H_slab_out×(T_ground − T_slab) − H_slab_in×(T_slab − T_room)` | H_slab_out, H_slab_in, C_slab | T_ground |
+| Module | Class | Extra state | Flux into T_room | Node ODE | Parameters | Signals |
+|---|---|---|---|---|---|---|
+| `HeavyWall` | `DelayedConductance` | T_wall | `H_in × (T_wall − T_room)` | `C_wall · dṪ_wall = H_out×(T_sa − T_wall) − H_in×(T_wall − T_room)` | H_out, H_in, C_wall, alpha | T_ext, G_sol |
+| `HeavySlab` | `DelayedConductance` | T_slab | `H_in × (T_slab − T_room)` | `C_slab · dṪ_slab = H_out×(T_ground − T_slab) − H_in×(T_slab − T_room)` | H_out, H_in, C_slab | T_ground |
 
-`HeavyWall` is exactly the current 2R2C wall path. `HeavySlab` is its ground-floor analogue.
-`HeavySlab` is only identifiable if T_ground is measured or modeled (e.g. from climate data at depth).
+`HeavyWall` and `HeavySlab` are the same `DelayedConductance` form — they differ only in
+their reference signal (T_ext+solar vs T_ground) and which envelope elements feed their prior.
+`HeavySlab` is only identifiable if T_ground is measured or modeled (e.g. Kusuda–Achenbach).
 
 ---
 
@@ -90,47 +110,28 @@ The user selects which modules are active. The app then:
 ### Example: current default model
 
 ```
-RoomMass + FastLoss + Ventilation + HeavyWall + DirectSolar
+RoomMass + DirectLoss + HeavyWall + SolarGain
 ```
 
-State: [T_wall, T_room]. Signals: T_ext, G_sol. Parameters: H_fast, H_ve, H_env, H_slow, C_wall, C_room, alpha.
+State: [T_wall, T_room]. Signals: T_ext, G_sol. Parameters: H_ve, H_out, H_in, C_wall, alpha, C_room.
 
-### Example: heavy soil room
+### Example: heavy ground-floor room
 
 ```
-RoomMass + FastLoss + Ventilation + HeavySlab
+RoomMass + DirectLoss + HeavySlab
 ```
 
-State: [T_slab, T_room]. Signals: T_ext, T_ground. Parameters: H_fast, H_ve, H_slab_out, H_slab_in, C_slab, C_room.
+State: [T_slab, T_room]. Signals: T_ext, T_ground. Parameters: H_ve, H_out, H_in, C_slab, C_room.
 No solar input needed.
 
-### Example: lightweight modern room
+### Example: lightweight HVAC room
 
 ```
-RoomMass + FastLoss + Ventilation + DirectSolar + Heater
+RoomMass + DirectLoss + SolarGain + HVAC
 ```
 
-State: [T_room] only. Signals: T_ext, G_sol, Q_hvac. Parameters: H_fast, H_ve, C_room, alpha.
+State: [T_room] only. Signals: T_ext, G_sol, Q_hvac. Parameters: H_ve, alpha·A, C_room.
 No wall mass — fast dynamics, HVAC-controlled.
-
----
-
-## Prior estimation per module
-
-Each module reads only the envelope elements relevant to its physics:
-
-| Module | Elements it reads | Prior logic |
-|---|---|---|
-| `RoomMass` | floor area | 20 kJ/(m²·K) × area |
-| `FastLoss` | windows | Σ U×A for windows |
-| `Ventilation` | room ACH, volume | 0.34 × ACH × V |
-| `HeavyWall` | exterior opaque walls | H_env from Σ U×A; C_wall from heavy layers; alpha from outer material |
-| `DirectSolar` | windows (SHGC, area, orientation) | Σ SHGC×A per orientation |
-| `GroundSlab` / `HeavySlab` | floor-on-ground elements | H_floor from U×A; C_slab from slab thickness × ρcp |
-| `AdjacentRoom` | partition walls to adjacent spaces | H_adj from U×A |
-
-This scoping means **each module's prior is independent**. Adding or removing a module does
-not change the priors of the others.
 
 ---
 
@@ -141,7 +142,7 @@ indoor temperature sensor the practical limit is roughly **4–5 free parameters
 the optimizer becomes underdetermined.
 
 Guidelines:
-- `HeavyWall` adds 4 parameters (H_env, H_slow, C_wall, alpha) + 1 state → borderline, needs long time series with temperature swings
+- `HeavyWall` adds 4 parameters (H_out, H_in, C_wall, alpha) + 1 state → borderline, needs long time series with temperature swings
 - Combining `HeavyWall` + `HeavySlab` is 7 parameters + 2 states → only viable with both T_int and one of T_wall or T_slab measured
 - Simpler models (1–2 modules beyond `RoomMass`) are more robustly identifiable from short datasets
 
@@ -177,6 +178,10 @@ class FluxModule:
         ...
 ```
 
+The four concrete subclasses (`Conductance`, `SolarGain`, `DelayedConductance`, `SourceFlux`)
+implement the flux equations. Named modules (`DirectLoss`, `HeavyWall`, …) are instances or
+thin subclasses that add prior estimation logic on top.
+
 The `Simulator` assembles modules into a full ODE, the `FitEngine` collects priors and runs
 MAP optimization over the union of all `params`, and the frontend shows which modules are
 active with their signal requirements and prior estimates.
@@ -185,7 +190,10 @@ active with their signal requirements and prior estimates.
 
 ## Open questions
 
-1. **Module selection UX**: auto-detect from available signals + element types, or explicit user choice?
-2. **H_slow vs H_env**: in `HeavyWall`, are these the same resistance or two different resistances (inner/outer surface)? Currently H_int is fixed from ISO 6946 geometry — should it remain fixed?
-3. **T_ground signal**: use a fixed seasonal model (e.g. Kusuda–Achenbach), a user-provided sensor, or climate API data?
-4. **Multi-zone**: two coupled rooms share a partition wall — is that one `AdjacentRoom` module on each side, or a shared node?
+1. **Module selection UX**: explicit user choice for now. Auto-detect from available signals and element types (e.g. "your room has a heavy ground slab — consider adding `HeavySlab`") is deferred to a later iteration.
+
+2. **H_in vs H_int**: keep H_in fixed from ISO 6946 inner-surface conductance, same as the current model. Exposing it as a free parameter adds an identifiability cost for a physically well-constrained quantity. Not worth the complexity now.
+
+3. **T_ground signal**: deferred. The current weather source is hourly Open-Meteo data, which is impractical to pull for a full year just to estimate a seasonal ground temperature. `HeavySlab` requires T_ground and will not be implemented until a lightweight ground temperature model or data source is identified.
+
+4. **Multi-zone**: out of scope. The app fits a single room with a single indoor temperature observation. Coupling two rooms via a shared partition adds model and data complexity that is not warranted at this stage.
