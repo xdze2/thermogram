@@ -10,10 +10,12 @@ import numpy as np
 from thermal.api_models import (
     ElementType,
     MaterialOut,
+    ModuleSpecOut,
     Orientation,
     RCModelOut,
     Room,
 )
+from thermal.assembler import module_catalogue
 from thermal.materials_db import MATERIALS
 from thermal.priors import build_priors
 from thermal.study import DataSpec, Study, StudyStub
@@ -67,6 +69,16 @@ def get_materials() -> list[MaterialOut]:
         )
         for key, spec in MATERIALS.items()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Modules catalogue endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/modules", response_model=list[ModuleSpecOut])
+def get_modules() -> list[ModuleSpecOut]:
+    """Static metadata for every known flux module (name, form, params, signals, owns)."""
+    return module_catalogue()
 
 
 # ---------------------------------------------------------------------------

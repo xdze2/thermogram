@@ -43,7 +43,7 @@ Five parameters: `H_env` (W/K), `H_ve` (W/K), `C_wall` (J/K), `C_room` (J/K), `a
 - **`thermal/iso6946.py`** — U-value from layer stack (EN ISO 6946:2017 series resistance). `element_u_value(element)` respects `u_value_override` if set.
 - **`thermal/materials_db.py`** — `MATERIALS: dict[str, MaterialSpec]`. `MaterialSpec` carries `lambda_`, `rho`, `cp`; `is_heavy` (ρ > 500 kg/m³) controls which layers count toward `C_wall`.
 - **`thermal/rc_simulation.py`** — Hourly Euler simulation (phase 2 use); not called by the prior endpoint.
-- **`api.py`** — Endpoints: `GET /api/schema`, `GET /api/materials`, `GET /api/signals`, `GET /api/data`, `POST /api/room/rc_model`. Serves `frontend/dist/` as static files on `/` (falls back to `frontend/` if dist missing).
+- **`api.py`** — Endpoints: `GET /api/schema`, `GET /api/materials`, `GET /api/modules` (module catalogue), `GET /api/signals`, study CRUD + `PATCH …/room`, `GET …/topology` (assembled RC schematic SVG/PNG). `RCModelOut` carries the active-module report (`modules`, `signals_required`, `n_states`, `identifiability_warning`). Serves `frontend/dist/` as static files on `/` (falls back to `frontend/` if dist missing).
 
 ### Frontend
 

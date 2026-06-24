@@ -190,17 +190,29 @@ list; full suite green (70 tests).
 
 ## Stage 5 — Expose to API / frontend  *(now it's worth it)*
 
-There is something real and trusted underneath to show.
+There is something real and trusted underneath to show. **Backend landed; frontend deferred
+to its own pass.**
 
-- [ ] `GET /api/modules` — `{name, params, signals, extra_states, owns}` for all known modules
-- [ ] `RCModelOut.modules` — active modules + signal requirements + identifiability warning
-      (flagged as a *fit* concern, not a *simulation* one)
+- [x] `GET /api/modules` — `{name, form, summary, params, signals, extra_states, owns}` for
+      every known module, from a declarative `MODULE_CATALOGUE` in `modules.py`
+      (`DirectLoss` is split into `Ventilation` + `WindowLoss` in the implementation).
+- [x] `RCModelOut.modules` — `active_modules()` reports the room's modules **deduped by
+      class** (6 heavy walls → one `HeavyWall`, mirroring the aggregated 2R2C topology),
+      with `signals_required`, `n_free_params`, `n_states` (aggregated: distinct mass-node
+      keys, so caravan=1 / house=2), and an `identifiability_warning` flagged explicitly as
+      a *fit* concern, not a *simulation* one. A light `HeavyWall` instance narrows away its
+      `T_wall` extra-state.
+- [x] `tests/test_api.py` (+2) — `/api/modules` includes `HeavyWall`/`Ventilation`/
+      `SolarGain`; `RCModelOut.modules` reports the active set + signals + state count.
+      `tests/test_assembler.py` (+4) — catalogue covers every assembled class, dedup +
+      state-count, caravan single-state, warning trips over a monkeypatched limit. Golden
+      snapshots regenerated (**purely additive** — the five priors are byte-unchanged).
 - [ ] Frontend: forward-simulation view (ensemble plot + scenario sliders); module list with
-      signal-availability warnings; topology schematic
-- [ ] `tests/test_api.py` — `GET /api/modules` includes at least `HeavyWall`, `DirectLoss`,
-      `SolarGain`
+      signal-availability warnings; topology schematic — **deferred** (its own pass; the
+      simulation UI also needs a `/simulate` endpoint + the deferred Stage 3 driver wiring).
 
-**Verifiable:** API tests pass; frontend shows simulation, modules, warnings, and schematic.
+**Verifiable:** ✓ API tests pass; `GET /api/modules` + `RCModelOut.modules` expose the
+assembled topology; full suite green (76 tests). Frontend pending.
 
 ---
 

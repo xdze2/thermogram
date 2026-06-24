@@ -89,7 +89,10 @@ def test_rc_model_deterministic(study):
 
 def test_rc_model_all_parameters_present(study):
     r = _patch_room(study["id"], BRICK_ROOM)
-    assert {"H_env", "H_ve", "C_wall", "C_room", "alpha_eff", "H_int"} == r.json().keys()
+    params = {"H_env", "H_ve", "C_wall", "C_room", "alpha_eff", "H_int"}
+    # Stage 5 added the module report alongside the five-parameter priors.
+    report = {"modules", "signals_required", "n_free_params", "n_states", "identifiability_warning"}
+    assert params | report == r.json().keys()
 
 
 def test_rc_model_c_wall_has_brick_contribution(study):
@@ -129,6 +132,38 @@ def test_rc_model_window_with_u_override(study):
     assert data["H_env"]["mu"] == 0.0
     win_contrib = next(c for c in data["H_ve"]["contributions"] if "window" in c["label"].lower())
     assert abs(win_contrib["value"] - 1.4 * 2.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Modules catalogue + active modules (Stage 5)
+# ---------------------------------------------------------------------------
+
+def test_modules_catalogue():
+    r = client.get("/api/modules")
+    assert r.status_code == 200
+    names = {m["name"] for m in r.json()}
+    # The current topology's modules (DirectLoss split into Ventilation + WindowLoss).
+    assert {"HeavyWall", "Ventilation", "WindowLoss", "SolarGain", "RoomMass"} <= names
+    heavy = next(m for m in r.json() if m["name"] == "HeavyWall")
+    assert heavy["form"] == "DelayedConductance"
+    assert "C_wall" in heavy["params"]
+    assert "T_wall" in heavy["extra_states"]
+    assert "STORAGE@—" in heavy["owns"]
+
+
+def test_rc_model_reports_active_modules(study):
+    data = _patch_room(study["id"], BRICK_ROOM).json()
+    names = {m["name"] for m in data["modules"]}
+    assert {"RoomMass", "HeavyWall", "Ventilation"} <= names
+    # one heavy wall + room → 2-state aggregated topology
+    assert data["n_states"] == 2
+    assert data["n_free_params"] == 5
+    # BRICK_ROOM has no glazing → no SolarGain → no Q_room signal.
+    assert set(data["signals_required"]) == {"T_ext", "T_sa"}
+    assert "SolarGain" not in names
+    assert data["identifiability_warning"] is None
+    heavy = next(m for m in data["modules"] if m["name"] == "HeavyWall")
+    assert heavy["element"] == "South wall"
 
 
 # ---------------------------------------------------------------------------

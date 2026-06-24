@@ -181,5 +181,95 @@
     "sigma": 0.06583839212458807,
     "symbol": "\u03b1_eff",
     "unit": "\u2014"
-  }
+  },
+  "identifiability_warning": null,
+  "modules": [
+    {
+      "element": null,
+      "extra_states": [
+        "T_room"
+      ],
+      "form": "\u2014",
+      "name": "RoomMass",
+      "owns": [],
+      "params": [
+        "C_room"
+      ],
+      "signals": [],
+      "summary": "The room-air node: C_room to the datum; every flux writes here."
+    },
+    {
+      "element": null,
+      "extra_states": [],
+      "form": "Conductance",
+      "name": "Ventilation",
+      "owns": [],
+      "params": [
+        "H_ve"
+      ],
+      "signals": [
+        "T_ext"
+      ],
+      "summary": "Air-change loss 0.34\u00b7ACH\u00b7V to outside (the ventilation half of H_ve)."
+    },
+    {
+      "element": "Brick wall N",
+      "extra_states": [
+        "T_wall"
+      ],
+      "form": "DelayedConductance",
+      "name": "HeavyWall",
+      "owns": [
+        "CONDUCTION@T_ext",
+        "SOLAR@G_sol_solair",
+        "STORAGE@\u2014"
+      ],
+      "params": [
+        "H_env",
+        "C_wall",
+        "alpha_eff"
+      ],
+      "signals": [
+        "T_sa"
+      ],
+      "summary": "Opaque element: sol-air conduction (H_env) through a heavy mass node (C_wall) into the room (H_int); light walls skip the node."
+    },
+    {
+      "element": "Window S",
+      "extra_states": [],
+      "form": "Conductance",
+      "name": "WindowLoss",
+      "owns": [
+        "CONDUCTION@T_ext"
+      ],
+      "params": [
+        "H_ve"
+      ],
+      "signals": [
+        "T_ext"
+      ],
+      "summary": "A window's U\u00b7A conduction to outside, folded into H_ve (no separate branch)."
+    },
+    {
+      "element": "Window S",
+      "extra_states": [],
+      "form": "SolarGain",
+      "name": "SolarGain",
+      "owns": [
+        "SOLAR@G_sol_transmitted"
+      ],
+      "params": [],
+      "signals": [
+        "Q_room"
+      ],
+      "summary": "Glazing-transmitted solar gain injected into the room air (Q_room)."
+    }
+  ],
+  "n_free_params": 5,
+  "n_states": 2,
+  "signals_required": [
+    "T_ext",
+    "T_sa",
+    "Q_room"
+  ]
 }

@@ -14,11 +14,22 @@ Cells are keyed by `(element.uid, channel)` — Pydantic element models aren't h
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
-from .api_models import Room, ContributionOut, ParameterPriorOut, RCModelOut
+from .api_models import (
+    ActiveModuleOut,
+    ContributionOut,
+    ModuleSpecOut,
+    ParameterPriorOut,
+    RCModelOut,
+    Room,
+)
 from .channels import Channel, element_channels
 from .state_space import h_int_from_room
 from . import modules as M
+
+# Single indoor temperature sensor → practical fit limit (proposal §Identifiability).
+_FIT_PARAM_LIMIT = 5
 
 
 def assemble(room: Room) -> list[M.FluxModule]:
@@ -118,6 +129,8 @@ def collect_priors(mods: list[M.FluxModule], room: Room) -> RCModelOut:
         by_param["alpha_eff"], M._ALPHA_DEFAULT
     )
 
+    report = active_modules(mods)
+
     return RCModelOut(
         H_env=ParameterPriorOut(
             name="Opaque envelope heat loss",
@@ -165,4 +178,102 @@ def collect_priors(mods: list[M.FluxModule], room: Room) -> RCModelOut:
             contributions=alpha_contribs,
         ),
         H_int=h_int_from_room(room),
+        modules=report.modules,
+        signals_required=report.signals_required,
+        n_free_params=report.n_free_params,
+        n_states=report.n_states,
+        identifiability_warning=report.identifiability_warning,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Module reporting (Stage 5) — catalogue + per-room active modules
+# ---------------------------------------------------------------------------
+
+def module_catalogue() -> list[ModuleSpecOut]:
+    """Static metadata for every known module (powers `GET /api/modules`)."""
+    return [
+        ModuleSpecOut(
+            name=name,
+            form=meta.form,
+            summary=meta.summary,
+            params=list(meta.params),
+            signals=list(meta.signals),
+            extra_states=list(meta.extra_states),
+            owns=list(meta.owns),
+        )
+        for name, meta in M.MODULE_CATALOGUE.items()
+    ]
+
+
+@dataclass
+class _ModuleReport:
+    modules: list[ActiveModuleOut]
+    signals_required: list[str]
+    n_free_params: int
+    n_states: int
+    identifiability_warning: str | None
+
+
+def active_modules(mods: list[M.FluxModule]) -> _ModuleReport:
+    """Summarise the modules a room assembled: which are active, their signal needs,
+    the assembled state dimension, and a fit-identifiability warning.
+
+    Modules are reported **per class** (deduped) — a room with six heavy walls lists one
+    `HeavyWall`, mirroring the aggregated 2R2C topology and the schematic. The element
+    label of the first instance of each class is carried for context.
+
+    The identifiability warning is a **fit** concern (a single indoor sensor can resolve
+    only ~5 free parameters), not a simulation one — forward integration has no such limit.
+    """
+    out: list[ActiveModuleOut] = []
+    seen: set[str] = set()
+    signals: list[str] = []
+    free_params: set[str] = set()
+    extra_states: set[str] = set()
+
+    for mod in mods:
+        cls = type(mod).__name__
+        meta = M.MODULE_CATALOGUE[cls]
+        inst_states = M._instance_extra_states(mod)
+
+        for s in meta.signals:
+            if s not in signals:
+                signals.append(s)
+        free_params.update(meta.params)
+        # State dimension matches the AGGREGATED topology (the schematic / simulate
+        # default): all heavy walls share one `T_wall` node, so count distinct keys.
+        for st in inst_states:
+            if st != M.ROOM_NODE:
+                extra_states.add(st)
+
+        if cls in seen:
+            continue
+        seen.add(cls)
+        out.append(ActiveModuleOut(
+            name=cls,
+            form=meta.form,
+            summary=meta.summary,
+            params=list(meta.params),
+            signals=list(meta.signals),
+            extra_states=list(inst_states),
+            owns=list(meta.owns),
+            element=M._instance_element_label(mod),
+        ))
+
+    n_states = 1 + len(extra_states)  # room node + every mass node
+    n_free = len(free_params)
+    warning = None
+    if n_free > _FIT_PARAM_LIMIT:
+        warning = (
+            f"{n_free} free parameters exceed the ~{_FIT_PARAM_LIMIT} a single indoor "
+            "temperature sensor can identify — a concern for FITTING, not simulation."
+        )
+
+    return _ModuleReport(
+        modules=out,
+        signals_required=signals,
+        n_free_params=n_free,
+        n_states=n_states,
+        identifiability_warning=warning,
     )

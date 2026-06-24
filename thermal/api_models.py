@@ -236,6 +236,24 @@ class ParameterPriorOut(BaseModel):
     )
 
 
+class ModuleSpecOut(BaseModel):
+    """Static description of a flux module — the building block of the assembled RC system."""
+
+    name: str          = Field(..., description="Module class name, e.g. 'HeavyWall'.")
+    form: str          = Field(..., description="Canonical flux form (Conductance / SolarGain / DelayedConductance / SourceFlux / —).")
+    summary: str       = Field(..., description="One-line description of what the module does.")
+    params: list[str]  = Field(..., description="Free parameters this module contributes to.")
+    signals: list[str] = Field(..., description="Driving signals (boundary temps / solar) it reads.")
+    extra_states: list[str] = Field(..., description="Extra ODE state nodes it introduces (e.g. T_wall).")
+    owns: list[str]    = Field(..., description="Channel kinds it claims, e.g. ['CONDUCTION@T_ext', 'STORAGE@—'].")
+
+
+class ActiveModuleOut(ModuleSpecOut):
+    """A module instance active in a specific room, with the element it was routed to."""
+
+    element: str | None = Field(default=None, description="Element name/uid this instance was routed to (None for room-level modules).")
+
+
 class RCModelOut(BaseModel):
     """2R2C + sol-air RC model with Gaussian priors on all five free parameters."""
 
@@ -245,6 +263,25 @@ class RCModelOut(BaseModel):
     C_room:    ParameterPriorOut = Field(..., description="Interior thermal mass [MJ/K].")
     alpha_eff: ParameterPriorOut = Field(..., description="Effective outer surface absorptivity [—].")
     H_int:     float             = Field(default=0.0, description="Inner-surface conductance [W/K], fixed from ISO 6946 (not fitted).")
+
+    modules: list[ActiveModuleOut] = Field(
+        default_factory=list,
+        description="Modules assembled for this room (deduped by class), with the signals they need.",
+    )
+    signals_required: list[str] = Field(
+        default_factory=list,
+        description="Union of driving signals the assembled modules need (for the fit / simulation).",
+    )
+    n_free_params: int = Field(
+        default=0, description="Count of distinct free parameters across active modules.",
+    )
+    n_states: int = Field(
+        default=0, description="State dimension of the assembled ODE (room node + extra mass nodes).",
+    )
+    identifiability_warning: str | None = Field(
+        default=None,
+        description="Set when free params exceed what a single indoor sensor can fit (a FIT concern, not a simulation one).",
+    )
 
 
 # ---------------------------------------------------------------------------

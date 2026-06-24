@@ -396,3 +396,72 @@ class SolarGain(FluxModule):
         # `Q_room` is the pre-summed Σ SHGC·A·G (matching api.py's Q_sol_win), so the
         # gain here is 1.0 — the per-window weighting is folded into the signal.
         return Dynamics(source_fluxes=[SourceFlux(ROOM_NODE, "Q_room", 1.0)])
+
+
+# ---------------------------------------------------------------------------
+# Module catalogue — static metadata for the API (physics_model.md §3)
+# ---------------------------------------------------------------------------
+#
+# One declarative record per module class. Drives `GET /api/modules` (the catalogue)
+# and `RCModelOut.modules` (the modules a room actually assembles). Kept here, next to
+# the classes, so adding a module is one edit in one file.
+
+@dataclass(frozen=True)
+class ModuleMeta:
+    """What a module contributes, declaratively — for the API, not the physics."""
+
+    form: str               # canonical flux form (physics_model §3); "—" for the base node
+    summary: str
+    params: tuple[str, ...]       # free parameters it feeds
+    signals: tuple[str, ...]      # driving signals it reads (boundary temps / solar)
+    extra_states: tuple[str, ...] # extra ODE nodes it introduces
+    owns: tuple[str, ...]         # channel kinds (Mechanism@Source) it may claim
+
+
+# `extra_states` for HeavyWall is conditional: a heavy element adds a T_wall node, a
+# light one does not. The catalogue lists the heavy (richer) case; the active-module
+# reporter (`active_modules`) narrows it per instance.
+MODULE_CATALOGUE: dict[str, ModuleMeta] = {
+    "RoomMass": ModuleMeta(
+        form="—",
+        summary="The room-air node: C_room to the datum; every flux writes here.",
+        params=("C_room",), signals=(), extra_states=("T_room",), owns=(),
+    ),
+    "Ventilation": ModuleMeta(
+        form="Conductance",
+        summary="Air-change loss 0.34·ACH·V to outside (the ventilation half of H_ve).",
+        params=("H_ve",), signals=("T_ext",), extra_states=(), owns=(),
+    ),
+    "WindowLoss": ModuleMeta(
+        form="Conductance",
+        summary="A window's U·A conduction to outside, folded into H_ve (no separate branch).",
+        params=("H_ve",), signals=("T_ext",), extra_states=(),
+        owns=(str(CONDUCTION_EXT),),
+    ),
+    "HeavyWall": ModuleMeta(
+        form="DelayedConductance",
+        summary="Opaque element: sol-air conduction (H_env) through a heavy mass node (C_wall) into the room (H_int); light walls skip the node.",
+        params=("H_env", "C_wall", "alpha_eff"), signals=("T_sa",), extra_states=("T_wall",),
+        owns=(str(CONDUCTION_EXT), str(SOLAR_SOLAIR), str(STORAGE)),
+    ),
+    "SolarGain": ModuleMeta(
+        form="SolarGain",
+        summary="Glazing-transmitted solar gain injected into the room air (Q_room).",
+        params=(), signals=("Q_room",), extra_states=(),
+        owns=(str(SOLAR_TRANSMITTED),),
+    ),
+}
+
+
+def _instance_element_label(mod: "FluxModule") -> str | None:
+    elem = getattr(mod, "element", None)
+    if elem is None:
+        return None
+    return getattr(elem, "name", None) or getattr(elem, "uid", None)
+
+
+def _instance_extra_states(mod: "FluxModule") -> tuple[str, ...]:
+    """Per-instance state nodes: a light HeavyWall has no mass node."""
+    if isinstance(mod, HeavyWall) and not mod.is_heavy:
+        return ()
+    return MODULE_CATALOGUE[type(mod).__name__].extra_states
