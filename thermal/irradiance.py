@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pvlib
 
-from .api_models import Orientation, Room
+from .api_models import Room
 
 # pvlib azimuth convention: 0=N, 90=E, 180=S, 270=W
 _ORIENTATION_AZIMUTH: dict[str, float] = {

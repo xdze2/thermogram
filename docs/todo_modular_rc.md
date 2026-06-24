@@ -95,30 +95,40 @@ brutally simple: **the Stage 1 golden tests still pass and the JSON snapshots ar
 
 ### 2a — Element channels
 
-- [ ] `thermal/api_models.py` — discriminated union (`WallElement`, `WindowElement`,
-      `RoofElement`, `FloorElement`, `DoorElement`); `is_ground_contact`→Floor, `shgc`→Window;
-      keep `"type"` alias for existing JSON
-- [ ] `EnvelopeElement.channels() -> dict[Channel, Budget]` — conserved budgets computed once
-      (CONDUCTION=U·A, SOLAR_TRANSMISSION=SHGC·A, SOLAR_OPAQUE=α·A, STORAGE=C_heavy)
-- [ ] Fix `elem.type == ...` branches in `iso6946.py`, `irradiance.py`, `state_space.py`,
-      `priors.py`
+- [x] `thermal/api_models.py` — discriminated union (`WallElement`, `WindowElement`,
+      `RoofElement`, `FloorElement`, `DoorElement`) on a shared `_ElementBase`;
+      `is_ground_contact`→Floor, `shgc`→Window. Type-specific physics
+      (`surface_resistances`/`solar_tilt_deg`/`irradiance_key`/`is_opaque`) is polymorphic
+      on the subclasses — callers dispatch on the element, not `elem.type`. No `"type"`
+      JSON alias / migration kept (only consumer of Room JSON is the test fixtures).
+- [x] `EnvelopeElement.channels()` — landed as `channels.element_channels(elem) ->
+      dict[Channel, Budget]`; conserved budgets computed once (CONDUCTION=U·A,
+      SOLAR area, STORAGE=C_heavy). `Channel = (Mechanism, Source)` per physics_model §2.
+- [x] Fixed the `elem.type == ...` branches in `iso6946.py`, `irradiance.py`,
+      `state_space.py`, `priors.py` to use the polymorphic methods.
 
 ### 2b — Modules + assembler
 
-- [ ] `thermal/modules.py` — `FluxModule` base + `Channel`/`Budget` + four flux forms
-- [ ] `RoomMass`, `DirectLoss`, `SolarGain`, `HeavyWall` (the current default topology's modules)
-- [ ] `thermal/assembler.py` — route (element, channel) cells to owning modules; **assert
-      exactly-once per cell**; collect params/signals/states
-- [ ] Heavy/light routing: inferred from `is_heavy`, with per-element override field
+- [x] `thermal/modules.py` — `FluxModule` base + `PriorTerm`; `RoomMass`, `Ventilation`,
+      `WindowLoss`, `HeavyWall`, `SolarGain` (the current topology's modules). Each
+      `derive_prior` reproduces the legacy per-parameter math; verified in isolation by
+      `tests/test_modules_unit.py` against hand-values (13 tests).
+- [x] `thermal/assembler.py` — `assemble(room)` routes (element, channel) cells to owning
+      modules and **asserts exactly-once** (double-claim / unclaimed / stray are hard
+      errors); `collect_priors` folds `PriorTerm`s (quadrature; area-weighted α) into
+      `RCModelOut`. `tests/test_assembler.py` checks the invariant + legacy parity (8 tests).
+- [ ] Heavy/light routing on actual `C_heavy` magnitude + per-element override (open hole
+      #1) — **deferred**: changing it moves the C_wall snapshot, so it can't ride a
+      behaviour-preserving stage. Currently routes on the heavy-layer ρ>500 mass (legacy).
 
 ### 2c — Wire into `build_priors`
 
-- [ ] `build_priors(room)` becomes: compute channels → assemble modules → collect
-      `derive_priors` → `RCModelOut`
+- [x] `build_priors(room)` is now a thin `assemble(room)` → `collect_priors(...)`; legacy
+      per-element loop + constants removed (live in `modules.py`/`channels.py`).
 
-**Verifiable:** full suite green; Stage 1 golden tests pass; `RCModelOut` JSON byte-identical to
-Stage 1 snapshots. The channel model has reproduced the current physics — the abstraction has
-earned its keep.
+**Verifiable:** ✓ full suite green (52 tests); Stage 1 golden tests pass; `RCModelOut` JSON
+byte-identical to Stage 1 snapshots. The channel model reproduced the current physics — the
+abstraction earned its keep.
 
 ---
 
