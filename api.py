@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 import numpy as np
@@ -168,6 +168,28 @@ def patch_study_data_spec(study_id: str, body: PatchDataSpecBody) -> DataSpec:
     study.data_spec = body.data_spec
     save_study(study)
     return study.data_spec
+
+
+@app.get("/api/studies/{study_id}/topology")
+def get_topology(study_id: str, aggregate: bool = True, fmt: str = "svg") -> Response:
+    """Render the study's assembled RC topology as a schematic (Stage 4).
+
+    `aggregate=true` (default) collapses heavy walls into one 2R2C mass node; `fmt` is
+    "svg" (default, no matplotlib) or "png".
+    """
+    study = _load_or_raise(study_id)
+    if not study.room:
+        raise HTTPException(status_code=400, detail="No room definition")
+    if fmt not in ("svg", "png"):
+        raise HTTPException(status_code=400, detail="fmt must be 'svg' or 'png'")
+
+    from thermal.draw import topology, render
+    try:
+        image = render(topology(study.room, aggregate=aggregate), fmt=fmt)
+    except ImportError:
+        raise HTTPException(status_code=503, detail="PNG rendering needs matplotlib; use fmt=svg")
+    media = "image/svg+xml" if fmt == "svg" else "image/png"
+    return Response(content=image, media_type=media)
 
 
 @app.post("/api/studies/{study_id}/fetch_data")

@@ -167,10 +167,24 @@ aggregated granularity choice (physics_model §4).
 
 ## Stage 4 — Topology rendering  *(small, high-value)*
 
-- [ ] `thermal/draw.py` — assembled module graph → schemdraw → SVG/PNG (server-side)
-- [ ] Endpoint to serve the rendered topology for a study
+Drawn from the **assembled** module graph (not a parameter sample): a two-layer
+`thermal/draw.py` — a pure graph IR (`topology(room)` walks the modules' `dynamics()`)
+and a `render(topo)` that lays the IR out with schemdraw. Labels are the *symbolic*
+params (`H_env`/`H_int`/`C_wall`/…), so one schematic stands for the whole prior.
 
-**Verifiable:** each test case renders a legible RC schematic matching its module list.
+- [x] `thermal/draw.py` — `topology(room, aggregate)` → `Topology` IR (nodes /
+      conductances / fluxes), deduping the parallel edges that collapse onto the
+      aggregated `T_wall` node; `render(topo, fmt)` → SVG (native backend, no matplotlib)
+      or PNG (needs matplotlib). schemdraw added as a project dep.
+- [x] `GET /api/studies/{id}/topology?aggregate=&fmt=` serves the rendered SVG/PNG.
+- [x] `tests/test_draw.py` (8): IR structure proves the schematic matches the module
+      list — house → 2R2C edges, caravan degrades to a single room node, aggregation
+      collapses 6 parallel walls to one edge; `render` smoke-draws SVG. `tests/test_api.py`
+      (+3): endpoint serves SVG, 400 on no-room / bad-fmt.
+- [x] Reference SVGs in `docs/diagrams/topology_{caravan,house,passive}.svg`.
+
+**Verifiable:** ✓ each describable case renders a legible RC schematic matching its module
+list; full suite green (70 tests).
 
 ---
 

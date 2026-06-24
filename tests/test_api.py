@@ -132,6 +132,29 @@ def test_rc_model_window_with_u_override(study):
 
 
 # ---------------------------------------------------------------------------
+# Topology rendering (Stage 4)
+# ---------------------------------------------------------------------------
+
+def test_topology_svg(study):
+    _patch_room(study["id"], BRICK_ROOM)
+    r = client.get(f"/api/studies/{study['id']}/topology")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/svg+xml")
+    assert r.content[:4] == b"<svg"
+
+
+def test_topology_no_room_returns_400(study):
+    r = client.get(f"/api/studies/{study['id']}/topology")
+    assert r.status_code == 400
+
+
+def test_topology_bad_fmt_returns_400(study):
+    _patch_room(study["id"], BRICK_ROOM)
+    r = client.get(f"/api/studies/{study['id']}/topology?fmt=gif")
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # Studies CRUD
 # ---------------------------------------------------------------------------
 
