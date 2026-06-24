@@ -19,7 +19,7 @@ An element is described independently of any module choice:
 | `kind` | wall / window / roof / floor / door |
 | `boundary` | `exterior` / `ground` / `adjacent` / `interior-of-zone` → sets the CONDUCTION source |
 | `area`, `orientation`, `tilt` | geometry |
-| `layers` (inside→outside) | → `U·A`, `C_heavy`, and the `RChain` `(k, ρcp, thickness)` prior |
+| `layers` (inside→outside) | → `U·A`, `C_heavy`, and `HeavyWall`'s `(k, ρcp, thickness)` prior |
 | `shgc` | glazing → `SHGC·A` |
 | `α` | exterior opaque → sol-air absorptance; or interior surface lit through glazing |
 
@@ -43,7 +43,7 @@ identity, since conduction to outside, ground, and an adjacent zone are physical
 | `CONDUCTION` | `T_ext` (air exchange) | `0.34·ACH·V` | the room (ventilation) |
 | `SOLAR` | `G_sol` transmitted | `SHGC·A` | glazing → a target node |
 | `SOLAR` | `G_sol` sol-air | `α·A` | opaque exterior surfaces |
-| `SOLAR` | `G_sol` interior-absorbed | `α·A` behind glazing | interior mass lit through glazing *(Hole #1)* |
+| `SOLAR` | `G_sol` interior-absorbed | `α·A` behind glazing | interior mass lit through glazing — `SolarGain` with `target`=a mass node, not a new channel (§3.3) |
 | `STORAGE` | — | `C_heavy` (ρ>500 layers) | walls/roof/floor with heavy layers |
 | `SOURCE` | prescribed `Q(t)` | — | internal gains, HVAC (raw signal, no budget) |
 
@@ -70,12 +70,14 @@ name).
 |---|---|---|---|---|
 | `RoomMass` (base node) | `C_room·dṪ_room = ΣQ` | **`T_room`** | `C_room` | none — it *is* the balance |
 | `Conductance` | `H·(T_src − T_room)` | — | `H` | `CONDUCTION@{T_ext\|T_ground\|T_adj}` |
-| `SolarGain` | `α·Q_src` into a target node | — | `α` (SHGC, or HVAC effic.) | a `SOLAR` or `SOURCE` channel |
-| `RChain` (`DelayedConductance`) | `H_in·(T_mN − T_room)` | `T_m1…T_mN` | derived from layers + `N` | `CONDUCTION@src` **+** `STORAGE` (+ a `SOLAR` for sol-air on outer node) |
+| `SolarGain` / `SourceFlux` | `α·Q_src` into a **target node** (default `T_room`) | — | `α` (SHGC, or HVAC effic.) | a `SOLAR` or `SOURCE` channel |
+| `HeavyWall` (§3.4) | `H_in·(T_n − T_room)` | `T_1…T_n` (n from thickness) | derived from layers | `CONDUCTION@src` **+** `STORAGE` (+ a `SOLAR` for sol-air on outer node) |
+| `IndoorMass` (§3.5) | `(T_m − T_room)/R_m` | **`T_m`** | `C_m, R_m` (+ `Φ_h` if heater) | a `SOURCE` channel when the heat source is on |
 
-Named configs: `DirectLoss`=`Conductance@T_ext` (merges window conduction + ACH);
-`GroundLoss`=`@T_ground`; `AdjacentLoss`=`@T_adj`; `HeavyWall`=`RChain@T_ext`;
-`HeavySlab`=`RChain@T_ground`; `HeavyPartition`=`RChain@T_adj` (free — no new code).
+Named configs of `Conductance` by source: `DirectLoss`=`@T_ext` (merges window conduction + ACH);
+`GroundLoss`=`@T_ground`; `AdjacentLoss`=`@T_adj`. Of `HeavyWall` by source: `HeavyWall`=`@T_ext`,
+`HeavySlab`=`@T_ground`, `HeavyPartition`=`@T_adj`. `HeavyWall` and `IndoorMass` share an internal
+RC-chain helper but appear as distinct named modules (see the catalogue note in §3.3).
 
 ### 3.1 `RoomMass` — the base node
 
@@ -92,49 +94,95 @@ A resistor `R = 1/H` from a reference temperature to the room. `DirectLoss` / `G
 `AdjacentLoss` are this one form with `T_src` = `T_ext` / `T_ground` / `T_adj`. `DirectLoss` merges
 window conduction and ventilation (both `H·(T_ext − T_room)` on the same channel).
 
-### 3.3 `SolarGain` — `α·Q_src`
+### 3.3 `SolarGain` — `α·Q_src` into a **target node**
 
 ![SolarGain](diagrams/module_solar_gain.png)
 
-A prescribed flux (current source) injected into a target node. Shared by **solar-through-glazing**
-(α = SHGC, source `G_sol` per orientation) and **HVAC/heating** (α = efficiency/COP, source
-`Q_hvac`) — same math, different prior. The target is usually `T_room`, but for direct-gain onto an
-interior mass it is a chain node (Hole #1).
+A prescribed flux (current source) injected into a **target node**. Shared by
+**solar-through-glazing** (α = SHGC, source `G_sol` per orientation) and **direct heating**
+(α = efficiency/COP, source `Q_hvac`) — same math, different prior.
 
-### 3.4 `RChain` (`DelayedConductance`) — the parametrizable N-node wall mass
+**The target node is a parameter, default `T_room`.** This is the key distinction between *direct*
+and *indirect* gain — not the source, but **which node the flux lands on**:
+
+```
+direct gain:    Q ─────────────────────────▶ [T_room]      heats the air now
+indirect gain:  Q ──▶ [T_m] ──H──▶ [T_room]                heats a mass, which then warms the air
+```
+
+For indirect gain the target is the **existing mass node** of the element the source sits on (no new
+node needed — the element already offers `STORAGE`):
+
+| source × target | direct (→ `T_room`) | indirect (→ a mass node) |
+|---|---|---|
+| solar through glazing | light room: gain warms the air | **Trombe wall** — sun lands on the heavy wall behind the glass → that wall's `HeavyWall` node |
+| heating | air heater, blown air | **heavy heater** — masonry stove, underfloor slab → the `IndoorMass` node with its source on (§3.5) |
+
+So the earlier "interior-absorbed solar" idea is **not a new channel** — it is just `SolarGain` with
+`target` = a mass node.
+
+> **Catalogue, not configuration space.** The two mass modules below (`HeavyWall`, `IndoorMass`)
+> share an internal RC-chain helper (the 1-D heat-equation discretization + layer slicing + the
+> back-reaction term, written once), but the **catalogue exposes named modules, not a generic
+> `RChain(N, H_out, …)`**. `N` and the boundary conductances are implementation details of each
+> named module, not user-facing knobs. This keeps the catalogue enumerable and readable while the
+> tricky math lives in one place.
+
+### 3.4 `HeavyWall` — a heavy envelope element's thermal mass
 
 ![RChain](diagrams/module_rchain.png)
 
-One module spans the whole mass-node family by varying `N` and its two boundary conductances. It is
-the 1-D heat equation discretized into `N` cells between an outer source and the room:
+A heavy wall/roof/floor between an outer source (`T_ext` sol-air / `T_ground` / `T_adj`) and the
+room. Internally an RC chain — the 1-D heat equation discretized into a few cells:
 
 ```
-outer src ──H_out──[C_1]──H_1──[C_2]──H_2── … ──[C_N]──H_in── T_room
-                     │                            │
-              (optional sol-air solar)      (back-reaction into RoomMass)
+outer src ──H_out──[C_1]──H_1── … ──[C_n]──H_in── T_room
+                     │                  │
+              (optional sol-air)   (back-reaction into RoomMass)
 ```
 
-Node ODE (interior node *i*):
-```
-C_i · dṪ_i = H_{i-1}·(T_{i-1} − T_i) − H_i·(T_i − T_{i+1})
-```
-The outer node sees `H_out·(T_src − T_1)` (+ optional sol-air `α·A·G`); the inner node *N* feeds the
-room `H_in·(T_N − T_room)`, **and the room balance receives the equal-and-opposite
-`+H_in·(T_N − T_room)`** — a mass node is never write-only, it pushes back on `RoomMass`.
+The inner node feeds the room `H_in·(T_n − T_room)`, **and the room balance receives the
+equal-and-opposite `+H_in·(T_n − T_room)`** — a mass node is never write-only, it pushes back on
+`RoomMass`.
 
-**Params: derived from the layer stack; `N` is discretization only.** The chain has *one* physical
-prior — `k_eq`, `(ρcp)_eq`, thickness from the ordered layer stack — sliced into `N` cells
-(`R_i = R_total/N`, `C_i = C_total/N`). The fit sees a small fixed param set regardless of `N`;
-raising `N` buys spatial fidelity (a 40 cm brick wall → `N`=5–10) without adding free parameters.
-Identifiable.
+**Params derived from the ordered layer stack** — `k_eq`, `(ρcp)_eq`, thickness — sliced into cells
+(`R_i`, `C_i`). The **number of cells `n` is auto-picked from thickness** (thin wall → 1, 40 cm
+brick → several) and is **not a free fit parameter**; the fit sees a small fixed param set
+regardless. An **advanced override** can set `n` explicitly. Slicing *in layer order* is what lets
+the same materials produce opposite dynamics for external vs internal insulation (see the ITE/ITI
+case in `test_cases.md`).
 
-**Special cases of the same module:**
+Configs by source: `HeavyWall`=`@T_ext` (sol-air), `HeavySlab`=`@T_ground`,
+`HeavyPartition`=`@T_adj` — same module, different reference signal.
 
-| config | meaning | diagram |
+### 3.5 `IndoorMass` — a one-sided interior mass, **heat source optional**
+
+![furniture](diagrams/module_rchain_furniture.png)
+
+An interior mass coupled to the room on one side only (adiabatic outer face). One module covers two
+roles via an **optional heat source on the node**:
+
+| source | role | this is |
 |---|---|---|
-| `N=1`, `H_out, H_in` finite | classic 2R2C heavy wall | ![n1](diagrams/module_rchain_n1.png) |
-| `N=1`, `H_out=0` (adiabatic outer) | furniture / internal medium mass (one-sided) | ![furn](diagrams/module_rchain_furniture.png) |
-| `N`=5–10 | spatially-resolved thick wall (captures ITE vs ITI) | (the main `RChain` diagram) |
+| **off** (`Φ=0`) | passive interior thermal mass — furniture, finishes, partitions | the weak interior-inertia term |
+| **on** (`Φ_h`) | heater with thermal mass — masonry stove, storage radiator, underfloor slab | **Bacher & Madsen's `Th` state** |
+
+```
+(Φ_h optional) ──▶ [C_m, T_m] ──1/R_m── T_room
+```
+
+Node ODE and room back-reaction:
+```
+C_m · dṪ_m = Φ_h − (T_m − T_room)/R_m        (Φ_h = 0 for passive furniture)
+room balance receives  +(T_m − T_room)/R_m
+```
+
+This **resolves the earlier overlap** — furniture and heater were two ways to spell the same
+topology; now they are one module, the source flag the only difference. With the source on, the
+params `C_m`(=`Ch`), `R_m`(=`Rih`) and signal `Φ_h` are Bacher's `Th` exactly (the `h` in his
+`Ti → TiTh → TiTeTh → …` path; `Φ_h` was a PRBS in his experiment — see the reading note). The
+heater earns its own state and so costs identifiability: viable in the fit only with a well-excited
+heat-input signal; always fine for the forward-simulation toy.
 
 ---
 
@@ -150,10 +198,10 @@ Identifiable.
 
 The same assembled system feeds both the forward simulator (①②) and the fit engine (③).
 
-**Granularity** is a per-use choice: aggregate heavy elements into one node (`N=1`, fit-friendly,
-recovers current 2R2C) or keep them per-element (more faithful, more states, for the simulation
-toy). The channel model supports both — it is just whether `RChain` sums claimed elements into one
-node or emits one per element.
+**Granularity** is a per-use choice: aggregate heavy elements into one `HeavyWall` node
+(single-cell, fit-friendly, recovers current 2R2C) or keep them per-element (more faithful, more
+states, for the simulation toy). It is just whether one `HeavyWall` sums claimed elements into one
+node or the assembler emits one per element.
 
 ---
 
@@ -186,20 +234,29 @@ Exercised against six buildings in `test_cases.md`:
 - **Exactly-once invariant:** holds in all six cases.
 - **`(mechanism, source)` key:** validated — ground/adjacent become first-class, the three loss
   modules collapse to one `Conductance`, and `HeavyPartition` fell out free.
-- **`RChain` generalization:** validated — furniture (`N=1, H_out=0`), 2R2C wall (`N=1`), and a
-  discretized thick wall (`N`=5–10) are one module; `N` is resolution, not free params. The ITE/ITI
-  case **requires `N>1`** to express, which justifies the discretization.
+- **Mass modules:** validated — `HeavyWall` (multi-cell, auto `n` from thickness; ITE/ITI needs the
+  multi-cell slicing) and `IndoorMass` (one-sided, source optional) cover the wall, furniture, and
+  heater cases off one shared internal RC-chain helper.
 - **`RoomMass` as a module:** validated.
+
+### Resolved
+
+- **Direct vs indirect gain (Trombe wall / heavy heater).** Not a new channel: `SolarGain` /
+  `SourceFlux` take a **`target` node** (default `T_room`). Direct gain → `T_room`; indirect gain →
+  a mass node (the lit element's `HeavyWall` cell for a Trombe wall; `IndoorMass` with the source on
+  for a masonry stove / underfloor slab, §3.5 = Bacher's `Th`). *(Earthship, heavy heater)*
+- **Furniture/heater overlap.** Collapsed into one `IndoorMass` module with an optional heat source
+  — no two-spellings ambiguity for the assembler. *(see §3.5)*
+- **Module catalogue vs configuration space.** The parametrizable chain is demoted to an internal
+  helper; the catalogue exposes named modules (`HeavyWall`, `IndoorMass`, …). `n`/boundary
+  conductances are implementation details, not user knobs.
 
 ### Open holes / decisions (none block; for Stage 2 design)
 
-1. **Direct-gain onto interior mass (Trombe).** `SolarGain` must accept a *target node*: the
-   `SOLAR(interior-absorbed)` channel is owned by the lit element's `RChain`, spending `α·A` into
-   its outer node rather than `T_room`. *(Earthship)*
-2. **Heavy/light routing key:** route on the element's actual `C_heavy` magnitude (+ override), not
+1. **Heavy/light routing key:** route on the element's actual `C_heavy` magnitude (+ override), not
    the material-ρ `is_heavy` flag — a 1 mm metal skin (ρ=7800) must stay light or it spawns a
    ~0-capacity node. *(Caravan)*
-3. **Position of heavy layer vs insulation** governs coupling — lives in the `RChain` per-cell
+2. **Position of heavy layer vs insulation** governs coupling — lives in `HeavyWall`'s per-cell
    `R_i/C_i` derivation from the *ordered* layer stack, not a new channel. Headlined by the ITE/ITI
    case. Renovation extras — thermal bridges (a `U·A` correction, deferred) and humidity
    (orthogonal, out of scope) — are not modelled.

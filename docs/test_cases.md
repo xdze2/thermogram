@@ -15,7 +15,7 @@ The cases form a coverage matrix — each stresses a different degree of freedom
 | **regular house** | full mix | south-window dual-channel; heavy/light routing; the current default |
 | **passive house** | extreme insulation, large solar | do the *ratios* stay physical at the extremes? |
 | **Earthship** | ground berm + big south glazing | both solar channels + ground STORAGE at once (hardest) |
-| **ITE vs ITI wall** | layer order of a heavy wall | does per-cell `RChain` beat a lumped node? (the load-bearing test) |
+| **ITE vs ITI wall** | layer order of a heavy wall | does multi-cell `HeavyWall` beat a single-cell node? (the load-bearing test) |
 
 Conventions: per-element granularity (each heavy element keeps its own chain; aggregating into one
 `C_wall` is a fit-time collapse). Cells = **owning module @ source**.
@@ -26,13 +26,14 @@ Conventions: per-element granularity (each heavy element keeps its own chain; ag
 
 | element | boundary | CONDUCTION | SOLAR | STORAGE |
 |---|---|---|---|---|
-| `wall_stone` | ground | `GroundLoss` | — | `HeavySlab`(RChain@T_ground) |
+| `wall_stone` | ground | `GroundLoss` | — | `HeavySlab` |
 | `floor_slab` | ground | `GroundLoss` | — | `HeavySlab` |
 | `partition` | adjacent | `AdjacentLoss` | — | — (light) |
-| `ceiling_concrete` | adjacent | `AdjacentLoss` | — | `HeavyPartition`(RChain@T_adj) |
+| `ceiling_concrete` | adjacent | `AdjacentLoss` | — | `HeavyPartition` |
 
-States: `T_room` + one chain per heavy element. The heavy ceiling-to-house is just `RChain@T_adj`
-— the source-in-key change made it a free config, not a missing module.
+States: `T_room` + one mass node per heavy element. The heavy ceiling-to-house is just
+`HeavyPartition` (`HeavyWall@T_adj`) — the source-in-key change made it a free config, not a missing
+module.
 
 ---
 
@@ -54,7 +55,7 @@ Modules: `RoomMass` + `DirectLoss` + `SolarGain`. State: `T_room` only. ✓ no h
 
 | element | boundary | CONDUCTION | SOLAR | STORAGE |
 |---|---|---|---|---|
-| `wall_brick` ×4 (heavy) | exterior | `HeavyWall`(RChain@T_ext) | `HeavyWall` sol-air | `HeavyWall` |
+| `wall_brick` ×4 (heavy) | exterior | `HeavyWall` | `HeavyWall` sol-air | `HeavyWall` |
 | `roof` (light) | exterior | `DirectLoss` | `SolarGain`(sol-air) | — |
 | `floor` (heavy) | ground | `GroundLoss` | — | `HeavySlab` |
 | `win_S` | exterior | `DirectLoss` | `SolarGain`(transmitted) | — |
@@ -62,15 +63,16 @@ Modules: `RoomMass` + `DirectLoss` + `SolarGain`. State: `T_room` only. ✓ no h
 | (ventilation) | exterior | `DirectLoss` (ACH) | — | — |
 
 ✓ South-window dual-channel (`CONDUCTION`→`DirectLoss`, `SOLAR`→`SolarGain`, both fire).
-✓ Heavy/light routing (brick `CONDUCTION` owned by `HeavyWall` only). A 40 cm brick wall can run
-`RChain` with `N`=5–10. Aggregated collapse (`N=1`, 4 walls → one chain) recovers 2R2C.
+✓ Heavy/light routing (brick `CONDUCTION` owned by `HeavyWall` only). A 40 cm brick wall runs
+`HeavyWall` with several internal cells. Aggregated collapse (single-cell, 4 walls → one node)
+recovers 2R2C.
 
 ---
 
 ## Case 4 — Passive house  *(extreme insulation, large solar; ratio/extreme test)*
 
 Same channel shape as the house, very low `U·A`/ACH. Heavy mass **inboard** of insulation
-(well-coupled) — the opposite of the house roof tiles. No new channel; confirms the `RChain`
+(well-coupled) — the opposite of the house roof tiles. No new channel; confirms `HeavyWall`'s
 `H_out/H_in` split must encode which side of the insulation the mass sits. Its job is Stage 3
 dynamics, not Stage 0 expressiveness.
 
@@ -87,13 +89,13 @@ dynamics, not Stage 0 expressiveness.
 | `floor` | ground | `GroundLoss` | — | `HeavySlab` |
 | (ventilation) | exterior | `DirectLoss` (ACH) | — | — |
 
-States: `T_room` + chains for berm / floor / south_mass. Stresses: (1) transmitted solar lands on
-`south_mass`'s outer node, not `T_room` — `SolarGain` must target a chain node (**Hole #1**); (2)
-berm = `CONDUCTION@T_ground` + `STORAGE` in one `RChain` ✓.
+States: `T_room` + mass nodes for berm / floor / south_mass. Stresses: (1) transmitted solar lands
+on `south_mass`'s node, not `T_room` — handled by `SolarGain` with `target` = that node (resolved,
+not a new channel); (2) berm = `CONDUCTION@T_ground` + `STORAGE` in one `HeavySlab` ✓.
 
 ---
 
-## Case 6 — Renovated old wall: ITE vs ITI  *(the `RChain` layer-order stress test)*
+## Case 6 — Renovated old wall: ITE vs ITI  *(the `HeavyWall` layer-order stress test)*
 
 Not a building typology but a **paired test**: one heavy wall (40 cm brick, south), **same
 materials and same `U·A`/`C_heavy` budgets**, in two layer orders. The only difference is *where the
@@ -108,15 +110,15 @@ Both variants: same element, same channels —
 
 | element | boundary | CONDUCTION | SOLAR | STORAGE |
 |---|---|---|---|---|
-| `wall_brick_40` | exterior | `HeavyWall`(RChain@T_ext) | `HeavyWall` sol-air | `HeavyWall` |
+| `wall_brick_40` | exterior | `HeavyWall` | `HeavyWall` sol-air | `HeavyWall` |
 
-**The point.** A lumped `N=1` `C_wall` **cannot distinguish ITE from ITI** — identical total `C` and
-`U`. Only the `N`-node `RChain` with per-cell `R_i, C_i` sliced *in layer order* captures it: in ITE
-the high-`C` cells sit at the room end of the chain (small resistance to `T_room`); in ITI the big
+**The point.** A single-cell `C_wall` **cannot distinguish ITE from ITI** — identical total `C` and
+`U`. Only a **multi-cell `HeavyWall`** with per-cell `R_i, C_i` sliced *in layer order* captures it:
+in ITE the high-`C` cells sit at the room end (small resistance to `T_room`); in ITI the big
 insulation `R` sits between the mass and the room, so `T_room` sees mostly the light plasterboard.
-**This is the headline demonstration of Hole #3** and the cheapest falsification of the whole
-`RChain` story: if it can't get ITE τ ≫ ITI τ from the same materials, the discretization buys
-nothing. → Stage 3 sanity assertion.
+**This is the headline demonstration of open hole #2** (heavy-layer position vs insulation) and the
+cheapest falsification of the multi-cell `HeavyWall`: if it can't get ITE τ ≫ ITI τ from the same
+materials, the extra cells buy nothing. → Stage 3 sanity assertion.
 
 **Explicitly out of scope for the RC model** (real in renovation, not carried here):
 - **Thermal bridges** (ITI's weak point — slabs/party walls pierce the insulation): a *correction to
@@ -132,9 +134,10 @@ nothing. → Stage 3 sanity assertion.
 - **Exactly-once invariant:** ✓ all six cases — no `(element, channel)` cell has two owners. The
   south window (Case 3) and berm wall (Case 5) confirm the rule separates legitimate distinct-paths
   from illegal double-counting.
-- **Holes surfaced** (full detail in [`physics_model.md`](physics_model.md#open-holes--decisions-none-block-for-stage-2-design)):
-  (1) direct-gain onto interior mass (Earthship); (2) heavy/light routing key (caravan); (3) heavy
-  layer position vs insulation (ITE/ITI).
+- **Resolved by the pass:** direct-gain onto interior mass (Earthship / heavy heater) → `SolarGain`
+  /`SourceFlux` with a `target` node, and the furniture/heater overlap → one `IndoorMass`.
+- **Open holes** (full detail in [`physics_model.md`](physics_model.md#open-holes--decisions-none-block-for-stage-2-design)):
+  (1) heavy/light routing key (caravan); (2) heavy-layer position vs insulation (ITE/ITI).
 
 **Stage 1 scope (computable from current physics):** caravan, regular house, passive house. Cave
 and Earthship are **Stage-0-only** until ground/adjacent/interior-solar physics lands (Deferred in
