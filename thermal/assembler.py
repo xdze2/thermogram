@@ -227,7 +227,7 @@ def active_modules(mods: list[M.FluxModule]) -> _ModuleReport:
     only ~5 free parameters), not a simulation one — forward integration has no such limit.
     """
     out: list[ActiveModuleOut] = []
-    seen: set[str] = set()
+    by_class: dict[str, ActiveModuleOut] = {}
     signals: list[str] = []
     free_params: set[str] = set()
     extra_states: set[str] = set()
@@ -247,10 +247,10 @@ def active_modules(mods: list[M.FluxModule]) -> _ModuleReport:
             if st != M.ROOM_NODE:
                 extra_states.add(st)
 
-        if cls in seen:
+        if cls in by_class:
+            by_class[cls].count += 1
             continue
-        seen.add(cls)
-        out.append(ActiveModuleOut(
+        entry = ActiveModuleOut(
             name=cls,
             form=meta.form,
             summary=meta.summary,
@@ -259,7 +259,9 @@ def active_modules(mods: list[M.FluxModule]) -> _ModuleReport:
             extra_states=list(inst_states),
             owns=list(meta.owns),
             element=M._instance_element_label(mod),
-        ))
+        )
+        by_class[cls] = entry
+        out.append(entry)
 
     n_states = 1 + len(extra_states)  # room node + every mass node
     n_free = len(free_params)

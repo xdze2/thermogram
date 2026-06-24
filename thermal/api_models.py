@@ -251,7 +251,8 @@ class ModuleSpecOut(BaseModel):
 class ActiveModuleOut(ModuleSpecOut):
     """A module instance active in a specific room, with the element it was routed to."""
 
-    element: str | None = Field(default=None, description="Element name/uid this instance was routed to (None for room-level modules).")
+    element: str | None = Field(default=None, description="Element name/uid of the first instance (None for room-level modules).")
+    count: int = Field(default=1, description="How many instances of this module class the room assembled (e.g. one per heavy wall).")
 
 
 class RCModelOut(BaseModel):

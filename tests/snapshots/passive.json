@@ -185,6 +185,7 @@
   "identifiability_warning": null,
   "modules": [
     {
+      "count": 1,
       "element": null,
       "extra_states": [
         "T_room"
@@ -199,6 +200,7 @@
       "summary": "The room-air node: C_room to the datum; every flux writes here."
     },
     {
+      "count": 1,
       "element": null,
       "extra_states": [],
       "form": "Conductance",
@@ -213,6 +215,7 @@
       "summary": "Air-change loss 0.34\u00b7ACH\u00b7V to outside (the ventilation half of H_ve)."
     },
     {
+      "count": 6,
       "element": "Wall N",
       "extra_states": [
         "T_wall"
@@ -235,6 +238,7 @@
       "summary": "Opaque element: sol-air conduction (H_env) through a heavy mass node (C_wall) into the room (H_int); light walls skip the node."
     },
     {
+      "count": 2,
       "element": "Window S",
       "extra_states": [],
       "form": "Conductance",
@@ -251,6 +255,7 @@
       "summary": "A window's U\u00b7A conduction to outside, folded into H_ve (no separate branch)."
     },
     {
+      "count": 2,
       "element": "Window S",
       "extra_states": [],
       "form": "SolarGain",

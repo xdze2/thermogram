@@ -6,7 +6,6 @@
     room, elements, addElement, nextId, genUid, autoName,
     dataSources, rangeStart, rangeEnd,
     rcResult, rcStatus, rcError,
-    theme, navigate,
   } from './store.js';
   import { fetchJson } from './api.js';
   import RoomFields from './RoomFields.svelte';
@@ -15,6 +14,7 @@
   import PriorBlock from './PriorBlock.svelte';
   import DataPreview from './DataPreview.svelte';
   import FitResultChart from './FitResultChart.svelte';
+  import ModulePanel from './ModulePanel.svelte';
 
   export let studyId;
 
@@ -230,37 +230,13 @@
     if (r.ok) studyName = nameInput;
   }
 
-  // --- Mermaid ---
-  let mermaidLoaded = false;
-  let mermaidDiv;
-
-  onMount(async () => {
-    const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
-    mermaid.initialize({ startOnLoad: false, theme: $theme === 'dark' ? 'dark' : 'default' });
-    window._mermaid = mermaid;
-    mermaidLoaded = true;
-    renderMermaid();
-  });
-
-  async function renderMermaid() {
-    if (!window._mermaid || !mermaidDiv) return;
-    const source = `graph LR
-    Tsa["T_sa(t)<br/>sol-air"]
-    Tout["T_out<br/>outdoor"]
-    Qint(["Q_int + Q_sol_win"])
-    Tsa -->|"R_ext"| Cwall(["C_wall"])
-    Cwall -->|"R_int"| Croom(["C_room<br/>room air"])
-    Tout -->|"R_ve"| Croom
-    Qint --> Croom`;
-    mermaidDiv.innerHTML = '';
-    const { svg } = await window._mermaid.render('rc-mermaid-' + Date.now(), source);
-    mermaidDiv.innerHTML = svg;
-  }
-
-  $: if (mermaidLoaded && $theme) {
-    window._mermaid?.initialize({ startOnLoad: false, theme: $theme === 'dark' ? 'dark' : 'default' });
-    renderMermaid();
-  }
+  // --- Topology schematic ---
+  // The real assembled RC graph, rendered server-side from draw.py. Bump a version on
+  // every recompute so the <img> cache-busts to the current room (replaces the old
+  // hardcoded Mermaid diagram, which ignored the room entirely).
+  let topoVersion = 0;
+  $: if ($rcResult) topoVersion++;
+  $: topoSrc = `/api/studies/${studyId}/topology?v=${topoVersion}`;
 </script>
 
 <!-- Editor layout -->
@@ -316,10 +292,21 @@
   <!-- Right: priors + diagram + data preview + fit -->
   <div class="p-4 overflow-y-auto">
 
-    <!-- RC diagram -->
+    <!-- RC topology schematic (real assembled graph) -->
+    <div class="mb-4">
+      <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">RC topology</p>
+      {#if $rcResult}
+        <div class="flex justify-center bg-base-200/40 rounded p-2">
+          <img src={topoSrc} alt="Assembled RC schematic" class="w-full max-w-2xl" />
+        </div>
+      {:else}
+        <p class="text-xs text-base-content/30">Describe the room to draw its schematic.</p>
+      {/if}
+    </div>
+
+    <!-- Assembled-module readout -->
     <div class="mb-5">
-      <p class="text-xs uppercase tracking-widest text-base-content/30 mb-2">RC model</p>
-      <div class="flex justify-center" bind:this={mermaidDiv}></div>
+      <ModulePanel rcResult={$rcResult} />
     </div>
 
     <div class="divider my-0 mb-4"></div>

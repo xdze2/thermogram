@@ -207,12 +207,75 @@ to its own pass.**
       `tests/test_assembler.py` (+4) — catalogue covers every assembled class, dedup +
       state-count, caravan single-state, warning trips over a monkeypatched limit. Golden
       snapshots regenerated (**purely additive** — the five priors are byte-unchanged).
-- [ ] Frontend: forward-simulation view (ensemble plot + scenario sliders); module list with
-      signal-availability warnings; topology schematic — **deferred** (its own pass; the
-      simulation UI also needs a `/simulate` endpoint + the deferred Stage 3 driver wiring).
+- [x] Frontend — **module readout + real schematic** (the *consequence* side):
+      - `ActiveModuleOut.count` added (additive; snapshots regenerated) so the panel shows
+        `HeavyWall ×6` rather than hiding multiplicity behind the class-dedup.
+      - `frontend/src/lib/ModulePanel.svelte` — read-only "Model" panel from `RCModelOut`:
+        per-module count / canonical form / free params / routed element / `← signal`
+        badges, a `needs:` footer, and the `identifiability_warning` (shown only when set).
+      - **Killed the fake Mermaid diagram.** `StudyEditor.svelte` now embeds
+        `GET …/topology` (the real Stage-4 `draw.py` schematic), cache-busted on each
+        recompute. Verified in the running app: house → `2 states` + `T_wall` node;
+        caravan → `1 state`, no wall node (the old hardcoded graph drew a phantom `C_wall`).
+- [ ] Frontend — **forward-simulation view** (ensemble plot + scenario sliders) — **deferred**:
+      needs a `/simulate` endpoint + the deferred Stage 3 driver wiring (Open-Meteo +
+      T_ground). See "What's next" below.
 
 **Verifiable:** ✓ API tests pass; `GET /api/modules` + `RCModelOut.modules` expose the
-assembled topology; full suite green (76 tests). Frontend pending.
+assembled topology; the UI shows the *real* schematic + module readout; full suite green
+(76 tests). Simulation view pending.
+
+---
+
+## What's next  *(ordered: cheapest-honest → biggest payoff)*
+
+The engine + read-only exposure are done. The remaining work splits into (A) closing small
+honesty gaps, (B) the real *choice* the proposal promises, and (C) the simulation toy.
+
+### A. Light-instance param narrowing  *(small, no physics change)*
+
+The `ModulePanel` lists `C_wall` under `HeavyWall` even for the **caravan** (all-light),
+because per-module `params` come from the static `MODULE_CATALOGUE`, not from what a *light*
+instance actually contributes. The `n_states`/schematic are already correct; only the
+per-module param list over-reports. Fix mirrors the existing `_instance_extra_states`:
+add `_instance_params(mod)` that drops `C_wall` (and the `STORAGE@—` channel from `owns`)
+for a light `HeavyWall`. Update `active_modules` + one assembler test + regen snapshots
+(additive). ~30 min.
+
+### B. Heavy/light routing override — the actual module *choice*  *(the proposal's core UX)*
+
+This is **open hole #1** (deferred from Stage 2b) and the real "module choice in the UI":
+
+- **Model**: add `thermal_mass: "auto" | "heavy" | "light"` to the opaque element model
+  (default `"auto"`). `assemble()` routes a wall's `CONDUCTION` to `HeavyWall`-with-node vs
+  direct on this override instead of purely on `is_heavy`. **This moves the `C_wall`/state
+  snapshots** — it is a deliberate behaviour change (regen snapshots, review the diff), not
+  a behaviour-preserving step. That is why it never rode Stage 2.
+- **Assembler**: `is_heavy` becomes "offers STORAGE *and* not overridden to light"; a wall
+  forced `heavy` with no ρ>500 layers needs a fallback C (or a warning).
+- **API**: the override round-trips through `Room` JSON (already persisted per study).
+- **Frontend**: a 3-way toggle **on the `ElementCard`** (`auto · heavy · light`) — the choice
+  lives where the element is edited (cause); the `ModulePanel` + schematic already built
+  show the effect, live. Editing the toggle visibly moves both.
+- **Tests**: routing flips the state count (force a brick wall light → caravan-like 1-state;
+  force a light wall heavy → gains a node); snapshot diff is the C_wall delta only.
+
+### C. Forward-simulation view — the Bret-Victor toy  *(biggest, needs driver wiring first)*
+
+The `simulate()` engine (Stage 3) is ready and returns a plottable T_room ensemble; what's
+missing is the *drivers* and an endpoint:
+
+1. **Driver wiring** (the deferred Stage 3 item): build `T_sa`/`Q_room` from a scenario —
+   synthetic first (sinusoid T_ext + diurnal solar, zero deps, runs standalone), then real
+   Open-Meteo. Add a prescribed `T_ground` scenario signal for when `HeavySlab` lands.
+2. **`POST /api/studies/{id}/simulate`** — `{n_draws, dt, scenario}` → the room-node
+   ensemble (mean + p10/p90 bands). Reuses `sample_params` + `assemble_system` + `integrate`.
+3. **Frontend**: ensemble plot (reuse the Plotly setup in `DataPreview.svelte`) + scenario
+   sliders (ACH, set-point, solar scale). **No identifiability limit here** — forward
+   integration needs no inversion; the warning stays a *fit*-only concern.
+
+**Suggested order:** A (quick honesty fix) → B (the headline choice UX) → C (the toy). A and
+B share the `ModulePanel`/schematic already built; C is the largest and most independent.
 
 ---
 
