@@ -1,0 +1,106 @@
+{
+  "name": "Passive house",
+  "floor_area_m2": 40.0,
+  "height_m": 2.5,
+  "latitude": 48.85,
+  "longitude": 2.35,
+  "ach": 0.1,
+  "elements": [
+    {
+      "name": "Wall N",
+      "uid": "wall_n00",
+      "type": "wall",
+      "orientation": "N",
+      "area_m2": 15.0,
+      "layers": [
+        {"material_key": "gypsum_plaster", "thickness_m": 0.015},
+        {"material_key": "brick_common", "thickness_m": 0.20},
+        {"material_key": "mineral_wool", "thickness_m": 0.30},
+        {"material_key": "cement_plaster", "thickness_m": 0.02}
+      ]
+    },
+    {
+      "name": "Wall E",
+      "uid": "wall_e00",
+      "type": "wall",
+      "orientation": "E",
+      "area_m2": 15.0,
+      "layers": [
+        {"material_key": "gypsum_plaster", "thickness_m": 0.015},
+        {"material_key": "brick_common", "thickness_m": 0.20},
+        {"material_key": "mineral_wool", "thickness_m": 0.30},
+        {"material_key": "cement_plaster", "thickness_m": 0.02}
+      ]
+    },
+    {
+      "name": "Wall S",
+      "uid": "wall_s00",
+      "type": "wall",
+      "orientation": "S",
+      "area_m2": 15.0,
+      "layers": [
+        {"material_key": "gypsum_plaster", "thickness_m": 0.015},
+        {"material_key": "brick_common", "thickness_m": 0.20},
+        {"material_key": "mineral_wool", "thickness_m": 0.30},
+        {"material_key": "cement_plaster", "thickness_m": 0.02}
+      ]
+    },
+    {
+      "name": "Wall W",
+      "uid": "wall_w00",
+      "type": "wall",
+      "orientation": "W",
+      "area_m2": 15.0,
+      "layers": [
+        {"material_key": "gypsum_plaster", "thickness_m": 0.015},
+        {"material_key": "brick_common", "thickness_m": 0.20},
+        {"material_key": "mineral_wool", "thickness_m": 0.30},
+        {"material_key": "cement_plaster", "thickness_m": 0.02}
+      ]
+    },
+    {
+      "name": "Roof",
+      "uid": "roof0000",
+      "type": "roof",
+      "orientation": "horizontal",
+      "area_m2": 40.0,
+      "layers": [
+        {"material_key": "gypsum_plaster", "thickness_m": 0.0125},
+        {"material_key": "mineral_wool", "thickness_m": 0.40},
+        {"material_key": "roof_tiles_clay", "thickness_m": 0.02}
+      ]
+    },
+    {
+      "name": "Ground floor",
+      "uid": "floor000",
+      "type": "floor",
+      "orientation": "horizontal",
+      "area_m2": 40.0,
+      "is_ground_contact": true,
+      "layers": [
+        {"material_key": "ceramic_tile", "thickness_m": 0.01},
+        {"material_key": "screed", "thickness_m": 0.06},
+        {"material_key": "concrete_dense", "thickness_m": 0.15},
+        {"material_key": "xps", "thickness_m": 0.20}
+      ]
+    },
+    {
+      "name": "Window S",
+      "uid": "win_s000",
+      "type": "window",
+      "orientation": "S",
+      "area_m2": 6.0,
+      "u_value_override": 0.8,
+      "shgc": 0.5
+    },
+    {
+      "name": "Window N",
+      "uid": "win_n000",
+      "type": "window",
+      "orientation": "N",
+      "area_m2": 2.0,
+      "u_value_override": 0.8,
+      "shgc": 0.5
+    }
+  ]
+}

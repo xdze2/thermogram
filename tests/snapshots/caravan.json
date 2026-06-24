@@ -1,0 +1,142 @@
+{
+  "C_room": {
+    "contributions": [
+      {
+        "detail": "20 kJ/(m\u00b2\u00b7K) \u00d7 12.0 m\u00b2  (weak prior)",
+        "label": "Interior estimate  (12.0 m\u00b2 floor)",
+        "sigma": 144000.0,
+        "value": 240000.0
+      }
+    ],
+    "description": "Furniture, floor finishes, partition walls. Not described by user \u2014 wide prior.",
+    "mu": 240000.0,
+    "name": "Room interior thermal mass",
+    "sigma": 144000.0,
+    "symbol": "C_room",
+    "unit": "MJ/K"
+  },
+  "C_wall": {
+    "contributions": [],
+    "description": "Heat stored in heavy envelope layers (brick, concrete\u2026). Drives thermal lag.",
+    "mu": 0.0,
+    "name": "Envelope thermal mass",
+    "sigma": 0.0,
+    "symbol": "C_wall",
+    "unit": "MJ/K"
+  },
+  "H_env": {
+    "contributions": [
+      {
+        "detail": "U=0.30 W/m\u00b2K  \u00d7  6.0 m\u00b2",
+        "label": "Wall N  [N]",
+        "sigma": 0.2698784064322668,
+        "value": 1.7991893762151119
+      },
+      {
+        "detail": "U=0.30 W/m\u00b2K  \u00d7  6.0 m\u00b2",
+        "label": "Wall E  [E]",
+        "sigma": 0.2698784064322668,
+        "value": 1.7991893762151119
+      },
+      {
+        "detail": "U=0.30 W/m\u00b2K  \u00d7  6.0 m\u00b2",
+        "label": "Wall S  [S]",
+        "sigma": 0.2698784064322668,
+        "value": 1.7991893762151119
+      },
+      {
+        "detail": "U=0.30 W/m\u00b2K  \u00d7  6.0 m\u00b2",
+        "label": "Wall W  [W]",
+        "sigma": 0.2698784064322668,
+        "value": 1.7991893762151119
+      },
+      {
+        "detail": "U=0.30 W/m\u00b2K  \u00d7  12.0 m\u00b2",
+        "label": "Roof  [horizontal]",
+        "sigma": 0.5446565139323002,
+        "value": 3.631043426215335
+      },
+      {
+        "detail": "U=0.30 W/m\u00b2K  \u00d7  12.0 m\u00b2",
+        "label": "Floor  [horizontal]",
+        "sigma": 0.5333593826316303,
+        "value": 3.555729217544202
+      }
+    ],
+    "description": "U\u00b7A for opaque elements (walls, roof, floor). Drives sol-air path through C_wall.",
+    "mu": 14.383530148619984,
+    "name": "Opaque envelope heat loss",
+    "sigma": 0.9340558689092204,
+    "symbol": "H_env",
+    "unit": "W/K"
+  },
+  "H_int": 14.558036549315078,
+  "H_ve": {
+    "contributions": [
+      {
+        "detail": "0.34 \u00d7 0.8 ACH \u00d7 28.8 m\u00b3",
+        "label": "Ventilation  (ACH=0.8)",
+        "sigma": 3.1334400000000002,
+        "value": 7.8336
+      },
+      {
+        "detail": "U=1.40 W/m\u00b2K  \u00d7  2.0 m\u00b2",
+        "label": "Window S  [S]",
+        "sigma": 0.42,
+        "value": 2.8
+      }
+    ],
+    "description": "Direct T_ext\u2192T_room losses: ventilation (\u03c1\u00b7cp\u00b7n\u00b7V) plus window conduction (U\u00b7A). Windows bypass C_wall.",
+    "mu": 10.6336,
+    "name": "Ventilation + window heat loss",
+    "sigma": 3.161462673130904,
+    "symbol": "H_ve",
+    "unit": "W/K"
+  },
+  "alpha_eff": {
+    "contributions": [
+      {
+        "detail": "outer layer: mineral_wool  \u00d7  6.0 m\u00b2",
+        "label": "Wall N  [N]",
+        "sigma": 0.15,
+        "value": 0.65
+      },
+      {
+        "detail": "outer layer: mineral_wool  \u00d7  6.0 m\u00b2",
+        "label": "Wall E  [E]",
+        "sigma": 0.15,
+        "value": 0.65
+      },
+      {
+        "detail": "outer layer: mineral_wool  \u00d7  6.0 m\u00b2",
+        "label": "Wall S  [S]",
+        "sigma": 0.15,
+        "value": 0.65
+      },
+      {
+        "detail": "outer layer: mineral_wool  \u00d7  6.0 m\u00b2",
+        "label": "Wall W  [W]",
+        "sigma": 0.15,
+        "value": 0.65
+      },
+      {
+        "detail": "outer layer: mineral_wool  \u00d7  12.0 m\u00b2",
+        "label": "Roof  [horizontal]",
+        "sigma": 0.15,
+        "value": 0.65
+      },
+      {
+        "detail": "outer layer: mineral_wool  \u00d7  12.0 m\u00b2",
+        "label": "Floor  [horizontal]",
+        "sigma": 0.15,
+        "value": 0.65
+      }
+    ],
+    "description": "Area-weighted solar absorptivity of opaque outer surfaces. Drives sol-air temperature.",
+    "mu": 0.65,
+    "name": "Outer surface absorptivity",
+    "sigma": 0.06495190528383289,
+    "symbol": "\u03b1_eff",
+    "unit": "\u2014"
+  }
+}

@@ -68,12 +68,23 @@ Pin current behaviour before any refactor. Hand-compute (or read off current `pr
 expected ~5 parameter priors for each describable case; encode as pytest assertions. **This is
 the regression net the modular refactor must keep green.**
 
-- [ ] `tests/fixtures/` — the test-case rooms as `Room` JSON (cave, caravan, house, passive,
-      earthship where current physics allows)
-- [ ] `tests/test_golden_priors.py` — `build_priors(case).<param>.mu ≈ X ± tol` for each case
-- [ ] Record full `RCModelOut` JSON snapshots per case for byte-diffing in later stages
+- [x] `tests/fixtures/` — the test-case rooms as `Room` JSON: caravan, house, passive.
+      Cave/earthship deferred (need ground/interior-solar physics, see test_cases.md scope).
+      Every element carries an explicit `name`+`uid` — the uuid-default would otherwise make
+      contribution labels (and thus snapshots) non-reproducible.
+- [x] `tests/test_golden_priors.py` — hand-computed `mu`/`sigma` per param, derived
+      *independently* from the ISO 6946 / rho·cp·d formulas (cross-checked against
+      `build_priors` at rel_tol 1e-9), pinned at full precision.
+- [x] Record full `RCModelOut` JSON snapshots per case (`tests/snapshots/`) for byte-diffing;
+      `tests/regen_snapshots.py` regenerates them for *deliberate* behaviour changes only.
 
-**Verifiable:** `uv run pytest tests/test_golden_priors.py` passes against current `priors.py`.
+**Found by the pass (pinned as current behaviour, to revisit in Stage 2):**
+- `alpha_eff` includes floors (incl. ground-contact) in the area-weighted average — only
+  windows are excluded. A buried floor has no sol-air solar drive yet pulls weight here.
+- `alpha_eff` contributions are an averaged breakdown, *not* additive — they don't sum to mu.
+- Ground-contact floor U is the bare-stack ISO 6946 value (Rso=0, no T_ground model).
+
+**Verifiable:** `uv run pytest tests/test_golden_priors.py` passes against current `priors.py`. ✓ (11 tests)
 
 ---
 

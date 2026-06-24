@@ -1,0 +1,85 @@
+{
+  "name": "Caravan",
+  "floor_area_m2": 12.0,
+  "height_m": 2.4,
+  "latitude": 45.0,
+  "longitude": 5.0,
+  "ach": 0.8,
+  "elements": [
+    {
+      "name": "Wall N",
+      "uid": "wall_n00",
+      "type": "wall",
+      "orientation": "N",
+      "area_m2": 6.0,
+      "layers": [
+        {"material_key": "wood_softwood", "thickness_m": 0.04},
+        {"material_key": "mineral_wool", "thickness_m": 0.10}
+      ]
+    },
+    {
+      "name": "Wall E",
+      "uid": "wall_e00",
+      "type": "wall",
+      "orientation": "E",
+      "area_m2": 6.0,
+      "layers": [
+        {"material_key": "wood_softwood", "thickness_m": 0.04},
+        {"material_key": "mineral_wool", "thickness_m": 0.10}
+      ]
+    },
+    {
+      "name": "Wall S",
+      "uid": "wall_s00",
+      "type": "wall",
+      "orientation": "S",
+      "area_m2": 6.0,
+      "layers": [
+        {"material_key": "wood_softwood", "thickness_m": 0.04},
+        {"material_key": "mineral_wool", "thickness_m": 0.10}
+      ]
+    },
+    {
+      "name": "Wall W",
+      "uid": "wall_w00",
+      "type": "wall",
+      "orientation": "W",
+      "area_m2": 6.0,
+      "layers": [
+        {"material_key": "wood_softwood", "thickness_m": 0.04},
+        {"material_key": "mineral_wool", "thickness_m": 0.10}
+      ]
+    },
+    {
+      "name": "Roof",
+      "uid": "roof0000",
+      "type": "roof",
+      "orientation": "horizontal",
+      "area_m2": 12.0,
+      "layers": [
+        {"material_key": "wood_softwood", "thickness_m": 0.04},
+        {"material_key": "mineral_wool", "thickness_m": 0.10}
+      ]
+    },
+    {
+      "name": "Floor",
+      "uid": "floor000",
+      "type": "floor",
+      "orientation": "horizontal",
+      "area_m2": 12.0,
+      "layers": [
+        {"material_key": "wood_softwood", "thickness_m": 0.04},
+        {"material_key": "mineral_wool", "thickness_m": 0.10}
+      ]
+    },
+    {
+      "name": "Window S",
+      "uid": "win_s000",
+      "type": "window",
+      "orientation": "S",
+      "area_m2": 2.0,
+      "u_value_override": 1.4,
+      "shgc": 0.6
+    }
+  ]
+}

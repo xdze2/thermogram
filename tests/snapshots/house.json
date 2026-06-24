@@ -1,0 +1,185 @@
+{
+  "C_room": {
+    "contributions": [
+      {
+        "detail": "20 kJ/(m\u00b2\u00b7K) \u00d7 40.0 m\u00b2  (weak prior)",
+        "label": "Interior estimate  (40.0 m\u00b2 floor)",
+        "sigma": 480000.0,
+        "value": 800000.0
+      }
+    ],
+    "description": "Furniture, floor finishes, partition walls. Not described by user \u2014 wide prior.",
+    "mu": 800000.0,
+    "name": "Room interior thermal mass",
+    "sigma": 480000.0,
+    "symbol": "C_room",
+    "unit": "MJ/K"
+  },
+  "C_wall": {
+    "contributions": [
+      {
+        "detail": "6.22 MJ/K from heavy layers",
+        "label": "Brick wall N  [N]",
+        "sigma": 1554375.0,
+        "value": 6217500.0
+      },
+      {
+        "detail": "6.22 MJ/K from heavy layers",
+        "label": "Brick wall E  [E]",
+        "sigma": 1554375.0,
+        "value": 6217500.0
+      },
+      {
+        "detail": "6.22 MJ/K from heavy layers",
+        "label": "Brick wall S  [S]",
+        "sigma": 1554375.0,
+        "value": 6217500.0
+      },
+      {
+        "detail": "6.22 MJ/K from heavy layers",
+        "label": "Brick wall W  [W]",
+        "sigma": 1554375.0,
+        "value": 6217500.0
+      },
+      {
+        "detail": "1.83 MJ/K from heavy layers",
+        "label": "Roof  [horizontal]",
+        "sigma": 457500.0,
+        "value": 1830000.0
+      },
+      {
+        "detail": "19.97 MJ/K from heavy layers",
+        "label": "Ground floor  [horizontal]",
+        "sigma": 4993200.0,
+        "value": 19972800.0
+      }
+    ],
+    "description": "Heat stored in heavy envelope layers (brick, concrete\u2026). Drives thermal lag.",
+    "mu": 46672800.0,
+    "name": "Envelope thermal mass",
+    "sigma": 5899633.806644273,
+    "symbol": "C_wall",
+    "unit": "MJ/K"
+  },
+  "H_env": {
+    "contributions": [
+      {
+        "detail": "U=0.25 W/m\u00b2K  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall N  [N]",
+        "sigma": 0.5639939124466594,
+        "value": 3.759959416311063
+      },
+      {
+        "detail": "U=0.25 W/m\u00b2K  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall E  [E]",
+        "sigma": 0.5639939124466594,
+        "value": 3.759959416311063
+      },
+      {
+        "detail": "U=0.25 W/m\u00b2K  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall S  [S]",
+        "sigma": 0.5639939124466594,
+        "value": 3.759959416311063
+      },
+      {
+        "detail": "U=0.25 W/m\u00b2K  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall W  [W]",
+        "sigma": 0.5639939124466594,
+        "value": 3.759959416311063
+      },
+      {
+        "detail": "U=0.17 W/m\u00b2K  \u00d7  40.0 m\u00b2",
+        "label": "Roof  [horizontal]",
+        "sigma": 1.015995887635693,
+        "value": 6.773305917571286
+      },
+      {
+        "detail": "U=0.38 W/m\u00b2K  \u00d7  40.0 m\u00b2",
+        "label": "Ground floor  [horizontal]",
+        "sigma": 2.2738400604891766,
+        "value": 15.158933736594513
+      }
+    ],
+    "description": "U\u00b7A for opaque elements (walls, roof, floor). Drives sol-air path through C_wall.",
+    "mu": 36.97207731941005,
+    "name": "Opaque envelope heat loss",
+    "sigma": 2.734035990524928,
+    "symbol": "H_env",
+    "unit": "W/K"
+  },
+  "H_int": 37.17059296302005,
+  "H_ve": {
+    "contributions": [
+      {
+        "detail": "0.34 \u00d7 0.5 ACH \u00d7 100.0 m\u00b3",
+        "label": "Ventilation  (ACH=0.5)",
+        "sigma": 6.800000000000001,
+        "value": 17.0
+      },
+      {
+        "detail": "U=2.80 W/m\u00b2K  \u00d7  4.0 m\u00b2",
+        "label": "Window S  [S]",
+        "sigma": 1.68,
+        "value": 11.2
+      },
+      {
+        "detail": "U=2.80 W/m\u00b2K  \u00d7  2.0 m\u00b2",
+        "label": "Window N  [N]",
+        "sigma": 0.84,
+        "value": 5.6
+      }
+    ],
+    "description": "Direct T_ext\u2192T_room losses: ventilation (\u03c1\u00b7cp\u00b7n\u00b7V) plus window conduction (U\u00b7A). Windows bypass C_wall.",
+    "mu": 33.8,
+    "name": "Ventilation + window heat loss",
+    "sigma": 7.054643860606998,
+    "symbol": "H_ve",
+    "unit": "W/K"
+  },
+  "alpha_eff": {
+    "contributions": [
+      {
+        "detail": "outer layer: cement_plaster  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall N  [N]",
+        "sigma": 0.12,
+        "value": 0.6
+      },
+      {
+        "detail": "outer layer: cement_plaster  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall E  [E]",
+        "sigma": 0.12,
+        "value": 0.6
+      },
+      {
+        "detail": "outer layer: cement_plaster  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall S  [S]",
+        "sigma": 0.12,
+        "value": 0.6
+      },
+      {
+        "detail": "outer layer: cement_plaster  \u00d7  15.0 m\u00b2",
+        "label": "Brick wall W  [W]",
+        "sigma": 0.12,
+        "value": 0.6
+      },
+      {
+        "detail": "outer layer: roof_tiles_clay  \u00d7  40.0 m\u00b2",
+        "label": "Roof  [horizontal]",
+        "sigma": 0.15,
+        "value": 0.65
+      },
+      {
+        "detail": "outer layer: xps  \u00d7  40.0 m\u00b2",
+        "label": "Ground floor  [horizontal]",
+        "sigma": 0.15,
+        "value": 0.65
+      }
+    ],
+    "description": "Area-weighted solar absorptivity of opaque outer surfaces. Drives sol-air temperature.",
+    "mu": 0.6285714285714286,
+    "name": "Outer surface absorptivity",
+    "sigma": 0.06583839212458807,
+    "symbol": "\u03b1_eff",
+    "unit": "\u2014"
+  }
+}
