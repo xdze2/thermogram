@@ -49,9 +49,13 @@ Write each building as an element list + its expected **channel decomposition**:
 element, which channels it offers and which module owns each. If a case can't be filled in, the
 channel model has a hole — found for the cost of a markdown table.
 
-- [ ] `docs/test_cases_channels.md` — the five buildings, each as elements → {channel: owner}
-- [ ] Resolve `SOLAR_OPAQUE` as a 4th channel against the concrete Earthship/house walls
-- [ ] Confirm the south-window dual-channel and heavy/light routing read correctly on paper
+- [x] `docs/test_cases.md` — six buildings, each as elements → {channel: owner}; generic physics
+      in `docs/physics_model.md`
+- [x] Resolve `SOLAR_OPAQUE` as a 4th channel against the concrete Earthship/house walls
+      (resolved for *exterior* opaque; **hole found** — transmitted solar onto interior mass is
+      not covered, see Hole #1)
+- [x] Confirm the south-window dual-channel and heavy/light routing read correctly on paper
+- [x] Added the ITE/ITI renovated-wall case — the `RChain` layer-order stress test (Case 6)
 
 **Verifiable:** every (element, channel) cell has exactly one owner; no case has an
 unrepresentable element. Pure review artifact.

@@ -1,5 +1,10 @@
 # Modular RC Model — Design Proposal
 
+> **Note.** This is the design rationale ("why"). The authoritative, current spec of the channels,
+> module forms, elements, and assembly now lives in [`physics_model.md`](physics_model.md), with
+> worked buildings in [`test_cases.md`](test_cases.md). Where the detailed tables below differ from
+> `physics_model.md`, the physics doc wins.
+
 ## Motivation
 
 The current 2R2C model with sol-air input works well for solar-driven, lightweight rooms.
