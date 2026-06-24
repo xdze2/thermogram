@@ -158,19 +158,43 @@ ROOM_NODE = "T_room"
 
 @dataclass
 class FluxModule:
-    """Base flux module. A module claims `(element, channel)` cells and derives priors."""
+    """One RC topology sub-part: it connects an element to a source.
+
+    A module has two separate jobs, on two separate planes — don't conflate them:
+
+      • ACCOUNTING — `claims()` lists the element *channels* (budget slots) this module
+        takes ownership of. The assembler enforces exactly-one-owner per channel, so a
+        wall's conduction budget can't be silently spent twice. Claiming a channel is
+        bookkeeping; it is not yet a branch in the circuit.
+
+      • PHYSICS — `derive_prior()` turns the claimed budgets into Gaussian priors, and
+        `dynamics()` emits the actual RC branch(es): nodes, resistors to a source, and
+        prescribed-flux sources. This is where "module + source = one branch" happens.
+
+    Vocabulary (see channels.py): an *element* is declarative geometry; a *channel* is a
+    `(mechanism, source)` budget the element offers; a *source* is the other end of the
+    branch (a boundary temperature / solar driver, or `—` for storage). A source that
+    carries a measured timeseries is a *signal* — but not every source is a signal.
+    """
 
     def claims(self) -> list[tuple[object, Channel]]:
-        """The (element, channel) cells this module owns."""
+        """ACCOUNTING: the element channels (budget slots) this module owns.
+
+        Returns `(element, channel)` pairs. The assembler asserts each is claimed
+        exactly once — this is double-counting prevention, not the RC wiring.
+        """
         raise NotImplementedError
 
     def derive_prior(self) -> list[PriorTerm]:
+        """PHYSICS: Gaussian prior terms spent from the claimed budgets."""
         raise NotImplementedError
 
     def dynamics(self, params: dict) -> Dynamics:
-        """Contribution to the assembled ODE for a sampled `params` dict.
+        """PHYSICS: the RC branch(es) this module adds, for a sampled `params` dict.
 
-        Default: a module with no dynamics (claims no node, injects no flux).
+        Returns nodes / couplings / flux sources (the actual circuit). Default: a module
+        that adds no branch (claims budgets but contributes no RC element — e.g. a pure
+        prior contributor).
         """
         return Dynamics()
 

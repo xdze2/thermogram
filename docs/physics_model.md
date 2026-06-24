@@ -30,10 +30,26 @@ channels an element offers follows mechanically from `(kind, boundary, layers, s
 
 ## 2. Channels — `(mechanism, source)`
 
-A channel is a **conserved budget** an element offers, computed once from geometry + ISO 6946 +
-layers, model-agnostic. The unit of ownership is the `(element, channel)` pair. The key is a
-**`(mechanism, source)` tuple** — the *source* (reference temp / driving signal) is part of the
-identity, since conduction to outside, ground, and an adjacent zone are physically distinct paths.
+### Glossary — keep these distinct
+
+| term | what it is | plane |
+|---|---|---|
+| **Element** | declarative geometry + materials of one surface (§1). Offers budgets; owns no physics. | input |
+| **Mechanism** | a *kind* of heat path: `CONDUCTION` / `SOLAR` / `STORAGE`. | — |
+| **Source** | the **other end of a branch**: a boundary temp (`T_ext`/`T_ground`/`T_adj`), a solar driver (`G_sol…`), or `—` for storage (a capacitance has no other end). A source that carries a measured timeseries is a **signal** — but not every source is a signal (storage isn't). | — |
+| **Channel** | `(Mechanism, Source)`: a **budget slot** an element offers, e.g. "this wall has `U·A` of `CONDUCTION@T_ext`". | **accounting** |
+| **Module** (§3) | one RC sub-part: it **claims** channels (accounting) and **emits** RC branches (physics). *Module + source = one branch* in the assembled circuit. | both |
+
+A **channel** is therefore a **conserved budget** an element offers, computed once from geometry +
+ISO 6946 + layers, model-agnostic. The key is a **`(mechanism, source)` tuple** — the *source* is
+part of the identity, since conduction to outside, ground, and an adjacent zone are physically
+distinct paths.
+
+**Two planes, never conflate them.** A channel lives on the *accounting* plane: it is the unit at
+which ownership is enforced, so a budget can't be silently spent twice. It is **not yet a branch**.
+The RC branch (resistor to a source, a node, a flux source) is emitted later, on the *physics*
+plane, by the owning module's `dynamics()`. "A module claims an `(element, channel)`" is a statement
+about accounting; "a module connects an element to a source" is the same module on the physics plane.
 
 | mechanism | source | budget | offered by |
 |---|---|---|---|
@@ -59,9 +75,12 @@ silent fit bug.
 
 ## 3. Module forms
 
-Every flux in `C·dT/dt = ΣQ` is a module: it declares **params**, required **signals** (channel
-sources), any **extra states** (temperature nodes with their own ODE), and how to **derive its
-prior** by spending the budgets it claims.
+A module is **one RC topology sub-part** — it connects an element to a source. It works on two
+planes (§2): on the **accounting** plane it *claims* the `(element, channel)` budget slots it owns;
+on the **physics** plane it *emits* the RC branch — declaring **params**, required **signals**
+(those of its sources that carry a timeseries), any **extra states** (temperature nodes with their
+own ODE), the flux into `T_room`, and how to **derive its prior** by spending the claimed budgets.
+Every flux in `C·dT/dt = ΣQ` is one such module.
 
 There are **four flux forms**. Named modules are configurations of these (the source fixes the
 name).
