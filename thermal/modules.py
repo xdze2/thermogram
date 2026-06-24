@@ -18,7 +18,7 @@ success criterion.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .api_models import ContributionOut
 from .channels import (
@@ -95,6 +95,67 @@ class PriorTerm:
     weight: float = 0.0
 
 
+# ---------------------------------------------------------------------------
+# Dynamics vocabulary — how a module contributes to the assembled ODE
+# ---------------------------------------------------------------------------
+#
+# The assembled system is a node graph:
+#
+#   C_i · dT_i/dt = Σ_j H_ij·(T_j − T_i)            (inter-node conduction)
+#                 + Σ   H_src·(T_src − T_i)         (conduction to a driving signal)
+#                 + Σ   Q_i(t)                       (prescribed flux into the node)
+#
+# Each module, given a sampled parameter dict, emits the pieces it owns. The assembler
+# (thermal/simulate.py) collects nodes + couplings into continuous A, B matrices.
+
+@dataclass(frozen=True)
+class Node:
+    """A temperature state with its own ODE. `key` is the state-vector identifier."""
+
+    key: str
+    capacitance: float  # C [J/K]
+
+
+@dataclass(frozen=True)
+class NodeCoupling:
+    """Conductance H between two internal nodes (symmetric)."""
+
+    a: str
+    b: str
+    H: float
+
+
+@dataclass(frozen=True)
+class SourceCoupling:
+    """Conductance H from a driving signal (e.g. T_ext, T_sa) into a node."""
+
+    node: str
+    signal: str
+    H: float
+
+
+@dataclass(frozen=True)
+class SourceFlux:
+    """Prescribed heat flux from a signal injected into a node (gain = multiplier)."""
+
+    node: str
+    signal: str
+    gain: float = 1.0
+
+
+@dataclass
+class Dynamics:
+    """What one module contributes to the assembled ODE for a given parameter sample."""
+
+    nodes: list[Node] = field(default_factory=list)
+    node_couplings: list[NodeCoupling] = field(default_factory=list)
+    source_couplings: list[SourceCoupling] = field(default_factory=list)
+    source_fluxes: list[SourceFlux] = field(default_factory=list)
+
+
+ROOM_NODE = "T_room"
+
+
 @dataclass
 class FluxModule:
     """Base flux module. A module claims `(element, channel)` cells and derives priors."""
@@ -105,6 +166,13 @@ class FluxModule:
 
     def derive_prior(self) -> list[PriorTerm]:
         raise NotImplementedError
+
+    def dynamics(self, params: dict) -> Dynamics:
+        """Contribution to the assembled ODE for a sampled `params` dict.
+
+        Default: a module with no dynamics (claims no node, injects no flux).
+        """
+        return Dynamics()
 
 
 def _ua_contribution(element) -> ContributionOut:
@@ -140,6 +208,10 @@ class RoomMass(FluxModule):
         )
         return [PriorTerm("C_room", mu, sigma, contrib, aggregation="scalar")]
 
+    def dynamics(self, params: dict) -> Dynamics:
+        # Owns the room air node; every other flux writes into it.
+        return Dynamics(nodes=[Node(ROOM_NODE, params["C_room"])])
+
 
 # ---------------------------------------------------------------------------
 # DirectLoss — Conductance@T_ext (windows + ventilation), → H_ve
@@ -166,6 +238,13 @@ class Ventilation(FluxModule):
         )
         return [PriorTerm("H_ve", mu, sigma, contrib)]
 
+    def dynamics(self, params: dict) -> Dynamics:
+        # Ventilation conductance carries the full H_ve (it already includes window
+        # conduction in the assembled prior, matching build_state_space's H_ve+H_win).
+        return Dynamics(source_couplings=[
+            SourceCoupling(ROOM_NODE, "T_ext", params["H_ve"]),
+        ])
+
 
 @dataclass
 class WindowLoss(FluxModule):
@@ -180,6 +259,10 @@ class WindowLoss(FluxModule):
     def derive_prior(self) -> list[PriorTerm]:
         c = _ua_contribution(self.element)
         return [PriorTerm("H_ve", c.value, c.sigma, c)]
+
+    # No dynamics() override: window conduction is already folded into the sampled
+    # H_ve total, which Ventilation carries as the single T_room↔T_ext coupling.
+    # Emitting another coupling here would double-count the window loss.
 
 
 # ---------------------------------------------------------------------------
@@ -196,12 +279,19 @@ class HeavyWall(FluxModule):
 
     element: object
     budgets: dict[Channel, Budget]
+    #: Mass-node key. Per-element by default; the assembler may set a shared key
+    #: ("T_wall") to aggregate all heavy walls into one 2R2C-style node.
+    node_key: str | None = None
 
     def claims(self) -> list[tuple[object, Channel]]:
         cells = [(self.element, CONDUCTION_EXT), (self.element, SOLAR_SOLAIR)]
         if STORAGE in self.budgets:
             cells.append((self.element, STORAGE))
         return cells
+
+    @property
+    def is_heavy(self) -> bool:
+        return STORAGE in self.budgets
 
     def derive_prior(self) -> list[PriorTerm]:
         terms: list[PriorTerm] = []
@@ -241,6 +331,25 @@ class HeavyWall(FluxModule):
 
         return terms
 
+    def dynamics(self, params: dict) -> Dynamics:
+        """Heavy wall → its own mass node between T_sa and T_room.
+
+        Reads this wall's share from `params`: `H_env` (sol-air conductance),
+        `H_int` (node→room conductance), `C_wall` (node capacitance). A light wall
+        (no STORAGE) has no mass node — its H_env conducts T_sa straight to T_room.
+        """
+        if not self.is_heavy:
+            return Dynamics(source_couplings=[
+                SourceCoupling(ROOM_NODE, "T_sa", params["H_env"]),
+            ])
+
+        node = self.node_key or f"T_wall_{self.element.uid}"
+        return Dynamics(
+            nodes=[Node(node, params["C_wall"])],
+            node_couplings=[NodeCoupling(node, ROOM_NODE, params["H_int"])],
+            source_couplings=[SourceCoupling(node, "T_sa", params["H_env"])],
+        )
+
 
 # ---------------------------------------------------------------------------
 # SolarGain — glazing-transmitted solar (no current 5-parameter prior)
@@ -257,3 +366,9 @@ class SolarGain(FluxModule):
 
     def derive_prior(self) -> list[PriorTerm]:
         return []
+
+    def dynamics(self, params: dict) -> Dynamics:
+        # Transmitted gain Q = SHGC·A·G injected into the room air. The signal
+        # `Q_room` is the pre-summed Σ SHGC·A·G (matching api.py's Q_sol_win), so the
+        # gain here is 1.0 — the per-window weighting is folded into the signal.
+        return Dynamics(source_fluxes=[SourceFlux(ROOM_NODE, "Q_room", 1.0)])

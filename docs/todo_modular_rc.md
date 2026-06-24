@@ -134,20 +134,34 @@ abstraction earned its keep.
 
 ## Stage 3 — Forward MC simulation over the engine  *(the payoff + dynamics check)*
 
-Sample priors → integrate (reuse `forward_sim`) → eyeball trajectories against intuition. This
-validates **dynamics**, which static priors don't, and is the first genuinely motivating thing
-to look at.
+Sample priors → integrate → check trajectories against intuition. Validates **dynamics**,
+which static priors don't.
 
-- [ ] `thermal/simulate.py` — `simulate(modules, priors, drivers, n_draws)` → ensemble of
-      T_room (and node) trajectories; scenario inputs for variable states (heating/occupancy/
-      window via `SourceFlux`)
-- [ ] Season-long drivers from existing Open-Meteo wiring; T_ground as prescribed scenario signal
-- [ ] `notebooks/` or script — plot the five buildings' ensembles with uncertainty envelope
-- [ ] `tests/test_simulate_sanity.py` — physical-ordering assertions (à la `inertie_nocturne`
-      console checks): caravan tracks T_ext fastest; passive most damped; cave near-flat at
-      ground temp; τ in plausible range; passive τ > caravan τ
+Built the **general module-graph integrator** (not the 2R2C-reuse shortcut): modules grow a
+`dynamics(params) -> Dynamics` method emitting nodes / inter-node couplings / source
+couplings / source fluxes; the assembler folds them into a continuous `dx/dt = Ax + Bu` of
+arbitrary state dimension. Node merging (same key → summed C/H) gives the per-element vs
+aggregated granularity choice (physics_model §4).
 
-**Verifiable:** sanity assertions pass; the plots match physical intuition per case.
+- [x] `thermal/modules.py` — `Node`/`NodeCoupling`/`SourceCoupling`/`SourceFlux`/`Dynamics`
+      vocabulary + `dynamics()` on `RoomMass`, `Ventilation`, `HeavyWall` (heavy → own mass
+      node; light → direct T_sa→room), `SolarGain` (Q_room flux). Window conduction is folded
+      into the H_ve coupling (no double-count).
+- [x] `thermal/simulate.py` — `assemble_system(room, params, aggregate)` builds (A, B) by
+      collecting module Dynamics, splitting sampled scalars across walls by U·A / mass share;
+      `integrate()` (ZOH); `simulate(... n_draws ...)` → T_room ensemble. `sample_params`
+      (Gaussian, clipped positive, seeded).
+- [x] `tests/test_simulate_sanity.py` (7 tests): **correctness anchor** — assembled (A, B)
+      equals `state_space.build_state_space` 2R2C exactly; node-merging (house 6 heavy nodes →
+      1 aggregated; caravan → room-only); **physical ordering** — caravan tracks T_ext fastest,
+      passive most damped (largest dominant τ), τ in 1 h–30 d range.
+- [ ] Season-long drivers from Open-Meteo wiring; T_ground scenario signal — **deferred** (the
+      describable cases need no T_ground; lands with the ground physics).
+- [ ] Visualization (notebook/script ensemble plots) — **deferred** (chose tests-only;
+      `simulate()` returns the ensemble ready to plot when wanted).
+
+**Verifiable:** ✓ sanity assertions pass; assembled system proven identical to the known-good
+2R2C engine (replaces the eyeball check). Full suite green (59 tests).
 
 ---
 
