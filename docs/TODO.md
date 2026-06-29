@@ -3,11 +3,14 @@
 **Audience: a fresh model session with no prior context.** This file is self-contained
 enough to start work, but you **must** read these first:
 
-1. `docs/app_proposal.md` — the full design. Non-negotiable concepts: star topology, the
-   (element, channel) ownership model, the four flux forms, the band rule, log-normal priors.
+0. `docs/specs/00_overview.md` — the authoritative target-state spec set and reading order.
+   Start here; the specs are what code is checked against.
+1. `docs/background/app_proposal.md` — the full design rationale. Non-negotiable concepts:
+   star topology, the (element, channel) ownership model, the four flux forms, the band rule,
+   log-normal priors.
 2. `docs/roadmap.md` — the sequencing and *why* (validate the engine with synthetic twin
    experiments before building any UI).
-3. `docs/biblio/reading_note_bacher_madsen_2011.md` — the fit method (Kalman
+3. `docs/background/reading_note_bacher_madsen_2011.md` — the fit method (Kalman
    prediction-error likelihood, not least-squares).
 
 **Golden rules**
@@ -98,7 +101,7 @@ Each exposes `flux_room(params, signals, states) -> float` and (if stateful)
   star-topology factoring; do not make solar a node-attaching module.
 
 ### 0.6 — Modules (`modules.py`)
-Implement the **canonical catalogue** from `app_proposal.md` (§Module catalogue). Minimum for
+Implement the **canonical catalogue** from `background/app_proposal.md` (§Module catalogue). Minimum for
 Step 0: `RoomMass`, `DirectLoss`, `SolarGain`, `HeavyWall`. Each module:
 - declares `params`, `signals` (boundary only), `private_states`, `owns: list[Channel]`;
 - `derive_priors(cells) -> {param: (mu_log, sigma_log)}` by **spending** claimed budgets
@@ -437,7 +440,7 @@ These three are the only engine changes 4a needs. Each is independently testable
 
 ### 4a.1 — The frozen API contract (write this doc FIRST, before B or F code)
 
-Produce `docs/api_contract.md` (or an OpenAPI/JSON-schema file) — the single source of truth both
+Produce `docs/specs/30_api.md` (or an OpenAPI/JSON-schema file) — the single source of truth both
 tracks code against. It must specify request/response JSON for every endpoint below. **Freeze it
 before parallel work starts.** Endpoints:
 

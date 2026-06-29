@@ -1,7 +1,16 @@
-# thnodes Step 4a — Frozen API Contract
+# 30 — API Contract (FastAPI ↔ Svelte)
 
-**Status: FROZEN.** Track B (FastAPI) and Track F (Svelte) code against this.
-Any change must be made here first; both sides then adapt together.
+**Status: FROZEN.** Track B (FastAPI) and Track F (Svelte) code against this. Any change
+must be made **here first**; both sides then adapt together. This is the single source of
+truth for endpoint shapes — it sits *under* the specs umbrella (see
+[`00_overview.md`](00_overview.md)) but its freeze discipline is unchanged from when it
+lived at `docs/api_contract.md`.
+
+> **Note for the state spec.** Line item: *"After any mutation the frontend re-fetches to
+> refresh all derived views."* The *mechanism* for that (the store-owned `applyMutation`
+> invariant, re-pulling **both** `/document` and `/assembly`) is specified in
+> [`10_state.md`](10_state.md). This contract defines the endpoints; `10_state.md` defines
+> how the frontend must call them.
 
 ---
 
@@ -11,7 +20,7 @@ Any change must be made here first; both sides then adapt together.
 - A single model `"default"` is auto-created at server startup. No save/load/list in 4a.
 - No `study_id` anywhere. Leaf endpoints (`/simulate`, `/identifiability`) receive their data in the request body.
 - IDs are server-assigned opaque strings (e.g. `"e1"`, `"m0"`).
-- Mutations return the affected resource. After any mutation the frontend re-fetches `/assembly` to refresh all derived views.
+- Mutations return the affected resource. After any mutation the frontend re-fetches `/document` **and** `/assembly` to refresh all derived views (see [`10_state.md`](10_state.md)).
 - `GET /assembly` **never** returns HTTP 500 on a structurally incomplete room — it always returns partial data + `problems[]`.
 
 ---
@@ -55,6 +64,10 @@ Any change must be made here first; both sides then adapt together.
   "fields": [<FieldSchema>, …]
 }
 ```
+
+> **`owns` is the channel-compatibility source for the routing UI.** It is already part of
+> this payload. The frontend routing controls must filter on it (`m.owns ∩ element channels`,
+> see [`20_layout.md`](20_layout.md)). No backend change is needed for that fix.
 
 ### `Element` (resource)
 ```json

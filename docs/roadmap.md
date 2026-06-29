@@ -1,6 +1,7 @@
 # thnodes Roadmap
 
-Sequencing for building and validating the engine described in `app_proposal.md`.
+Sequencing for building and validating the engine described in `background/app_proposal.md`
+(rationale) and specified in `specs/` (target behavior).
 
 ## Guiding principle
 

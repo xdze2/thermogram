@@ -1,7 +1,7 @@
 # Reading Note — Bacher & Madsen (2011)
 
 **Identifying suitable models for the heat dynamics of buildings.** Energy and
-Buildings 43(11):1511–1522. DTU (Lyngby). PDF: `docs/biblio/Journal_article_-_2011_-_...pdf`
+Buildings 43(11):1511–1522. DTU (Lyngby). PDF: `../biblio/Journal_article_-_2011_-_...pdf`
 
 This is the nearest-neighbour paper to our fit layer (phase 2). North star for
 *method*, but with one structural mismatch we must design around (see "What

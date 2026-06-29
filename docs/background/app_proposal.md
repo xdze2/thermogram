@@ -14,7 +14,7 @@ The app has two layers:
   material stack, orientation), windows, floor slab, partitions, indoor mass, heat
   source, …
 - **Topology layer** — a minimal RC-equivalent model, assembled from **Modules**,
-  inspired by [Bacher & Madsen (2011)](docs/biblio/Journal_article_-_2011_-_Identifying_suitable_models_for_the_heat_dynamics_of_buildings.pdf).
+  inspired by [Bacher & Madsen (2011)](../biblio/Journal_article_-_2011_-_Identifying_suitable_models_for_the_heat_dynamics_of_buildings.pdf).
   *Minimal* is not an aesthetic preference: the model must be only as complex as the
   data can identify (see §Identifiability).
 
