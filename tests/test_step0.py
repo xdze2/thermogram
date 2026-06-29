@@ -144,6 +144,24 @@ def test_caravan_step_response():
     assert np.all(np.diff(T_room) >= -0.01), "Step response should be monotone"
 
 
+def test_caravan_solar_pulse():
+    """T_room should rise during a daytime G_sol pulse and relax after."""
+    sys = _build_caravan()
+    params = _prior_mean_params(sys)
+
+    # Flat T_ext (no conduction gradient), solar pulse from hour 8 to 18
+    T_flat = np.full(N_HOURS + 2, 15.0)
+    G_sol = np.zeros(N_HOURS + 2)
+    G_sol[8:19] = 400.0  # W/m², boxcar pulse hours 8–18
+
+    x0 = np.array([15.0])
+    t, x = forward_sim(sys, {"T_ext": T_flat, "G_sol": G_sol}, (0, N_HOURS * DT), x0, params, dt=DT)
+    T_room = x[0]
+
+    assert T_room[18] > T_room[0] + 0.5, "T_room should rise during solar pulse"
+    assert T_room[-1] < T_room[18], "T_room should relax after solar pulse ends"
+
+
 def test_heavy_lags_caravan():
     """
     Heavy model T_room should lag the caravan (slower rise) under the same T_ext step.

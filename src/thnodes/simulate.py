@@ -50,11 +50,11 @@ def forward_sim(
         sig_t: dict[str, float] = {
             name: _interpolate(arr, t) for name, arr in signals.items()
         }
-        # Build sol-air signal for HeavyWall if needed
         if "_T_sol_air" not in sig_t and "T_ext" in sig_t:
-            # Approximate: use T_ext as sol-air when alphaA/UA unknown at sim level
-            # Modules that need a richer T_sol_air should supply it in signals directly.
-            sig_t["_T_sol_air"] = sig_t.get("T_ext", 0.0)
+            # DEFERRED (Step 0): heavy-wall sol-air uses T_ext only; SOLAR_OPAQUE budget is
+            # owned by HeavyWall but not yet active in the dynamics.
+            # Finish with pvlib POA: T_sa = T_ext + alpha * G_poa / h_se.
+            sig_t["_T_sol_air"] = sig_t["T_ext"]
         return system.rhs(t, x, sig_t, params)
 
     sol = solve_ivp(rhs, t_span, x0, method="RK45", t_eval=t_eval, max_step=dt)

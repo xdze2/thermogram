@@ -49,10 +49,13 @@ class OuterWall(EnvelopeElement):
         )
         budgets: dict[Channel, Budget] = {
             Channel.CONDUCTION: Budget(UA=U * self.area),
-            Channel.SOLAR_OPAQUE: Budget(alphaA=self.alpha * self.area),
         }
         if C_heavy > 0:
+            # SOLAR_OPAQUE only offered by heavy walls (consumed by HeavyWall module).
+            # DEFERRED: light-wall sol-air (DirectLoss should shift T_ext → T_sa via
+            # solar_boundary); skip for now to keep the happy path warning-free.
             budgets[Channel.STORAGE] = Budget(C=C_heavy)
+            budgets[Channel.SOLAR_OPAQUE] = Budget(alphaA=self.alpha * self.area)
         return budgets
 
 
