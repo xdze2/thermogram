@@ -10,15 +10,28 @@
  *
  * Exports `roomDoc` (not `document`) to avoid shadowing the browser global.
  *
- * In development (import.meta.env.DEV), loadFixtures() is called automatically
- * so the UI works without a running backend.
+ * THE ONE RULE: All writes go through applyMutation(). Components never call
+ * .set() on assembly or roomDoc directly. The store is the single source of truth.
+ *
+ * Fixture / mock-backend support lives entirely in src/lib/mockServer.js and
+ * src/main.js (enabled by VITE_USE_FIXTURES=true). This file is unaware of it.
  */
 
 import { writable, derived } from 'svelte/store';
-import { fetchAssembly, fetchDocument, fetchRegistry } from '../lib/api.js';
+import {
+  fetchAssembly,
+  fetchDocument,
+  fetchRegistry,
+  createElement,
+  updateElement,
+  deleteElement,
+  createModule,
+  deleteModule,
+  setModuleRouting,
+} from '../lib/api.js';
 
 // ---------------------------------------------------------------------------
-// Core writable stores
+// Core writable stores (private write surface — .set() only called here)
 // ---------------------------------------------------------------------------
 
 export const assembly = writable(null);
@@ -28,7 +41,7 @@ export const error    = writable(null);
 export const loading  = writable(false);
 
 // ---------------------------------------------------------------------------
-// Derived: flat element / module lists
+// Derived: flat element / module lists and problem list
 // ---------------------------------------------------------------------------
 
 export const elements = derived(roomDoc, ($doc) => $doc?.elements ?? []);
@@ -53,9 +66,42 @@ async function withLoading(fn) {
 }
 
 // ---------------------------------------------------------------------------
-// Data-fetching actions
+// Single mutation path
+//
+// Every write goes here. After any successful mutation, BOTH roomDoc and
+// assembly are re-pulled so all derived views are consistent. On failure,
+// neither store is touched — the cache stays at the last good server state.
 // ---------------------------------------------------------------------------
 
+async function applyMutation(apiCall) {
+  return withLoading(async () => {
+    const result = await apiCall();          // POST / PATCH / DELETE / PUT
+    const [doc, asm] = await Promise.all([   // the invariant, in one place
+      fetchDocument(),
+      fetchAssembly(),
+    ]);
+    roomDoc.set(doc);
+    assembly.set(asm);
+    return result;                           // affected resource, for the caller
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Public, component-facing mutation actions (thin wrappers over applyMutation)
+// ---------------------------------------------------------------------------
+
+export const addElement    = (type, fields) => applyMutation(() => createElement(type, fields));
+export const editElement   = (eid, fields)  => applyMutation(() => updateElement(eid, fields));
+export const removeElement = (eid)          => applyMutation(() => deleteElement(eid));
+export const addModule     = (type, fields) => applyMutation(() => createModule(type, fields));
+export const removeModule  = (mid)          => applyMutation(() => deleteModule(mid));
+export const routeModule   = (mid, eids)    => applyMutation(() => setModuleRouting(mid, eids));
+
+// ---------------------------------------------------------------------------
+// Read actions (non-mutating)
+// ---------------------------------------------------------------------------
+
+/** Pull all three reads in parallel. Called once on app start from main.js. */
 export async function refreshAll() {
   await withLoading(async () => {
     const [asm, doc, reg] = await Promise.all([
@@ -67,62 +113,4 @@ export async function refreshAll() {
     roomDoc.set(doc);
     registry.set(reg);
   });
-}
-
-export async function refreshAssembly() {
-  await withLoading(async () => {
-    const asm = await fetchAssembly();
-    assembly.set(asm);
-  });
-}
-
-export async function refreshDocument() {
-  await withLoading(async () => {
-    const doc = await fetchDocument();
-    roomDoc.set(doc);
-  });
-}
-
-export async function fetchAssemblyStore() {
-  return refreshAssembly();
-}
-
-export async function fetchRegistryStore() {
-  await withLoading(async () => {
-    const reg = await fetchRegistry();
-    registry.set(reg);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Fixture loader (development mode — no backend required)
-// ---------------------------------------------------------------------------
-
-export async function loadFixtures() {
-  loading.set(true);
-  error.set(null);
-  try {
-    const [asm, doc, reg] = await Promise.all([
-      import('../fixtures/assembly.json'),
-      import('../fixtures/document.json'),
-      import('../fixtures/registry.json'),
-    ]);
-    assembly.set(asm.default);
-    roomDoc.set(doc.default);
-    registry.set(reg.default);
-  } catch (err) {
-    error.set(err.message ?? String(err));
-  } finally {
-    loading.set(false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Auto-init: use fixtures in dev, real API in production
-// ---------------------------------------------------------------------------
-
-if (import.meta.env.DEV) {
-  loadFixtures();
-} else {
-  refreshAll();
 }

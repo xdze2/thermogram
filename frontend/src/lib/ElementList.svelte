@@ -1,13 +1,8 @@
 <script>
   import {
     elements, assembly, registry, loading, error,
-    assembly as assemblyStore, roomDoc as documentStore,
+    addElement, editElement, removeElement,
   } from '../stores/model.js';
-  import {
-    createElement, updateElement, deleteElement,
-    fetchAssembly as apiFetchAssembly,
-    fetchDocument as apiFetchDocument,
-  } from '../lib/api.js';
 
   // ---------------------------------------------------------------------------
   // Modal state
@@ -127,18 +122,11 @@
       const parsedFields = parseFields(currentTypeDef, formFields);
 
       if (modalMode === 'add') {
-        await createElement(selectedType, parsedFields);
+        await addElement(selectedType, parsedFields);
       } else {
-        await updateElement(editingElement.id, parsedFields);
+        await editElement(editingElement.id, parsedFields);
       }
-
-      // Re-fetch both document and assembly
-      const [asm, doc] = await Promise.all([
-        apiFetchAssembly(),
-        apiFetchDocument(),
-      ]);
-      assemblyStore.set(asm);
-      documentStore.set(doc);
+      // Stores are guaranteed fresh after the await (applyMutation invariant).
       closeModal();
     } catch (err) {
       formError = err.message ?? String(err);
@@ -181,13 +169,8 @@
   async function handleDelete(eid) {
     if (!confirm('Delete this element?')) return;
     try {
-      await deleteElement(eid);
-      const [asm, doc] = await Promise.all([
-        apiFetchAssembly(),
-        apiFetchDocument(),
-      ]);
-      assemblyStore.set(asm);
-      documentStore.set(doc);
+      await removeElement(eid);
+      // Stores are guaranteed fresh after the await (applyMutation invariant).
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
     }

@@ -86,20 +86,6 @@
     }
   }
 
-  /** Load fixture simulate response in dev without a backend. */
-  async function loadSimFixture() {
-    simLoading = true;
-    simError   = '';
-    try {
-      const { default: fixture } = await import('../fixtures/simulate.json', { with: { type: 'json' } });
-      simResult = fixture;
-    } catch (err) {
-      simError = err.message ?? String(err);
-    } finally {
-      simLoading = false;
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Hand-rolled SVG line chart
   // ---------------------------------------------------------------------------
@@ -397,15 +383,6 @@
         {/if}
         Run simulation
       </button>
-      {#if import.meta.env.DEV}
-        <button
-          class="btn btn-outline btn-sm"
-          onclick={loadSimFixture}
-          disabled={simLoading}
-        >
-          Load fixture (dev)
-        </button>
-      {/if}
     </div>
 
     {#if simError}

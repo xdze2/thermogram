@@ -1,12 +1,6 @@
 <script>
-  import { assembly, roomDoc as documentStore, registry, loading, error } from '../stores/model.js';
-  // assemblyStore and docStore alias the same writables — used for .set() after mutations
-  import { assembly as assemblyStore, roomDoc as docStore } from '../stores/model.js';
-  import {
-    createModule, deleteModule, setModuleRouting,
-    fetchAssembly as apiFetchAssembly,
-    fetchDocument as apiFetchDocument,
-  } from '../lib/api.js';
+  import { assembly, roomDoc, registry, loading, error,
+           addModule, removeModule, routeModule } from '../stores/model.js';
   import TopologySvg from './TopologySvg.svelte';
 
   // ---------------------------------------------------------------------------
@@ -19,8 +13,8 @@
   // ---------------------------------------------------------------------------
   $: ownershipMap = buildOwnershipMap($assembly?.ownership ?? []);
   $: problemSet   = buildProblemSet($assembly?.problems ?? []);
-  $: elements     = $documentStore?.elements ?? [];
-  $: mods         = $documentStore?.modules ?? [];
+  $: elements     = $roomDoc?.elements ?? [];
+  $: mods         = $roomDoc?.modules ?? [];
 
   function buildOwnershipMap(ownership) {
     const map = {};
@@ -39,14 +33,55 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Module lookup
+  // Module lookup + registry owns map
   // ---------------------------------------------------------------------------
   $: moduleById = Object.fromEntries(mods.map(m => [m.id, m]));
+
+  /** Map from type_name -> owns[] from the registry. */
+  $: moduleOwns = buildModuleOwns($registry);
+
+  function buildModuleOwns(reg) {
+    const map = {};
+    for (const mt of reg?.module_types ?? []) {
+      map[mt.type_name] = mt.owns ?? [];
+    }
+    return map;
+  }
 
   function moduleName(mid) {
     if (!mid) return '';
     const m = moduleById[mid];
     return m ? m.type : mid;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Routing compatibility helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the set of channels that element `elem` actually offers a budget for.
+   * A channel is "offered" when its budget object has at least one non-null field.
+   */
+  function offeredChannels(elem) {
+    const offered = new Set();
+    for (const [ch, bvals] of Object.entries(elem.budgets ?? {})) {
+      if (bvals && Object.values(bvals).some(v => v !== null)) {
+        offered.add(ch);
+      }
+    }
+    return offered;
+  }
+
+  /**
+   * Returns true when module `mod` can own at least one channel that `elem`
+   * actually offers a budget for — i.e. m.owns ∩ elem.offeredChannels ≠ ∅.
+   * RoomMass has owns=[] so this always returns false for it.
+   */
+  function moduleCanRouteElement(mod, elem) {
+    const owns = moduleOwns[mod.type] ?? [];
+    if (owns.length === 0) return false;
+    const offered = offeredChannels(elem);
+    return owns.some(ch => offered.has(ch));
   }
 
   // ---------------------------------------------------------------------------
@@ -85,8 +120,8 @@
       for (const [k, v] of Object.entries(addModuleFields)) {
         fields[k] = parseFloat(v) || 0;
       }
-      await createModule(addModuleType, fields);
-      await refreshDerived();
+      await addModule(addModuleType, fields);
+      // Stores are guaranteed fresh after the await (applyMutation invariant).
     } catch (err) {
       addModuleError = err.message ?? String(err);
     } finally {
@@ -100,8 +135,8 @@
   async function handleDeleteModule(mid) {
     if (!confirm(`Delete module ${moduleName(mid)}?`)) return;
     try {
-      await deleteModule(mid);
-      await refreshDerived();
+      await removeModule(mid);
+      // Stores are guaranteed fresh after the await (applyMutation invariant).
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
     }
@@ -118,20 +153,11 @@
       current.delete(eid);
     }
     try {
-      await setModuleRouting(mod.id, [...current]);
-      await refreshDerived();
+      await routeModule(mod.id, [...current]);
+      // Stores are guaranteed fresh after the await (applyMutation invariant).
     } catch (err) {
       alert(`Routing update failed: ${err.message}`);
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Refresh after mutations
-  // ---------------------------------------------------------------------------
-  async function refreshDerived() {
-    const [asm, doc] = await Promise.all([apiFetchAssembly(), apiFetchDocument()]);
-    assemblyStore.set(asm);
-    docStore.set(doc);
   }
 
   // ---------------------------------------------------------------------------
@@ -150,6 +176,11 @@
     if (!mid) return '—';
     return moduleName(mid);
   }
+
+  // ---------------------------------------------------------------------------
+  // Ownership-check collapse: auto-open when problems exist
+  // ---------------------------------------------------------------------------
+  $: hasProblems = ($assembly?.problems?.length ?? 0) > 0;
 </script>
 
 <div class="p-4 space-y-6">
@@ -178,54 +209,6 @@
   {:else}
 
     <!-- ====================================================================
-         Routing matrix
-    ===================================================================== -->
-    <section>
-      <h2 class="text-xl font-semibold mb-3">Routing matrix (element × channel)</h2>
-      <p class="text-sm text-base-content/60 mb-3">
-        Each cell shows which module owns that (element, channel) combination.
-        Red cells indicate a problem (double-count or unclaimed channel).
-      </p>
-
-      {#if elements.length === 0}
-        <p class="text-base-content/60">No elements — add elements first.</p>
-      {:else}
-        <div class="overflow-x-auto">
-          <table class="table table-sm table-bordered w-full">
-            <thead>
-              <tr>
-                <th class="bg-base-200">Element</th>
-                {#each CHANNELS as ch}
-                  <th class="bg-base-200 text-xs">{ch}</th>
-                {/each}
-              </tr>
-            </thead>
-            <tbody>
-              {#each elements as elem}
-                <tr>
-                  <td class="font-medium text-sm">{elem.label}</td>
-                  {#each CHANNELS as ch}
-                    {@const hasBudget = elem.budgets?.[ch] && Object.values(elem.budgets[ch]).some(v => v !== null)}
-                    <td class="text-xs text-center {hasBudget ? cellClass(elem.label, ch) : 'text-base-content/20'}">
-                      {#if hasBudget}
-                        {cellContent(elem.label, ch)}
-                        {#if problemSet.has(`${elem.label}::${ch}`)}
-                          <span class="badge badge-error badge-xs ml-1">!</span>
-                        {/if}
-                      {:else}
-                        ·
-                      {/if}
-                    </td>
-                  {/each}
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </section>
-
-    <!-- ====================================================================
          Star topology graph
     ===================================================================== -->
     <section>
@@ -244,6 +227,9 @@
       {:else}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           {#each mods as mod}
+            {@const owns = moduleOwns[mod.type] ?? []}
+            {@const isRoomMass = owns.length === 0}
+            {@const routableElements = elements.filter(e => moduleCanRouteElement(mod, e))}
             <div class="card card-border bg-base-100 shadow-sm">
               <div class="card-body p-4">
                 <div class="flex items-start justify-between">
@@ -260,12 +246,18 @@
                   </button>
                 </div>
 
-                <!-- Element routing checkboxes -->
-                {#if elements.length}
+                {#if isRoomMass}
+                  <!-- RoomMass owns nothing — show its fields, no element checkboxes -->
+                  <div class="mt-2 text-xs text-base-content/60">
+                    Owns no channels — no element routing.
+                  </div>
+                {:else if routableElements.length > 0}
+                  <!-- Element routing checkboxes — only for elements whose offered
+                       channels overlap with this module's owns set -->
                   <div class="mt-3">
                     <div class="text-xs font-medium mb-1">Routed elements</div>
                     <div class="flex flex-col gap-1">
-                      {#each elements as elem}
+                      {#each routableElements as elem}
                         <label class="flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
@@ -277,6 +269,10 @@
                         </label>
                       {/each}
                     </div>
+                  </div>
+                {:else}
+                  <div class="mt-2 text-xs text-base-content/40">
+                    No compatible elements (needs channels: {owns.join(', ')}).
                   </div>
                 {/if}
               </div>
@@ -340,6 +336,77 @@
           {#if addModuleError}
             <div role="alert" class="alert alert-error mt-2 text-sm">
               <span>{addModuleError}</span>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         Ownership check — collapsible diagnostic matrix
+         Collapsed by default; auto-expands when assembly problems exist.
+    ===================================================================== -->
+    <section>
+      <!-- DaisyUI collapse with checkbox trick for programmatic open/close.
+           When hasProblems is true we force the checkbox checked to expand it. -->
+      <div class="collapse collapse-arrow border border-base-300 rounded-lg bg-base-100">
+        <input
+          type="checkbox"
+          class="peer"
+          id="ownership-check-toggle"
+          checked={hasProblems}
+          aria-label="Toggle ownership check panel"
+        />
+        <label
+          for="ownership-check-toggle"
+          class="collapse-title font-semibold text-sm cursor-pointer select-none peer-checked:text-base-content"
+        >
+          Ownership check
+          {#if hasProblems}
+            <span class="badge badge-error badge-xs ml-2 align-middle">{$assembly.problems.length}</span>
+          {/if}
+        </label>
+
+        <div class="collapse-content">
+          <p class="text-xs text-base-content/60 mb-3 mt-1">
+            Each cell shows which module owns that (element, channel) combination.
+            Red cells indicate a problem (double-count or unclaimed channel).
+          </p>
+
+          {#if elements.length === 0}
+            <p class="text-base-content/60 text-sm">No elements — add elements first.</p>
+          {:else}
+            <div class="overflow-x-auto">
+              <table class="table table-sm table-bordered w-full">
+                <thead>
+                  <tr>
+                    <th class="bg-base-200">Element</th>
+                    {#each CHANNELS as ch}
+                      <th class="bg-base-200 text-xs">{ch}</th>
+                    {/each}
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each elements as elem}
+                    <tr>
+                      <td class="font-medium text-sm">{elem.label}</td>
+                      {#each CHANNELS as ch}
+                        {@const hasBudget = elem.budgets?.[ch] && Object.values(elem.budgets[ch]).some(v => v !== null)}
+                        <td class="text-xs text-center {hasBudget ? cellClass(elem.label, ch) : 'text-base-content/20'}">
+                          {#if hasBudget}
+                            {cellContent(elem.label, ch)}
+                            {#if problemSet.has(`${elem.label}::${ch}`)}
+                              <span class="badge badge-error badge-xs ml-1">!</span>
+                            {/if}
+                          {:else}
+                            ·
+                          {/if}
+                        </td>
+                      {/each}
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             </div>
           {/if}
         </div>
