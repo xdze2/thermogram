@@ -1,4 +1,4 @@
-# thnodes
+# thnodes `v0.3` *(third prototype)*
 
 Single-room dynamic thermal building simulation + parameter identification.
 
