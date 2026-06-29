@@ -1,5 +1,6 @@
 from .assembler import Assembler, System
 from .channels import Budget, Channel
+from .draw import elements_table, topology_svg
 from .elements import Floor, HeatSource, IndoorMass, Layer, OuterWall, Partition, Window
 from .identifiability import (
     BandExcitation,
@@ -21,6 +22,8 @@ __all__ = [
     "System",
     "Budget",
     "Channel",
+    "elements_table",
+    "topology_svg",
     "Floor",
     "HeatSource",
     "IndoorMass",

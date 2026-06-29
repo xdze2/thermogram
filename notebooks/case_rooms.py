@@ -34,8 +34,10 @@ from thnodes import (
     RoomMass,
     SolarGainModule,
     Window,
+    elements_table,
     forward_sim,
     identifiability_report,
+    topology_svg,
 )
 from thnodes.identifiability import bands_from_system, band_overlap
 
@@ -76,6 +78,16 @@ def ground_signals(n: int, T_ground: float) -> dict:
 
 
 # ── rendering helpers ──────────────────────────────────────────────────────────
+
+def render_elements(elements):
+    """Pre-assembly view: each element the user described, with computed budgets."""
+    st.dataframe(elements_table(elements), width="stretch")
+
+
+def render_topology(sys_):
+    """Post-assembly view: the RC ladder schematic (schemdraw → SVG)."""
+    st.image(topology_svg(sys_))
+
 
 def render_ownership_table(sys_):
     """Render the (element × channel) → module routing table."""
@@ -165,7 +177,7 @@ def build_caravan():
     asm.add_module(RoomMass(floor_area=15.0))
     asm.add_module(DirectLoss(), elements=[wall, win])
     asm.add_module(SolarGainModule(), elements=[win])
-    return asm.build()
+    return asm.build(), [wall, win]
 
 
 def build_heavy():
@@ -179,7 +191,7 @@ def build_heavy():
     asm.add_module(DirectLoss(), elements=[win])
     asm.add_module(HeavyWall(), elements=[wall])
     asm.add_module(SolarGainModule(), elements=[win])
-    return asm.build()
+    return asm.build(), [wall, win]
 
 
 # ── tab renderers ──────────────────────────────────────────────────────────────
@@ -191,7 +203,13 @@ def tab_caravan():
         "Fast time constant, identifiable under any diurnal excitation."
     )
 
-    sys_ = build_caravan()
+    sys_, elements = build_caravan()
+
+    st.subheader("Elements")
+    render_elements(elements)
+
+    st.subheader("Topology schematic")
+    render_topology(sys_)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -222,7 +240,13 @@ def tab_heavy():
         "T_wall (slow) + T_room (fast). Independent diurnal signals → both bands identifiable."
     )
 
-    sys_ = build_heavy()
+    sys_, elements = build_heavy()
+
+    st.subheader("Elements")
+    render_elements(elements)
+
+    st.subheader("Topology schematic")
+    render_topology(sys_)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -254,7 +278,13 @@ def tab_collinear():
         "or prior_dominated — the same ridge Step 2's posterior will show."
     )
 
-    sys_ = build_heavy()
+    sys_, elements = build_heavy()
+
+    st.subheader("Elements")
+    render_elements(elements)
+
+    st.subheader("Topology schematic")
+    render_topology(sys_)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -302,6 +332,12 @@ def tab_cellar():
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Unclaimed channel.*SOLAR_TRANSMISSION")
         sys_ = asm.build()
+
+    st.subheader("Elements")
+    render_elements([win])
+
+    st.subheader("Topology schematic")
+    render_topology(sys_)
 
     col1, col2 = st.columns(2)
     with col1:
