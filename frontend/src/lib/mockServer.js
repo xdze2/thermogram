@@ -11,9 +11,15 @@
  *     UI stores will refresh but show the pre-mutation fixture state.
  *     This is intentional — the mock is for UI layout / loading-state work,
  *     not for testing mutation logic (use the real backend for that).
+ *   - Model-management stubs (GET /api/models, POST /api/models, etc.) return
+ *     a static list. Creates and deletes succeed but do NOT change the list on
+ *     the next GET — same stateless limitation as element/module stubs above.
  *   - /simulate is served from a fixture too, so the ParameterTable scenario
  *     toy runs through the SAME runSimulate() path in mock and live modes.
  *     /identifiability and /topology.svg fall through to the real fetch.
+ *   - Model-scoped GET handlers match on the URL SUFFIX (/document, /assembly,
+ *     /registry) rather than the literal uid 'default', so they work for any
+ *     uid the router might open (including ones created via the home page stubs).
  */
 
 // Lazy-load fixtures. Vite resolves these as static JSON imports.
@@ -40,11 +46,57 @@ export async function installMockServer() {
   const fixtures = await loadFixtureMap();
   const realFetch = window.fetch.bind(window);
 
+  // Static fixture data for the model-list home page.
+  const MOCK_MODELS = [
+    { uid: 'default', name: 'Default' },
+    { uid: 'example-light', name: 'Light office (example copy)' },
+  ];
+  const MOCK_EXAMPLES = [
+    { key: 'light_office', name: 'Light office' },
+    { key: 'heavy_apartment', name: 'Heavy apartment' },
+  ];
+
   window.fetch = async function mockFetch(input, init) {
     const url = typeof input === 'string' ? input : input.url;
     const method = (init?.method ?? 'GET').toUpperCase();
 
-    // --- GETs: serve fixture JSON ---
+    // -----------------------------------------------------------------------
+    // Model-management endpoints  (/api/models[/...])
+    // These come BEFORE the model-scoped suffix checks so the more-specific
+    // paths are matched first.
+    // -----------------------------------------------------------------------
+
+    // GET /api/models/examples
+    if (method === 'GET' && url.endsWith('/api/models/examples')) {
+      return jsonResponse(MOCK_EXAMPLES);
+    }
+    // GET /api/models  (list — must not match /api/models/examples above)
+    if (method === 'GET' && url.match(/\/api\/models\/?$/)) {
+      return jsonResponse(MOCK_MODELS);
+    }
+    // POST /api/models/from_example
+    if (method === 'POST' && url.includes('/api/models/from_example')) {
+      return jsonResponse({ uid: 'example-light', name: 'Example copy' }, 201);
+    }
+    // POST /api/models  (create blank)
+    if (method === 'POST' && url.match(/\/api\/models\/?$/)) {
+      return jsonResponse({ uid: 'default', name: 'New model' }, 201);
+    }
+    // PATCH /api/models/{uid}  (rename)
+    if (method === 'PATCH' && url.match(/\/api\/models\/[^/]+\/?$/)) {
+      const name = (() => { try { return JSON.parse(init?.body ?? '{}').name; } catch { return 'Renamed'; } })();
+      const uid = url.split('/').pop();
+      return jsonResponse({ uid, name });
+    }
+    // DELETE /api/models/{uid}  (must match before the element/module DELETE checks)
+    if (method === 'DELETE' && url.match(/\/api\/models\/[^/]+\/?$/) &&
+        !url.includes('/elements/') && !url.includes('/modules/')) {
+      return emptyResponse(204);
+    }
+
+    // -----------------------------------------------------------------------
+    // GETs: serve fixture JSON (match on suffix so any uid works)
+    // -----------------------------------------------------------------------
     if (method === 'GET') {
       if (url.includes('/registry')) {
         return jsonResponse(fixtures.registry);
@@ -58,7 +110,9 @@ export async function installMockServer() {
       // topology.svg — fall through to real fetch (or 404 gracefully)
     }
 
-    // --- Mutations: acknowledge without mutating fixture state ---
+    // -----------------------------------------------------------------------
+    // Mutations: acknowledge without mutating fixture state
+    // -----------------------------------------------------------------------
     // POST elements → return first fixture element as a plausible stub
     if (method === 'POST' && url.includes('/elements')) {
       return jsonResponse(fixtures.document.elements[0] ?? {}, 201);
