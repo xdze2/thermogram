@@ -128,6 +128,48 @@ Return a `System` object exposing `rhs(t, x, signals, params)`, plus `state_name
   produce monotone, settling `T_room`; the heavy model lags the caravan (visible thermal
   inertia). Eyeball-sane is the bar here.
 
+### 🔧 Step 0 — closeout (DEFERRED — pick this up next)
+
+Step 0's spine is done: both reference topologies assemble, the double-count guard raises,
+`forward_sim` runs, the heavy model lags the caravan, 8 tests green. **But four loose ends stand
+between "tests pass" and "Step 0 honestly closed." Do these before starting Step 1.**
+
+1. **Add a solar-pulse test (the untested half of the step-response criterion).**
+   Current tests only exercise the `T_ext` step with `G_sol = 0` everywhere — so the
+   `SolarGainModule` path (reads `G_sol` → flux into `T_room`) is *assembled but never fired*.
+   Add a test: flat `T_ext` (no conduction gradient), a daytime `G_sol` bump (e.g. a half-period
+   sinusoid or boxcar over hours 8–18), assert `T_room` rises during the pulse and relaxes after.
+   This is the one path that could be silently broken; it must be exercised.
+
+2. **Resolve `SOLAR_OPAQUE`-on-light-walls (a warning fires on the caravan happy path).**
+   `OuterWall.channels()` always emits `SOLAR_OPAQUE`, but `DirectLoss` only owns `CONDUCTION`,
+   so a light wall's `SOLAR_OPAQUE` is unclaimed → `UserWarning` on every green-path build.
+   **Decision (already made): DEFER, don't implement sol-air-on-light-walls now.** Implement the
+   deferral cleanly: suppress this specific warning for light exterior walls *with a tracked
+   note* (don't leave a warning firing on the happy path — it trains everyone to ignore
+   warnings). The proper fix (later, with `pvlib`): `DirectLoss` consumes `SOLAR_OPAQUE` by
+   shifting its reference `T_ext → T_sa` via `solar_boundary` (see proposal §"Solar is a reusable
+   boundary helper").
+
+3. **Replace the `_T_sol_air` silent fallback in `simulate.py` with an explicit deferral.**
+   `forward_sim` currently injects `_T_sol_air = T_ext` "when alphaA/UA unknown at sim level."
+   Consequence: `HeavyWall`'s sol-air boundary is *just `T_ext`* — the `SOLAR_OPAQUE` budget the
+   heavy wall owns is computed but **never enters the dynamics** (dead path in simulation). For
+   Step 0 this is acceptable (the criterion only needs inertia, which works), but it must be
+   **named as a deferral, not a silent `if`-block that looks like it works.** Add an explicit
+   `# DEFERRED (Step 0): heavy-wall sol-air uses T_ext only; SOLAR_OPAQUE not yet active —
+   finish with pvlib POA` comment and a line in this TODO's "Known placeholders" section.
+
+4. **Write the validation notebook/script (the eyeball artifact).**
+   `notebooks/step0_validation.py` (or `.ipynb`) producing the plots a human actually looks at:
+   (a) `T_ext` +10 °C step → caravan vs heavy `T_room` overlay (shows the lag); (b) solar pulse
+   → `T_room` rise/relax. The automated tests assert the numbers; this is the "curves look
+   physically right" check the acceptance criterion explicitly asks for. For a physics engine the
+   plot *is* the point.
+
+**Done when:** items 1–4 complete, `pytest` green **with no warnings on the happy path**, and the
+notebook renders both plots looking physically sane. Then Step 0 is closed — start Step 1.
+
 ---
 
 ## Step 1 — Identifiability lens (standalone, no fit)
@@ -256,6 +298,11 @@ of Kalman. **Never enters the deploy.**
 ---
 
 ## Known placeholders to revisit (do not silently bake in)
+- **Heavy-wall sol-air** (Step 0 deferral): `forward_sim` uses `_T_sol_air = T_ext`, so the
+  heavy wall's `SOLAR_OPAQUE` budget is owned but inactive in the dynamics. Finish with the
+  `pvlib` POA work (`T_sa = T_ext + α·G_poa/h_se`).
+- **Sol-air on light walls** (Step 0 deferral): `OuterWall` emits `SOLAR_OPAQUE` but no
+  memoryless module claims it; the proper fix is `DirectLoss` shifting `T_ext → T_sa`.
 - `solar_boundary`: cosine-projection placeholder → proper 8-orientation POA model.
 - Band-overlap threshold (~1 decade in τ): empirical, depends on data length/sampling. Pin
   down once real fits run.
