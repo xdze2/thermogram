@@ -16,12 +16,40 @@ lived at `docs/api_contract.md`.
 
 ## Global conventions
 
-- All model-scoped routes: `/api/models/{model_id}/…`
-- A single model `"default"` is auto-created at server startup. No save/load/list in 4a.
+- All model-scoped routes: `/api/models/{model_id}/…`, where `{model_id}` is a model **UID**.
+- Models are **persisted locally** (see [model management](#model-management) below). Each model
+  is a UID-addressed document auto-saved to `user_data/{uid}.json`; the server loads all saved
+  models at startup. `name` is a mutable label; the UID is stable (rename ≠ new UID). A `"default"`
+  model is seeded on first run when `user_data/` is empty. *(This supersedes the original 4a
+  "single in-memory `default`, no save/load/list" rule — see CLAUDE.md amendment.)*
 - No `study_id` anywhere. Leaf endpoints (`/simulate`, `/identifiability`) receive their data in the request body.
 - IDs are server-assigned opaque strings (e.g. `"e1"`, `"m0"`).
 - Mutations return the affected resource. After any mutation the frontend re-fetches `/document` **and** `/assembly` to refresh all derived views (see [`10_state.md`](10_state.md)).
 - `GET /assembly` **never** returns HTTP 500 on a structurally incomplete room — it always returns partial data + `problems[]`.
+
+---
+
+## Model management
+
+UID-addressed local persistence. These endpoints manage the set of saved models; the
+model-scoped routes (document, assembly, CRUD, physics) operate on one model by its UID.
+Model-management mutations are **not** room-document mutations — they do not trigger the
+`/document` + `/assembly` re-pull invariant; the frontend re-lists `/api/models` instead.
+
+```
+GET    /api/models                 -> [{uid, name}]                list saved models
+POST   /api/models       {name?}   -> {uid, name}                  create empty model (name defaults "Untitled")
+GET    /api/models/examples        -> [{key, name}]                available example templates
+POST   /api/models/from_example  {example_key, name?} -> {uid, name}   copy an example into a NEW uid
+PATCH  /api/models/{uid}  {name}   -> {uid, name}                  rename (label only; uid unchanged)
+DELETE /api/models/{uid}           -> 204                          remove model + its user_data file
+```
+
+- `from_example` copies a canonical room (`caravan`, `heavy_wall`, `collinear`, `cellar`) into a
+  fresh UID; the example originals are read-only templates and are never mutated. Returns `503`
+  if examples are unavailable, `404` for an unknown `example_key`.
+- `PATCH`/`DELETE` on an unknown `uid` return `404`.
+- Auto-save: every model-scoped mutation persists `user_data/{uid}.json` before returning.
 
 ---
 

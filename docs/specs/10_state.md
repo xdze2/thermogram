@@ -26,6 +26,14 @@ held server-side; everything the UI shows is either that document or a **project
 (`/assembly`: ownership, parameters, graph, problems). The frontend store is a **cache of
 two server reads**, never an independent model the client mutates locally.
 
+The app is **multi-model**: a home view lists saved models (UID + name) and routes
+(`#/` home, `#/models/{uid}` editor) into one model at a time. The document/assembly/registry
+stores below describe the **currently-open** model; entering the editor sets the active UID
+(so `api.js` targets `/api/models/{uid}/…`) and runs the initial load. Model-list management
+(create / open / rename / remove / new-from-example, per [`30_api.md`](30_api.md#model-management))
+is **separate** from the document mutation path — it does not go through `applyMutation` and does
+not re-pull document/assembly; it re-lists `/api/models`.
+
 | Store        | Source              | Meaning                                                   |
 | ------------ | ------------------- | --------------------------------------------------------- |
 | `roomDoc`    | `GET …/document`    | raw elements + modules (+ routing)                        |

@@ -16,8 +16,12 @@ specification and gives the full reading order. When code and a spec disagree, t
 
 ## Hard constraints (do not violate without explicit sign-off)
 
-- **Local, single-user, single-session.** No auth, multi-tenancy, or save/load to build for.
-- **Physics runs server-side**, including topology rendering (schemdraw → SVG/PNG).
+- **Local, single-user, no auth, no multi-tenancy.** *(Amended 2026-06: the original
+  "single-session, no save/load" rule is relaxed. The app now persists locally — each room
+  is a UID-addressed document auto-saved to `user_data/{uid}.json`, with a multi-model home
+  page (list / open / rename / remove / new-from-example). Still strictly local single-user:
+  no auth, no DB, no remote storage, no multi-tenancy.)*
+- **Physics runs server-side**, including topology rendering (schemdraw → SVG).
 - **JAX stays contained to the fit layer (Steps 2–3).** The assembler, forward simulation,
   and identifiability lens (Steps 0–1) must not import JAX.
 - The Kalman filter is **hand-rolled**, not a black-box state-space library
