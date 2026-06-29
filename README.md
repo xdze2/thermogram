@@ -2,7 +2,17 @@
 
 A small engineering app for identifying the thermal parameters of a room from sensor data, using a 2R2C RC model and Bayesian inference.
 
-![Screenshot](docs/screenshot_v12.png)
+![Screenshot](docs/screenshots/screenshot_v12.png)
+
+## Project status
+
+> **In transition — major redesign underway.**
+>
+> - The fixed 2R2C (R2C2) topology has proven **too limiting** to capture the range of room behaviours we need to model.
+> - Following the study in [docs/biblio/reading_note_bacher_madsen_2011.md](docs/biblio/reading_note_bacher_madsen_2011.md), the project is moving toward a **module-based RC topology** — the model is assembled from composable RC modules rather than a single fixed network.
+> - This is a **start-from-scratch** effort: the new approach is not a refactor of the current code but a fresh design.
+>
+> The description below reflects the existing 2R2C implementation and will change as the module-based model lands.
 
 ## What it does
 
