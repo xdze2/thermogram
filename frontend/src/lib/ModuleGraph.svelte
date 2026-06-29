@@ -1,12 +1,34 @@
 <script>
   import { assembly, roomDoc, registry, loading, error,
            addModule, removeModule, routeModule } from '../stores/model.js';
-  import TopologySvg from './TopologySvg.svelte';
+  import { topologySvgUrl } from '../lib/api.js';
 
   // ---------------------------------------------------------------------------
   // Channels (fixed set per contract)
   // ---------------------------------------------------------------------------
   const CHANNELS = ['CONDUCTION', 'SOLAR_TRANSMISSION', 'SOLAR_OPAQUE', 'STORAGE'];
+
+  // ---------------------------------------------------------------------------
+  // Server-rendered schematic (schemdraw busbar from draw.py via /topology.svg).
+  // The endpoint serves a raster, so we cache-bust it whenever the assembly
+  // changes (any mutation re-pulls $assembly per spec 10) to force a reload.
+  // `svgError` toggles a fallback message when the room is too incomplete to
+  // render (the endpoint 400s in that case).
+  // ---------------------------------------------------------------------------
+  let svgError = false;
+  $: schematicUrl = $assembly
+    ? `${topologySvgUrl()}?v=${assemblyVersion($assembly)}`
+    : '';
+  // Reset the error flag whenever we point at a fresh image.
+  $: if (schematicUrl) svgError = false;
+
+  function assemblyVersion(asm) {
+    // A cheap content hash: ownership cells + problems + state/signal counts.
+    // Changes on any structural edit, so the browser re-requests the image.
+    const own = (asm.ownership ?? []).map(o => `${o.element_id}:${o.channel}:${o.module_id}`).join(',');
+    const prob = (asm.problems ?? []).length;
+    return encodeURIComponent(`${own}|${prob}`);
+  }
 
   // ---------------------------------------------------------------------------
   // Derived: ownership map keyed by (element_label, channel)
@@ -209,11 +231,25 @@
   {:else}
 
     <!-- ====================================================================
-         Star topology graph
+         Star topology — server-rendered RC schematic (schemdraw busbar)
     ===================================================================== -->
     <section>
       <h2 class="text-xl font-semibold mb-3">Topology</h2>
-      <TopologySvg graph={$assembly?.graph} />
+      {#if !schematicUrl || svgError}
+        <div class="border border-base-300 rounded-lg p-6 text-center text-base-content/50 text-sm">
+          No schematic yet — add a RoomMass and at least one module to render the
+          RC star (T_room rail + module branches).
+        </div>
+      {:else}
+        <div class="overflow-x-auto rounded-lg border border-base-300 bg-base-100 p-2">
+          <img
+            src={schematicUrl}
+            alt="RC star schematic: T_room rail with each module as a branch to its boundary"
+            class="mx-auto max-w-full"
+            onerror={() => (svgError = true)}
+          />
+        </div>
+      {/if}
     </section>
 
     <!-- ====================================================================
