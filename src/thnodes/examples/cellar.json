@@ -1,0 +1,32 @@
+{
+  "name": "Cellar",
+  "elements": {
+    "e0": {
+      "type": "Window",
+      "fields": {
+        "area": 1.0,
+        "orientation": "N",
+        "U": 2.0,
+        "shgc": 0.1
+      }
+    }
+  },
+  "modules": {
+    "m0": {
+      "type": "RoomMass",
+      "fields": {
+        "floor_area": 25.0
+      }
+    },
+    "m1": {
+      "type": "DirectLoss",
+      "fields": {}
+    }
+  },
+  "routes": {
+    "m0": [],
+    "m1": [
+      "e0"
+    ]
+  }
+}

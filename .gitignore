@@ -28,3 +28,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# local persistence (per-model JSON files, not committed)
+user_data/

@@ -20,6 +20,6 @@ def get_topology_svg(model_id: str) -> Response:
             + "; ".join(p.message for p in problems),
         )
 
-    # topology_svg returns PNG bytes (schemdraw renders via matplotlib)
+    # topology_svg returns SVG bytes (schemdraw renders via matplotlib's SVG backend)
     img_bytes = topology_svg(system)
-    return Response(content=img_bytes, media_type="image/png")
+    return Response(content=img_bytes, media_type="image/svg+xml")

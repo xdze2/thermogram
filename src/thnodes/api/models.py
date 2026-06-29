@@ -26,6 +26,8 @@ class ModuleSpec:
 
 @dataclass
 class RoomDoc:
+    uid: str = field(default="")              # stable server-assigned opaque UID
+    name: str = field(default="Untitled")     # mutable human-readable label
     elements: dict[str, ElementSpec] = field(default_factory=dict)   # id -> spec
     modules: dict[str, ModuleSpec] = field(default_factory=dict)     # id -> spec
     routes: dict[str, list[str]] = field(default_factory=dict)       # module_id -> [element_ids]
@@ -41,6 +43,32 @@ class RoomDoc:
         mid = f"m{self._mod_counter}"
         self._mod_counter += 1
         return mid
+
+
+# ── model-list schemas ────────────────────────────────────────────────────────
+
+class ModelInfo(BaseModel):
+    """Lightweight summary returned by GET /api/models and create/rename operations."""
+    uid: str
+    name: str
+
+
+class ModelCreateIn(BaseModel):
+    name: str = "Untitled"
+
+
+class ModelRenameIn(BaseModel):
+    name: str
+
+
+class ExampleInfo(BaseModel):
+    key: str
+    name: str
+
+
+class ModelFromExampleIn(BaseModel):
+    example_key: str
+    name: str | None = None
 
 
 # ── budget sub-schema ──────────────────────────────────────────────────────────

@@ -347,9 +347,8 @@ def test_topology_returns_image(client):
     _build_caravan(client)
     r = client.get(f"{BASE}/topology.svg")
     assert r.status_code == 200
-    # draw.topology_svg actually returns PNG; media type is image/png
-    assert r.headers["content-type"].startswith("image/")
-    assert len(r.content) > 100  # non-trivial image
+    assert r.headers["content-type"].startswith("image/svg+xml")
+    assert len(r.content) > 100  # non-trivial SVG
 
 
 def test_topology_incomplete_room_400(client):

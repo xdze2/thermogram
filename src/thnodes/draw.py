@@ -1,65 +1,15 @@
 """
-Rendering layer: turn user-described elements and assembled systems into views.
+Rendering layer: turn an assembled system into a topology view.
 
-Two pure outputs, reused by both the Streamlit case notebook and (eventually) the
-FastAPI endpoint the proposal describes (server-side topology rendering):
+  - topology_svg(system) -> bytes (SVG)   post-assembly RC star schematic (schemdraw)
 
-  - elements_table(elements) -> list[dict]    pre-assembly "what did the user describe"
-  - topology_svg(system)     -> str (SVG)     post-assembly RC star schematic (schemdraw)
-
-Physics is never recomputed here: the elements table reads each element's own
-channels() budgets, and the schematic reads the assembled System's modules.
+Physics is never recomputed here: the schematic reads the assembled System's modules.
 """
 
 from __future__ import annotations
 
-from .channels import Budget, Channel
-from .elements import EnvelopeElement, Layer
+from .channels import Channel
 from .assembler import System
-
-
-# ── elements view (pre-assembly) ─────────────────────────────────────────────
-
-
-def _layers_str(layers: list[Layer]) -> str:
-    return " | ".join(f"{l.material} {l.thickness * 1000:.0f}mm" for l in layers)
-
-
-def _fmt(x: float | None, unit: str = "") -> str:
-    if x is None:
-        return "—"
-    return f"{x:.3g} {unit}".rstrip()
-
-
-def elements_table(elements: list[EnvelopeElement]) -> list[dict]:
-    """
-    One row per element with its geometry and the channel budgets it offers.
-
-    Budgets come straight from element.channels() so the table shows exactly the
-    physical quantities the assembler will route — no parallel physics here.
-    """
-    rows: list[dict] = []
-    for elem in elements:
-        ch = elem.channels()
-        cond: Budget | None = ch.get(Channel.CONDUCTION)
-        store: Budget | None = ch.get(Channel.STORAGE)
-        trans: Budget | None = ch.get(Channel.SOLAR_TRANSMISSION)
-        opaque: Budget | None = ch.get(Channel.SOLAR_OPAQUE)
-
-        area = getattr(elem, "area", None)
-        row = {
-            "Element": type(elem).__name__,
-            "Area (m²)": "—" if not area else f"{area:.3g}",
-            "Orientation": getattr(elem, "orientation", "—"),
-            "Layers": _layers_str(elem.layers) if hasattr(elem, "layers") else "—",
-            "U·A (W/K)": _fmt(cond.UA if cond else None, ""),
-            "C (J/K)": _fmt(store.C if store else None, ""),
-            "SHGC·A (m²)": _fmt(trans.shgcA if trans else None, ""),
-            "α·A (m²)": _fmt(opaque.alphaA if opaque else None, ""),
-            "Channels": ", ".join(sorted(c.name for c in ch)) or "—",
-        }
-        rows.append(row)
-    return rows
 
 
 # ── topology view (post-assembly RC star) ────────────────────────────────────
@@ -155,7 +105,9 @@ def _draw_branch(d, e, mod, x: float) -> None:
 
 def topology_svg(system: System) -> bytes:
     """
-    Render the assembled star topology as a PNG (vertical-branch star layout).
+    Render the assembled star topology as an SVG (vertical-branch star layout).
+
+    Returns SVG bytes (UTF-8 encoded XML).
 
     The top rail is the single T_room node; every module hangs from it as a
     vertical branch down to the common ground rail. C_room drops from the rail at
@@ -194,4 +146,4 @@ def topology_svg(system: System) -> bytes:
         d += e.Label().at((x, _TOP + 0.7)).label(mod.name, fontsize=9)
         _draw_branch(d, e, mod, x)
 
-    return d.get_imagedata("png")
+    return d.get_imagedata("svg")

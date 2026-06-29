@@ -1,0 +1,54 @@
+{
+  "name": "Caravan",
+  "elements": {
+    "e0": {
+      "type": "OuterWall",
+      "fields": {
+        "area": 12.0,
+        "orientation": "S",
+        "layers": [
+          {
+            "material": "insulation_mineral_wool",
+            "thickness": 0.05
+          }
+        ],
+        "alpha": 0.6
+      }
+    },
+    "e1": {
+      "type": "Window",
+      "fields": {
+        "area": 3.0,
+        "orientation": "S",
+        "U": 2.8,
+        "shgc": 0.7
+      }
+    }
+  },
+  "modules": {
+    "m0": {
+      "type": "RoomMass",
+      "fields": {
+        "floor_area": 15.0
+      }
+    },
+    "m1": {
+      "type": "DirectLoss",
+      "fields": {}
+    },
+    "m2": {
+      "type": "SolarGainModule",
+      "fields": {}
+    }
+  },
+  "routes": {
+    "m0": [],
+    "m1": [
+      "e0",
+      "e1"
+    ],
+    "m2": [
+      "e1"
+    ]
+  }
+}

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from ..models import ElementIn, ElementOut, ElementPatch, ModuleIn, ModuleOut, RoutingIn
 from ..models import ElementSpec, ModuleSpec
-from ..store import element_to_out, get_doc, module_to_out
+from ..store import element_to_out, get_doc, module_to_out, save_model
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -28,6 +28,7 @@ def add_element(model_id: str, body: ElementIn) -> ElementOut:
     eid = doc.next_element_id()
     spec = ElementSpec(type=body.type, fields=dict(body.fields))
     doc.elements[eid] = spec
+    save_model(model_id)
     return element_to_out(eid, spec)
 
 
@@ -38,6 +39,7 @@ def patch_element(model_id: str, eid: str, body: ElementPatch) -> ElementOut:
         raise HTTPException(status_code=404, detail=f"Element '{eid}' not found.")
     spec = doc.elements[eid]
     spec.fields.update(body.fields)
+    save_model(model_id)
     return element_to_out(eid, spec)
 
 
@@ -50,6 +52,7 @@ def delete_element(model_id: str, eid: str) -> None:
     # Remove from any module routing
     for mid in doc.routes:
         doc.routes[mid] = [e for e in doc.routes[mid] if e != eid]
+    save_model(model_id)
 
 
 # ── modules ────────────────────────────────────────────────────────────────────
@@ -64,6 +67,7 @@ def add_module(model_id: str, body: ModuleIn) -> ModuleOut:
     spec = ModuleSpec(type=body.type, fields=dict(body.fields))
     doc.modules[mid] = spec
     doc.routes[mid] = []
+    save_model(model_id)
     return module_to_out(mid, spec, doc)
 
 
@@ -74,6 +78,7 @@ def delete_module(model_id: str, mid: str) -> None:
         raise HTTPException(status_code=404, detail=f"Module '{mid}' not found.")
     del doc.modules[mid]
     doc.routes.pop(mid, None)
+    save_model(model_id)
 
 
 @router.put("/modules/{mid}/routing", response_model=ModuleOut)
@@ -85,4 +90,5 @@ def put_routing(model_id: str, mid: str, body: RoutingIn) -> ModuleOut:
         if eid not in doc.elements:
             raise HTTPException(status_code=404, detail=f"Element '{eid}' not found.")
     doc.routes[mid] = list(body.element_ids)
+    save_model(model_id)
     return module_to_out(mid, doc.modules[mid], doc)

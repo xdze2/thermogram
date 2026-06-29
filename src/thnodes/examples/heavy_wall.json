@@ -1,0 +1,64 @@
+{
+  "name": "Heavy-wall",
+  "elements": {
+    "e0": {
+      "type": "OuterWall",
+      "fields": {
+        "area": 20.0,
+        "orientation": "S",
+        "layers": [
+          {
+            "material": "concrete",
+            "thickness": 0.25
+          },
+          {
+            "material": "insulation_mineral_wool",
+            "thickness": 0.1
+          }
+        ],
+        "alpha": 0.6
+      }
+    },
+    "e1": {
+      "type": "Window",
+      "fields": {
+        "area": 4.0,
+        "orientation": "S",
+        "U": 1.2,
+        "shgc": 0.6
+      }
+    }
+  },
+  "modules": {
+    "m0": {
+      "type": "RoomMass",
+      "fields": {
+        "floor_area": 20.0
+      }
+    },
+    "m1": {
+      "type": "DirectLoss",
+      "fields": {}
+    },
+    "m2": {
+      "type": "HeavyWall",
+      "fields": {}
+    },
+    "m3": {
+      "type": "SolarGainModule",
+      "fields": {}
+    }
+  },
+  "routes": {
+    "m0": [],
+    "m1": [
+      "e1"
+    ],
+    "m2": [
+      "e0"
+    ],
+    "m3": [
+      "e1"
+    ]
+  }
+}

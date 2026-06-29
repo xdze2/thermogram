@@ -1,10 +1,13 @@
 """
 In-memory session store: a single dict[model_id, RoomDoc].
-Also contains the roomboc_to_assembler helper and element/module serialisation.
+Also contains the roomboc_to_assembler helper, element/module serialisation,
+and the JSON persistence layer (save_model / load_all_models).
 """
 
 from __future__ import annotations
 
+import json
+import pathlib
 from typing import Any
 
 from ..assembler import Assembler, System
@@ -20,6 +23,12 @@ from .models import (
     ModuleSpec,
     RoomDoc,
 )
+
+# ── persistence directory (can be monkeypatched in tests) ─────────────────────
+
+# Resolve relative to this file: src/thnodes/api/store.py → project root is 3 levels up.
+_DEFAULT_USER_DATA = pathlib.Path(__file__).resolve().parents[3] / "user_data"
+USER_DATA_DIR: pathlib.Path = _DEFAULT_USER_DATA
 
 # Global session store.
 _store: dict[str, RoomDoc] = {}
@@ -156,3 +165,140 @@ def _elem_label_to_id(doc: RoomDoc) -> dict[str, str]:
         label_counter[base] = count + 1
         result[label] = eid
     return result
+
+
+# ── serialisation: RoomDoc ↔ plain dict ───────────────────────────────────────
+
+def roomdoc_to_dict(doc: RoomDoc) -> dict:
+    """
+    Serialise a RoomDoc to a JSON-safe dict.
+
+    Shape::
+
+        {
+          "uid": "...",
+          "name": "Untitled",
+          "elements": {"e0": {"type": "OuterWall", "fields": {...}}, ...},
+          "modules":  {"m0": {"type": "RoomMass",  "fields": {...}}, ...},
+          "routes":   {"m0": ["e0", "e1"], ...},
+          "_elem_counter": 3,
+          "_mod_counter":  2
+        }
+
+    This is also the shape that ``examples.load_example`` returns (minus the
+    private counters, which are handled in ``roomdoc_from_dict``).
+    """
+    return {
+        "uid": doc.uid,
+        "name": doc.name,
+        "elements": {
+            eid: {"type": spec.type, "fields": spec.fields}
+            for eid, spec in doc.elements.items()
+        },
+        "modules": {
+            mid: {"type": spec.type, "fields": spec.fields}
+            for mid, spec in doc.modules.items()
+        },
+        "routes": dict(doc.routes),
+        "_elem_counter": doc._elem_counter,
+        "_mod_counter": doc._mod_counter,
+    }
+
+
+def roomdoc_from_dict(d: dict) -> RoomDoc:
+    """
+    Deserialise a dict (from JSON or from ``examples.load_example``) into a
+    RoomDoc.
+
+    The ``_elem_counter`` / ``_mod_counter`` fields are optional.  When absent
+    (examples dict), the counters are set to max-existing-numeric-suffix + 1 so
+    that newly minted IDs never collide with existing ones.
+    """
+    elements = {
+        eid: ElementSpec(type=v["type"], fields=dict(v["fields"]))
+        for eid, v in d.get("elements", {}).items()
+    }
+    modules = {
+        mid: ModuleSpec(type=v["type"], fields=dict(v["fields"]))
+        for mid, v in d.get("modules", {}).items()
+    }
+    routes = {mid: list(eids) for mid, eids in d.get("routes", {}).items()}
+
+    # Recover counters, falling back to max-existing + 1 to avoid ID collisions.
+    if "_elem_counter" in d:
+        elem_counter = int(d["_elem_counter"])
+    else:
+        nums = [
+            int(eid[1:]) for eid in elements if eid.startswith("e") and eid[1:].isdigit()
+        ]
+        elem_counter = (max(nums) + 1) if nums else 0
+
+    if "_mod_counter" in d:
+        mod_counter = int(d["_mod_counter"])
+    else:
+        nums = [
+            int(mid[1:]) for mid in modules if mid.startswith("m") and mid[1:].isdigit()
+        ]
+        mod_counter = (max(nums) + 1) if nums else 0
+
+    doc = RoomDoc(
+        uid=d.get("uid", ""),
+        name=d.get("name", "Untitled"),
+        elements=elements,
+        modules=modules,
+        routes=routes,
+        _elem_counter=elem_counter,
+        _mod_counter=mod_counter,
+    )
+    return doc
+
+
+# ── file I/O ──────────────────────────────────────────────────────────────────
+
+def save_model(uid: str) -> None:
+    """
+    Persist the model with *uid* from ``_store`` to ``USER_DATA_DIR/{uid}.json``.
+
+    No-ops silently when:
+    - *uid* is not in ``_store``
+    - The doc's own ``uid`` field is empty (e.g. bare ``RoomDoc()`` created by
+      tests that directly seed ``_store`` without going through the models router)
+    """
+    doc = _store.get(uid)
+    if doc is None:
+        return
+    # Bare RoomDoc() injected by tests (uid="") — do not write to disk.
+    if not doc.uid:
+        return
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = USER_DATA_DIR / f"{uid}.json"
+    path.write_text(json.dumps(roomdoc_to_dict(doc), indent=2), encoding="utf-8")
+
+
+def delete_model_file(uid: str) -> None:
+    """Remove ``USER_DATA_DIR/{uid}.json`` if it exists."""
+    path = USER_DATA_DIR / f"{uid}.json"
+    if path.exists():
+        path.unlink()
+
+
+def load_all_models() -> None:
+    """
+    Scan ``USER_DATA_DIR`` for ``*.json`` files and load every model into
+    ``_store``.  Called once at application startup.  If the directory is
+    missing or empty, ``_store`` remains as-is.
+    """
+    if not USER_DATA_DIR.is_dir():
+        return
+    for path in sorted(USER_DATA_DIR.glob("*.json")):
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+            doc = roomdoc_from_dict(d)
+            # Derive uid from filename when not stored in JSON (migration safety).
+            if not doc.uid:
+                doc.uid = path.stem
+            _store[doc.uid] = doc
+        except Exception:
+            # Corrupt / incompatible file — skip silently rather than crashing at
+            # startup.  Operators can delete the bad file manually.
+            pass
