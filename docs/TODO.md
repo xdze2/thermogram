@@ -11,9 +11,19 @@ enough to start work, but you **must** read these first:
    prediction-error likelihood, not least-squares).
 
 **Golden rules**
-- Pure Python (NumPy + SciPy), `uv`-managed. **No FastAPI / Svelte until Step 4.**
+- `uv`-managed. **No FastAPI / Svelte until Step 4.**
+- **The fit target is the FULL POSTERIOR, sampled with NUTS — not a MAP point.** The data is
+  collinear; the posterior is degenerate (ridges); its *shape* is the identifiability answer.
+  This dictates the backend: NUTS needs gradients → the Kalman log-likelihood must be
+  differentiable → **JAX** Kalman + **NumPyro** sampler. (This supersedes any "NumPy Kalman"
+  phrasing in older notes, which assumed MAP.)
+- The Kalman filter stays **hand-rolled (~30 lines)** — JAX is the array backend, **NOT** a
+  black-box state-space/Kalman library (`filterpy`, `statsmodels`, `pykalman` are all out).
+- Keep JAX **contained to the fit core (Steps 2–3)**. Steps 0–1 (assembler, forward sim,
+  identifiability lens) and the simulation toy stay plain NumPy — they must not import JAX.
 - **CTSM-R is a validation oracle only — never a runtime/import dependency.**
-- Validate with **synthetic data** (known ground truth) before any real data.
+- Validate with **synthetic data** (known ground truth) before any real data. With a posterior,
+  "validate" means *the posterior covers the truth and is calibrated*, not "the point matches".
 - The canonical test cases (caravan / heavy-wall / collinear) run **headless** — they are
   the test suite.
 - Work the steps **in order**. Each step has acceptance criteria; do not advance until they
@@ -28,7 +38,12 @@ enough to start work, but you **must** read these first:
 Goal: assemble a star RC ODE from elements/modules and integrate it forward. **No fitting.**
 
 ### 0.1 — Scaffold
-- `uv init`; package `src/thnodes/`; dev deps: `numpy`, `scipy`, `matplotlib`, `pytest`.
+- `uv init`; package `src/thnodes/`.
+- Steps 0–1 deps: `numpy`, `scipy`, `matplotlib`, `pytest`.
+- Steps 2–3 add: `jax`, `numpyro`, `arviz`. (`pvlib` only with real data, Step 4-ish.)
+- The assembler must emit a **backend-agnostic** linear-system description (`A`/`B`/`C`
+  builders as plain arrays / pure functions) so the JAX Kalman can consume it without the
+  assembler itself importing JAX.
 - Layout:
   ```
   src/thnodes/
@@ -138,57 +153,82 @@ Goal: predict, **before fitting**, which parameters the data can resolve.
 
 ---
 
-## Step 2 — Kalman + MAP (the fit), validated by twin experiment
+## Step 2 — Differentiable Kalman + NUTS posterior, validated by twin experiment
 
-Goal: recover known parameters from synthetic data; degrade gracefully when collinear.
+Goal: **sample the posterior** `p(θ | y)` from synthetic data; show it covers the truth and
+degrades honestly (wide/ridged, not falsely confident) when collinear.
 
-### 2.1 — Discretize
+**Why JAX + NumPyro (read before coding):** the deliverable is the full posterior, not a point.
+Collinear data → degenerate posterior (ridges between `C_wall`/`H_in`/`H_out`). Only HMC/NUTS
+mixes on that; `emcee`-style gradient-free samplers do not. NUTS needs gradients of the
+log-posterior → the Kalman log-likelihood must be **differentiable** → write it in JAX, sample
+with NumPyro. Hand-rolled (~30 lines), JAX is just the array backend — **not** a Kalman library.
+
+### 2.1 — Discretize (JAX)
 - Continuous `dx = A x dt + B u dt + dω`. Discretize to `x_{k+1} = Ad x_k + Bd u_k + w_k`
-  (matrix exponential / van Loan, or `scipy.linalg.expm`). Observation `y_k = C x_k + v_k`
-  with `C` selecting `T_room`.
+  via matrix exponential — use **`jax.scipy.linalg.expm`** (van Loan for `Qd`). Observation
+  `y_k = C x_k + v_k`, `C` selecting `T_room`.
 - Noise: process `Q` (Wiener `dω`, **the key term** — absorbs unmeasured disturbance),
-  observation `R` (sensor floor). Both are estimated parameters with their own priors.
+  observation `R` (sensor floor). Both are sampled parameters with their own priors.
+- The continuous `A(θ)`/`B(θ)`/`C` come from the Step-0 assembler's backend-agnostic builders;
+  evaluate them inside the JAX log-density so gradients flow through to `θ`.
 
-### 2.2 — Kalman filter (~30 lines NumPy)
-- Standard predict/update for the 2-state LTI system. Return one-step predictive means,
-  covariances `S_k`, and innovations `e_k = y_k - ŷ_k`.
+### 2.2 — Kalman filter (~30 lines JAX)
+- Standard predict/update for the 2-state LTI system, written with `jax.numpy`; loop with
+  `jax.lax.scan` over time (carry = filtered mean/cov). Return per-step innovations
+  `e_k = y_k - ŷ_k` and innovation covariances `S_k`.
 
-### 2.3 — Prediction-error likelihood + log-normal prior (MAP)
-- Negative log-likelihood = `Σ_k [ 0.5*log|S_k| + 0.5*e_k' S_k^{-1} e_k ]`
+### 2.3 — Log-likelihood + log-normal prior (the log-density NumPyro samples)
+- Prediction-error log-likelihood = `−Σ_k [ 0.5·log|S_k| + 0.5·e_k' S_k⁻¹ e_k ]`
   (prediction-error ML — **not** least-squares on simulation error).
-- **Log-normal prior** on all positive physical params: optimize in `log θ`. Prior term
-  `Σ (logθ - μ_log)² / (2 σ_log²)`. `σ_log = ln(1.6)` encodes "±60%". `μ_log` from
-  `derive_priors` (budget-spent).
+- **Log-normal priors** on positive params: sample `log θ` (unconstrained) — in NumPyro,
+  `numpyro.sample(name, dist.Normal(μ_log, σ_log))` then `θ = exp(log θ)`; NumPyro handles the
+  transform Jacobian. `σ_log = ln(1.6)` encodes "±60%". `μ_log` from `derive_priors` (budgets).
 - Noise priors: `R` tight around sensor floor (~0.1 °C); `Q` weakly-informative/broad.
-- Objective = NLL + prior penalty; minimize with `scipy.optimize.minimize` (L-BFGS-B in
-  log-space). Return MAP params + Hessian (for posterior σ).
+- `numpyro.factor("kalman_ll", loglik)` adds the Kalman likelihood to the model.
 
-### 2.4 — Twin-experiment harness
-- `simulate_truth(topology, true_params, signals, noise) -> y_obs` (uses Step 0 forward_sim
-  + adds known process/obs noise).
-- `fit(topology, priors, signals, y_obs) -> MAP params + diagnostics`.
-- Compare recovered vs true.
+### 2.4 — Sample + the optional MAP smoke test
+- `numpyro.infer.MCMC(NUTS(model), ...)`; multiple chains. Optionally init from a MAP mode
+  (`numpyro.infer.Predictive` / a JAX optimizer or `scipy.optimize`) — MAP is a smoke test and
+  sampler-init only, **not** the deliverable.
+- Always report `r_hat`, ESS, divergence count. Divergences clustering on the heavy-wall ridge
+  are expected signal, but high counts mean reparameterize (e.g. non-centered) or accept the
+  geometry as the identifiability result.
 
-### ✅ Step 2 acceptance (the central bet)
+### 2.5 — Twin-experiment harness
+- `simulate_truth(topology, true_params, signals, noise) -> y_obs` (Step-0 forward_sim + known
+  process/obs noise).
+- `sample_posterior(topology, priors, signals, y_obs) -> InferenceData` (ArviZ).
+- Compare **posterior vs true**: does the marginal cover the truth? how tight? which params
+  trade off (pairwise)?
 
-| case                         | topology                              | must show                                              |
-| ---------------------------- | ------------------------------------- | ------------------------------------------------------ |
-| caravan                      | `RoomMass + DirectLoss + SolarGain`   | clean recovery within prior σ — "works at all" base    |
-| heavy wall, good excitation  | `+ HeavyWall`, large synthetic swings | recovers `C_wall` → buffered node *is* identifiable     |
-| heavy wall, collinear inputs | same, correlated `T_ext`/`G_sol`      | fit sits near prior **AND** Step-1 lens predicted it    |
+### ✅ Step 2 acceptance (the central bet — check the posterior, not a point)
 
-The third row is the prize: graceful degradation **and** the lens agreed in advance. If the
-two agree, the engine is trusted.
+| case                         | topology                              | must show                                                            |
+| ---------------------------- | ------------------------------------- | -------------------------------------------------------------------- |
+| caravan                      | `RoomMass + DirectLoss + SolarGain`   | posterior tight, **covers truth** (1 fast band) — "works at all"      |
+| heavy wall, good excitation  | `+ HeavyWall`, large synthetic swings | `C_wall` marginal tightens around truth → buffered node identifiable   |
+| heavy wall, collinear inputs | same, correlated `T_ext`/`G_sol`      | posterior wide/ridged, **covers truth**, marginals ≈ prior **AND** Step-1 lens predicted it |
+
+The third row is the prize: honest width (not false confidence), still covers truth, and the
+pairwise posterior shows the ridge the lens flagged in advance.
+
+**Calibration check** (do this — it's the real validation of a posterior): run many synthetic
+draws; the X% credible interval should contain the true value ~X% of the time. If coverage is
+calibrated and the lens predicts the wide cases, the engine is trusted.
 
 ---
 
-## Step 3 — Honesty diagnostics
+## Step 3 — Honesty diagnostics (read off the posterior)
 
-- `prior_vs_data(map_params, prior, posterior_sigma) -> per-param movement in σ_log units`:
-  "did the data move this number, or is it sitting at its prior?"
-- `whiteness(innovations) -> {acf_in_bounds: bool, cum_periodogram_ok: bool}`: ACF within
-  ±1.96/√N; cumulated periodogram inside Kolmogorov–Smirnov bounds. This is the model-
-  acceptance gate and the post-fit mirror of the Step-1 frequency lens.
+- `prior_vs_posterior(idata, prior) -> per-param`: marginal mean shift (in `σ_log`) **and**
+  posterior σ vs prior σ — "did the data tighten this, or is the marginal still the prior?"
+- Pairwise corner plot (ArviZ): which parameters trade off along a ridge.
+- Sampler health: `r_hat`, ESS, divergences — report, never hide.
+- `whiteness(innovations) -> {acf_in_bounds, cum_periodogram_ok}`: ACF within ±1.96/√N;
+  cumulated periodogram inside Kolmogorov–Smirnov bounds (evaluate at the posterior mean or via
+  posterior-predictive). Model-acceptance gate; post-fit mirror of the Step-1 frequency lens.
+- Use **ArviZ** throughout (it consumes NumPyro output directly).
 
 ### ✅ Step 3 acceptance
 - On the caravan twin experiment, `prior_vs_data` shows the well-excited params moved

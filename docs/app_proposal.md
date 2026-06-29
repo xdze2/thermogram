@@ -4,8 +4,9 @@ A small engineering app for
 
 1. **dynamic thermal building simulation** — the user describes a room, inputs weather
    data, and the inside temperature `T_room` is estimated forward in time;
-2. **thermal parameter identification** — the thermal parameters of a room are fitted
-   from sensor data using Bayesian inference (MAP).
+2. **thermal parameter identification** — the thermal parameters of a room are estimated
+   from sensor data by **full Bayesian inference**: we sample the posterior over parameters,
+   not just a point estimate.
 
 The app has two layers:
 
@@ -395,8 +396,9 @@ All physical parameters are **strictly positive and span orders of magnitude** (
 Priors are therefore **log-normal**: Gaussian in `log θ`. This (a) puts zero mass on
 unphysical negatives, (b) matches the multiplicative nature of engineering uncertainty, and
 (c) makes "±60%" well-defined — it is a multiplicative factor `σ_log = ln(1.6)`, not an
-additive band. The MAP objective adds `Σ (log θ − μ_log)² / (2 σ_log²)` to the negative
-log-likelihood.
+additive band. Sampling is done in `log θ` (an unconstrained space, which the NUTS sampler
+needs); the prior contributes `−Σ (log θ − μ_log)² / (2 σ_log²)` to the log-posterior, plus
+the log-Jacobian of the `θ = exp(log θ)` transform.
 
 Each module derives its prior by **spending its claimed channel budgets** (§Ownership). The
 canonical example is `HeavyWall`: one conserved `U·A` is split into `H_out`/`H_in` by the
@@ -412,13 +414,43 @@ they have no element. They get their own weakly-informative priors: `R` tight ar
 known sensor noise floor (~0.1 °C); `Q` weakly-informative, broad. For our collinear data
 these trade off against the physical parameters and must be estimated, not fixed.
 
+### Estimation: full posterior by NUTS, not a point estimate
+
+The fit target is the **full posterior** `p(θ | y)`, sampled — not a MAP point. The reason is
+exactly our data regime: collinear passive inputs produce **degenerate posterior geometry**
+(ridges and banana-shaped correlations between `C_wall`, `H_in`, `H_out` — the heavy-wall
+parameters trade off along a curve). A point estimate *hides* this; the samples *show* it. The
+posterior **is** the honest answer — its width and shape are the identifiability result, not a
+nuisance around a "true" value.
+
+That degenerate geometry dictates the sampler: only **Hamiltonian Monte Carlo / NUTS** mixes
+acceptably on strong ridges. Gradient-free samplers (`emcee`-style affine-invariant ensembles)
+mix badly on exactly our worst case, and a Metropolis random walk is hopeless there. NUTS needs
+**gradients of the log-posterior**, which means the **Kalman-filter log-likelihood must be
+differentiable**.
+
+This revises the earlier "hand-rolled NumPy Kalman" instinct (which assumed a MAP point fit): we
+still hand-roll the ~30-line 2-state LTI Kalman filter — keeping the "understand every line"
+virtue the reading note insists on — but we write it in **JAX** so it is autodifferentiable, and
+drive it with **NumPyro** (NUTS). We do **not** adopt a black-box state-space/Kalman library; the
+filter stays ours, just in a differentiable array backend. See `roadmap.md` / `TODO.md` for the
+JAX-vs-NumPy decision and `reading_note_bacher_madsen_2011.md` for how this sits relative to
+their ML/Kalman engine (same prediction-error likelihood, now sampled with a prior instead of
+maximized).
+
+A MAP point (the log-posterior mode, via `scipy.optimize` or a JAX optimizer) is still useful as
+a **sampler-init and a cheap smoke test**, but it is not the deliverable.
+
 ### The prior-vs-data diagnostic (first-class output)
 
-For every parameter, report **how far the posterior moved from the prior** (in `σ_log`
-units), i.e. "did the data actually move this number, or is it sitting at its prior?" For
-collinear passive data this is the single most important honesty check — it distinguishes a
-fit the data informed from one that merely echoes the priors back. It is promoted here from
-the reading note to a first-class app output.
+For every parameter, report **how far the posterior moved from the prior** — concretely, the
+posterior marginal vs the prior (mean shift in `σ_log` units, and posterior σ vs prior σ:
+"did the data tighten this, or is the marginal still the prior?"). For collinear passive data
+this is the single most important honesty check — it distinguishes a parameter the data
+informed from one whose marginal merely echoes the prior back. With full samples this is read
+directly off the marginals (and the pairwise posterior shows *which* parameters are trading off
+along a ridge, not just that they are loose). Promoted here from the reading note to a
+first-class app output.
 
 ---
 
@@ -539,8 +571,14 @@ by FastAPI). Server-side, not a client concern.
 - Frontend: Svelte + DaisyUI.
 - Backend: FastAPI (Python, `uv`). Local, single-user, single-session. Physics runs
   server-side, including topology rendering.
-- Numerics: pure Python (NumPy + `scipy.optimize`). Hand-rolled 2-state LTI Kalman filter
-  for the fit. **CTSM-R is a validation oracle only, never a runtime dependency.**
+- Numerics: **JAX** core (differentiable hand-rolled 2-state LTI Kalman filter) + **NumPyro**
+  (NUTS) for full-posterior sampling; `scipy`/NumPy for the assembler, the identifiability
+  lens, and forward simulation. The Kalman filter stays hand-rolled (~30 lines) — JAX is the
+  array backend, **not** a black-box state-space library. **CTSM-R is a validation oracle only,
+  never a runtime dependency.**
+- Solar/irradiance: **`pvlib`** for 8-orientation plane-of-array transposition (real-data
+  path only), quarantined in `solar.py` (it pulls `pandas`; convert to NumPy at the boundary so
+  pandas never reaches the engine core).
 
 ---
 
