@@ -193,6 +193,78 @@ Goal: predict, **before fitting**, which parameters the data can resolve.
   flagged; the two modules' params marked `borderline/prior_dominated`.
 - A node whose boundary signal has no spectral power in its band → `prior_dominated`.
 
+### 🔧 Step 1 — closeout (DEFERRED — resolve before Step 2 trusts the lens)
+
+The four functions exist, 21 tests green, the three written acceptance criteria are met. **But a
+green lens that is physically *wrong* is worse than no lens — and Step 2's "the lens predicted it
+in advance" validation depends on the lens being right, not just passing.** Resolve these first.
+
+1. **[CORRECTNESS — the big one] Pole-frequency vs excitation-frequency mismatch.**
+   `input_excitation` checks for spectral power **at the pole frequency** `f_band = 1/(2πτ)`. But
+   a slow thermal node is *driven by diurnal forcing that is faster than its own time constant* —
+   it **integrates** that forcing. Example: a τ=40 h wall has `f_band ≈ 1.1e-6 Hz`, while the
+   real excitation (diurnal, 1/24 h ≈ 1.16e-5 Hz) sits ~10× higher. So the lens can mark a node
+   `prior_dominated` ("no power at its band frequency") even though it *is* being driven. The
+   current tests pass only because they place power *exactly at* the pole τ
+   (`test_diurnal_signal_has_power_in_fast_band` sets `taus=[24h]` — signal tuned to the pole,
+   not a realistic τ). **Re-derive what "excited" should mean for an integrating node:** likely
+   "is there power at *or above* the pole frequency" (the node low-passes faster forcing), or use
+   the transfer-function gain `|H(jω)|` from boundary→node across the input's actual spectrum,
+   not a point check at `1/(2πτ)`. Fix, then re-tune the tests to realistic τ values.
+
+2. **[TEST INTEGRITY] Coherence test threshold doesn't match the verdict threshold.**
+   `test_correlated_signals_flagged` asserts `max_coherence >= 0.4`, but the report flags
+   `borderline` only at `_HIGH_COHERENCE_THRESHOLD = 0.7`. So the test passes at 0.4 while never
+   verifying that genuinely-correlated inputs cross the *flagging* threshold. Either assert
+   `>= 0.7`, or decide that real correlated signals only reach ~0.4–0.7 and lower the verdict
+   threshold to match — but make test and verdict agree.
+
+3. **[ROBUSTNESS] Guard `coherence()` on zero-variance signals.** A constant signal → `0/0` →
+   scipy `RuntimeWarning: invalid value in divide`, NaN coherence flowing into `max()`. Skip
+   coherence when a signal's variance ≈ 0 (it can't be coherent with anything). Silences the
+   warning and removes a NaN-propagation path.
+
+4. **[ARTIFACT] Print the report on the canonical cases (see "Case notebooks" below).** Step 1's
+   value is interpretive; there must be an eyeball artifact showing the lens's verdicts on
+   caravan / heavy-diurnal / heavy-collinear side by side. This is also how concern #1 gets
+   caught — the verdicts have to *read* sensibly to a human, not just be green.
+
+**Done when:** #1 re-derived and fixed (tests re-tuned to realistic τ), #2/#3 fixed, `pytest`
+green with no warnings, and the case notebook shows lens verdicts that match physical intuition.
+
+---
+
+## Case notebooks (cross-cutting — orthogonal to the step-by-step tests)
+
+The per-step tests validate each *mechanism* in isolation. The **case notebooks** validate each
+*physical scenario* end-to-end — one notebook per canonical room, running the full pipeline on
+it. This is the "what does thnodes say about a caravan?" view that the step files scatter.
+
+`notebooks/case_<room>.py` (or `.ipynb`), one per canonical room — **caravan, cellar, current-
+default, Earthship** — each doing, top to bottom:
+
+1. **Construct the room in plain Python.** This *is* the usability test (no UI needed): if a room
+   is awkward/ambiguous to express in the element vocabulary, it shows here. Stress-tests whether
+   `add_module(mod, elements=[...])` is the right authoring API or wants a friendlier `Room`
+   builder on top.
+2. **Emit the topology schema.** Requires a new **`System.ownership_map()`** accessor exposing
+   the assembler's internal `ownership` dict (`(element, channel) → module`) as a first-class
+   output. Render it as the (element × channel) table — the same structure the Step-4 routing-
+   matrix UI will display, so build the rendering here and port it later. (Also satisfies the
+   "make the mapping visible" requirement.)
+3. **Forward-sim plots** (the simulation toy ①): `T_room` under a representative scenario for
+   that room (e.g. cellar = ground-driven, near-constant; Earthship = solar + berm).
+4. **Identifiability report** rendered as a readable per-parameter table
+   (resolvable / borderline / prior_dominated + reason). Side-by-side across rooms is what makes
+   the lens legible and catches Step-1 concern #1.
+5. **(Later, after Step 2)** posterior corner plot + prior-vs-posterior movement on synthetic
+   twin data for that room.
+
+These notebooks double as the Step-2 twin-experiment fixtures and the skeleton of the Step-4 UI
+(schema rendering + report rendering are exactly what the frontend shows). **Prereq to build:**
+add `System.ownership_map()` — small, and it has a real consumer now rather than being
+speculative UI plumbing.
+
 ---
 
 ## Step 2 — Differentiable Kalman + NUTS posterior, validated by twin experiment

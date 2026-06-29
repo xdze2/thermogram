@@ -1,6 +1,16 @@
 from .assembler import Assembler, System
 from .channels import Budget, Channel
 from .elements import Floor, HeatSource, IndoorMass, Layer, OuterWall, Partition, Window
+from .identifiability import (
+    BandExcitation,
+    ExcitationReport,
+    IdentReport,
+    ParamStatus,
+    band_overlap,
+    bands_from_system,
+    identifiability_report,
+    input_excitation,
+)
 from .materials import is_heavy, materials_db
 from .modules import DirectLoss, HeavyWall, RoomMass, SolarGainModule
 from .simulate import forward_sim
@@ -18,6 +28,14 @@ __all__ = [
     "OuterWall",
     "Partition",
     "Window",
+    "BandExcitation",
+    "ExcitationReport",
+    "IdentReport",
+    "ParamStatus",
+    "band_overlap",
+    "bands_from_system",
+    "identifiability_report",
+    "input_excitation",
     "is_heavy",
     "materials_db",
     "DirectLoss",
