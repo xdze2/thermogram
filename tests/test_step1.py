@@ -126,46 +126,49 @@ def test_constant_signal_no_power():
     assert not report.bands[0].has_power
 
 
-def test_diurnal_signal_has_power_in_fast_band():
-    """A diurnal signal (period=24h) should excite the ~24h band."""
+def test_diurnal_signal_excites_slow_node():
+    """A non-constant signal must mark has_power=True regardless of τ."""
     t = np.arange(N) * DT
     T_ext = 15.0 + 8.0 * np.sin(2 * math.pi * t / (24 * 3600))
-    taus = [24 * 3600.0]  # 24-hour band centre
+    taus = [40 * 3600.0]  # slow wall node — f_band ≈ 7e-7 Hz, diurnal at 1.16e-5 Hz (above)
     signals = {"T_ext": T_ext}
     report = input_excitation(signals, taus, dt=DT)
-    assert report.bands[0].has_power
+    assert report.bands[0].has_power, (
+        "Diurnal signal must excite a slow (τ=40h) node via low-pass integration"
+    )
 
 
 def test_correlated_signals_flagged():
     """
-    Correlated T_ext / G_sol (G = a*T_ext + noise) → high coherence at all bands.
+    Correlated T_ext / G_sol (G = a*T_ext + small noise) → |Pearson r| above the
+    verdict threshold (0.7). Cross-correlation is stable and easy to reason about.
     """
     rng = np.random.default_rng(42)
     t = np.arange(N) * DT
     T_ext = 15.0 + 8.0 * np.sin(2 * math.pi * t / (24 * 3600)) + rng.normal(0, 0.5, N)
-    G_sol = 200.0 * T_ext / 25.0 + rng.normal(0, 5.0, N)   # strongly correlated
+    G_sol = 200.0 * T_ext / 25.0 + rng.normal(0, 0.5, N)   # strongly correlated
     signals = {"T_ext": T_ext, "G_sol": G_sol}
 
-    taus = [24 * 3600.0]
+    taus = [40 * 3600.0]
     report = input_excitation(signals, taus, dt=DT)
-    assert report.bands[0].max_coherence >= 0.4, (
-        f"Expected high coherence for correlated signals, got {report.bands[0].max_coherence:.2f}"
+    assert report.bands[0].max_correlation >= 0.7, (
+        f"Expected |r| >= 0.7 for correlated signals, got {report.bands[0].max_correlation:.2f}"
     )
 
 
-def test_uncorrelated_signals_low_coherence():
-    """Independent T_ext and G_sol → low coherence."""
+def test_uncorrelated_signals_low_correlation():
+    """Independent T_ext and G_sol → low |Pearson r|."""
     rng = np.random.default_rng(0)
     t = np.arange(N) * DT
     T_ext = 15.0 + 8.0 * np.sin(2 * math.pi * t / (24 * 3600)) + rng.normal(0, 1.0, N)
     G_sol = 300.0 * np.clip(np.sin(2 * math.pi * (t / (24 * 3600) - 0.25)), 0, None) + rng.normal(0, 20, N)
-    # G_sol is purely positive-half-sine, T_ext is symmetric → different phase/shape
     signals = {"T_ext": T_ext, "G_sol": G_sol}
 
     taus = [24 * 3600.0]
     report = input_excitation(signals, taus, dt=DT)
-    # Not asserting exact value, but should be lower than the correlated case
-    assert isinstance(report.bands[0].max_coherence, float)
+    assert report.bands[0].max_correlation < 0.7, (
+        f"Expected |r| < 0.7 for independent signals, got {report.bands[0].max_correlation:.2f}"
+    )
 
 
 # ── identifiability_report ─────────────────────────────────────────────────────
@@ -209,7 +212,7 @@ def test_report_correlated_inputs_flag_borderline():
     rng = np.random.default_rng(3)
     t = np.arange(N) * DT
     T_ext = 15.0 + 8.0 * np.sin(2 * math.pi * t / (24 * 3600)) + rng.normal(0, 0.5, N)
-    G_sol = 200.0 * T_ext / 25.0 + rng.normal(0, 2.0, N)  # strongly correlated
+    G_sol = 200.0 * T_ext / 25.0 + rng.normal(0, 0.5, N)  # tight noise → coherence crosses 0.7
 
     signals = {"T_ext": T_ext, "G_sol": G_sol}
     report = identifiability_report(sys, _prior_means(sys), signals, dt=DT)

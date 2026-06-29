@@ -40,6 +40,12 @@ class System:
     priors: dict[str, tuple[float, float]]  # {param: (mu_log, sigma_log)}
     _modules: list[TopologyModule] = field(repr=False)
     _C_room_param: str = field(repr=False, default="C_room")
+    # (element_type, channel) -> module_name; set by Assembler.build()
+    _ownership: dict[tuple[str, "Channel"], str] = field(repr=False, default_factory=dict)
+
+    def ownership_map(self) -> dict[tuple[str, "Channel"], str]:
+        """Return the (element_type, channel) -> module_name routing table."""
+        return dict(self._ownership)
 
     def rhs(self, t: float, x: np.ndarray, signals: Signals, params: Params) -> np.ndarray:
         """
@@ -90,11 +96,17 @@ class Assembler:
         # Step 1: compute (element_id, channel) → Budget for every routed element
         # element_id is the object id so the same element object can't appear twice
         all_element_cells: dict[int, dict[Channel, Budget]] = {}
+        elem_labels: dict[int, str] = {}  # element_id → human-readable label
+        elem_counter: dict[str, int] = {}
         for mod, elems in self._routes:
             for elem in elems:
                 eid = id(elem)
                 if eid not in all_element_cells:
                     all_element_cells[eid] = elem.channels()
+                    base = type(elem).__name__
+                    n = elem_counter.get(base, 0)
+                    elem_labels[eid] = base if n == 0 else f"{base}_{n}"
+                    elem_counter[base] = n + 1
 
         # Step 2: route; assert exactly-once per (element_id, channel) cell
         ownership: dict[tuple[int, Channel], str] = {}   # cell → module name
@@ -125,6 +137,12 @@ class Assembler:
                     warnings.warn(
                         f"Unclaimed channel {ch} on element id={eid}.", stacklevel=2
                     )
+
+        # Build human-readable ownership map: (element_label, channel) → module_name
+        readable_ownership: dict[tuple[str, Channel], str] = {
+            (elem_labels[eid], ch): mod_name
+            for (eid, ch), mod_name in ownership.items()
+        }
 
         # Step 3: collect state names (private states first, T_room last)
         private_states: list[str] = []
@@ -162,4 +180,5 @@ class Assembler:
             signal_names=all_signals,
             priors=priors,
             _modules=all_mods,
+            _ownership=readable_ownership,
         )

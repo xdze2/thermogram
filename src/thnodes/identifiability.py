@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from scipy.signal import coherence, welch
+from scipy.signal import welch
 
 # Band-overlap threshold: two time constants are "same band" if within this many
 # decades.  Placeholder — pin down empirically once real fits run.
@@ -99,9 +99,9 @@ class BandExcitation:
     """Excitation summary for one time-constant band."""
     tau: float               # band centre time constant (seconds)
     band_freq: float         # 1/(2π τ) in Hz
-    has_power: bool          # boundary signals have spectral power near this freq
-    signal_names: list[str]  # which signals are relevant
-    max_coherence: float     # max pairwise coherence among signals at band freq (NaN if <2 sigs)
+    has_power: bool          # at least one boundary signal has non-zero variance
+    signal_names: list[str]  # which signals are non-constant
+    max_correlation: float   # max pairwise |Pearson r| among boundary signals (NaN if <2 sigs)
 
 
 @dataclass
@@ -116,72 +116,51 @@ def input_excitation(
     dt: float = 3600.0,
 ) -> ExcitationReport:
     """
-    Per band: check spectral power and pairwise coherence of boundary signals.
+    Per band: check whether boundary signals are non-constant and mutually correlated.
 
     signals: dict of 1-D arrays (same length), representing boundary time series.
     taus: list of time constants in seconds (from bands_from_system).
-    dt: sampling interval in seconds.
+    dt: sampling interval in seconds (unused here, kept for API consistency).
 
-    Power threshold: band is "excited" if any signal has power > 1% of its
-    total power near the band frequency (within ±0.5 decades).
+    Collinearity metric: max pairwise |Pearson r| among all boundary signal pairs.
+    Cross-correlation is broadband — it captures the overall linear dependence
+    between signals regardless of which frequency band dominates. This is the right
+    metric for passive diurnal data where T_ext and G_sol co-vary throughout the day.
+
+    has_power: True if any signal has non-zero variance (i.e. is not constant).
+    A constant signal carries no information about any parameter, regardless of τ.
     """
     sig_names = list(signals.keys())
     arrays = [np.asarray(signals[s], dtype=float) for s in sig_names]
-    n_sig = len(arrays)
-    fs = 1.0 / dt
 
-    # Compute power spectral densities once
-    psds = []
-    freqs_ref = None
-    for arr in arrays:
-        f, psd = welch(arr, fs=fs, nperseg=min(256, len(arr) // 4 or 1))
-        if freqs_ref is None:
-            freqs_ref = f
-        psds.append(psd)
+    # Identify non-constant signals (std > 0)
+    non_const_idx = [i for i, arr in enumerate(arrays) if np.std(arr) > 1e-9]
+    has_power_global = len(non_const_idx) > 0
+    active_names = [sig_names[i] for i in non_const_idx]
 
+    # Max pairwise |Pearson r| among non-constant signal pairs — computed once,
+    # shared across all bands (cross-correlation is not band-specific).
+    max_r = float("nan")
+    if len(non_const_idx) >= 2:
+        max_r = 0.0
+        for ki in range(len(non_const_idx)):
+            for kj in range(ki + 1, len(non_const_idx)):
+                a = arrays[non_const_idx[ki]]
+                b = arrays[non_const_idx[kj]]
+                r = float(np.corrcoef(a, b)[0, 1])
+                max_r = max(max_r, abs(r))
+
+    # Same excitation info applies to every band — collinearity is a property
+    # of the input signals, not of the node time constant.
     band_results = []
     for tau in taus:
         f_band = 1.0 / (2.0 * math.pi * tau)
-
-        # Find frequency bin closest to the band frequency
-        if freqs_ref is not None and len(freqs_ref) > 1:
-            idx = int(np.argmin(np.abs(freqs_ref - f_band)))
-        else:
-            idx = 0
-
-        # Power check: signal has "power in band" if its PSD at f_band is
-        # > 1% of total PSD (integrated).  Signals with zero variance are skipped.
-        has_power = False
-        active_signals: list[str] = []
-        for k, (psd, name) in enumerate(zip(psds, sig_names)):
-            total_power = np.trapezoid(psd, freqs_ref) if freqs_ref is not None else 1.0
-            if total_power < 1e-12:
-                continue  # constant signal, no excitation
-            band_power_fraction = psd[idx] / (total_power / len(freqs_ref) if freqs_ref is not None else 1.0)
-            if band_power_fraction > 0.01:
-                has_power = True
-                active_signals.append(name)
-
-        # Pairwise coherence at band frequency between all active signal pairs
-        max_coh = float("nan")
-        if n_sig >= 2 and freqs_ref is not None:
-            max_coh = 0.0
-            for i in range(n_sig):
-                for j in range(i + 1, n_sig):
-                    f_coh, cxy = coherence(
-                        arrays[i], arrays[j], fs=fs,
-                        nperseg=min(256, len(arrays[i]) // 4 or 1),
-                    )
-                    if len(f_coh) > 1:
-                        coh_idx = int(np.argmin(np.abs(f_coh - f_band)))
-                        max_coh = max(max_coh, float(cxy[coh_idx]))
-
         band_results.append(BandExcitation(
             tau=tau,
             band_freq=f_band,
-            has_power=has_power,
-            signal_names=active_signals,
-            max_coherence=max_coh,
+            has_power=has_power_global,
+            signal_names=active_names,
+            max_correlation=max_r,
         ))
 
     return ExcitationReport(bands=band_results, signal_names=sig_names)
@@ -189,13 +168,15 @@ def input_excitation(
 
 # ── identifiability report ─────────────────────────────────────────────────────
 
-_HIGH_COHERENCE_THRESHOLD = 0.7   # magnitude-squared coherence flagged as "correlated"
+_HIGH_CORRELATION_THRESHOLD = 0.7  # |Pearson r| flagged as "correlated inputs"
 
 
 @dataclass
 class ParamStatus:
     status: str          # "resolvable" | "borderline" | "prior_dominated"
     reason: str
+    tau_h: float | None = None        # band time constant in hours (None if unassigned)
+    correlation: float | None = None  # max pairwise |Pearson r| among boundary signals
 
 
 @dataclass
@@ -245,11 +226,15 @@ def identifiability_report(
             continue
 
         exc = excitation.bands[band_idx]
+        tau_h = exc.tau / 3600.0
+        corr = None if math.isnan(exc.max_correlation) else exc.max_correlation
 
         if not exc.has_power:
             param_status[pname] = ParamStatus(
                 "prior_dominated",
-                f"no spectral power in boundary signals at band τ={exc.tau/3600:.1f}h",
+                "all boundary signals are constant",
+                tau_h=tau_h,
+                correlation=corr,
             )
             continue
 
@@ -267,17 +252,20 @@ def identifiability_report(
                 is_borderline = True
 
         # Check input collinearity
-        if not math.isnan(exc.max_coherence) and exc.max_coherence >= _HIGH_COHERENCE_THRESHOLD:
+        if corr is not None and corr >= _HIGH_CORRELATION_THRESHOLD:
             reasons.append(
-                f"boundary signals correlated (coherence={exc.max_coherence:.2f}) "
-                f"at band τ={exc.tau/3600:.1f}h"
+                f"boundary signals correlated (|r|={corr:.2f})"
             )
             is_borderline = True
 
         if is_borderline:
-            param_status[pname] = ParamStatus("borderline", "; ".join(reasons))
+            param_status[pname] = ParamStatus(
+                "borderline", "; ".join(reasons), tau_h=tau_h, correlation=corr,
+            )
         else:
-            param_status[pname] = ParamStatus("resolvable", "excited band, low coherence")
+            param_status[pname] = ParamStatus(
+                "resolvable", "excited band, independent signals", tau_h=tau_h, correlation=corr,
+            )
 
     return IdentReport(
         param_status=param_status,
