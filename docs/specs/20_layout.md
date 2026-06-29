@@ -1,8 +1,10 @@
 # 20 — UI Layout
 
-**Status: TARGET.** The current code uses a 3-tab layout (Elements / Topology+Routing /
-Parameters). This spec replaces it. See [§Known divergences](#known-divergences) for the
-gap.
+**Status: BUILT.** The layout refactor landed (commit `3259ea0`); the 3-tab layout is gone,
+replaced by the 2-column split described here. The topology panel shows the server-rendered
+schemdraw schematic (commit `b47d815`); the app is now multi-model with a home page (see
+[`10_state.md`](10_state.md)). The [§Resolved divergences](#resolved-divergences) section
+records what this replaced. Treat this document as describing existing behavior.
 
 ---
 
@@ -79,22 +81,24 @@ The 2-column split is the large-screen target. Below a width threshold (e.g. `lg
 columns stack vertically (left column first: Elements, Topology, then Time range, Graphs).
 No information is hidden behind tabs at any width — narrow screens scroll.
 
-## Known divergences
+## Resolved divergences
 
-| Where | Current (wrong) | Target |
-| ----- | --------------- | ------ |
+These were the violations the refactor fixed; all resolved:
+
+| Where | Was (wrong) | Now |
+| ----- | ----------- | --- |
 | `App.svelte` | 3 top-level tabs; only one third of the causal chain visible at a time. | Single-page 2-column split; nothing hidden behind tabs. |
 | `ModuleGraph.svelte` routing matrix | A top-level section with its own heading, always shown. | Collapsible "Ownership check" diagnostic under the topology; auto-expands only on problems. |
-| `ModuleGraph.svelte` routing checkboxes | A checkbox rendered for **every** element under **every** module, ignoring `owns` (so RoomMass offers to route a Window, etc.). | Filtered by `m.owns ∩ e`'s offered channels; RoomMass shows no element checkboxes. |
+| `ModuleGraph.svelte` routing checkboxes | A checkbox rendered for **every** element under **every** module, ignoring `owns` (so RoomMass offered to route a Window, etc.). | Filtered by `m.owns ∩ e`'s offered channels; RoomMass shows no element checkboxes. |
 
 ## Acceptance checklist
 
-- [ ] No top-level tabs; Elements, Topology, Time-range, and Graphs are simultaneously
+- [x] No top-level tabs; Elements, Topology, Time-range, and Graphs are simultaneously
       reachable on a large screen.
-- [ ] Editing an element on the left visibly updates the topology and the right-hand graphs
+- [x] Editing an element on the left visibly updates the topology and the right-hand graphs
       without navigation.
-- [ ] The routing matrix is collapsed by default and auto-expands when `problems` is
+- [x] The routing matrix is collapsed by default and auto-expands when `problems` is
       non-empty.
-- [ ] A module never shows a routing control for an element it cannot own; RoomMass shows no
+- [x] A module never shows a routing control for an element it cannot own; RoomMass shows no
       element checkboxes.
-- [ ] Columns stack (not hide) on narrow widths.
+- [x] Columns stack (not hide) on narrow widths.

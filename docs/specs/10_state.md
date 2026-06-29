@@ -1,8 +1,8 @@
 # 10 — Frontend State & Data Flow
 
-**Status: TARGET.** The current code does **not** satisfy this spec. See
-[§Known divergences](#known-divergences-current-bugs) for exactly where it differs.
-This document is the acceptance criterion for the state-management refactor.
+**Status: BUILT.** The state-management refactor landed (commit `3259ea0`); the code now
+satisfies this spec. The [§Resolved divergences](#resolved-divergences) section records the
+bugs this replaced. Treat this document as describing existing behavior.
 
 ---
 
@@ -126,24 +126,24 @@ fixtures while writes go to a real backend whose state never matched those fixtu
    do. A manual "Refresh" (re-run `refreshAll`) is acceptable as a recovery affordance, but
    it is not part of the normal edit loop.
 
-## Known divergences (current bugs)
+## Resolved divergences
 
-The code as of this writing violates the spec in these specific ways. The refactor is "make
-these false":
+These were the violations the refactor fixed. Recorded for history (the bugs the design
+prevents), now all resolved:
 
-| # | Where | Current (wrong) | Target |
-| - | ----- | --------------- | ------ |
-| 1 | `stores/model.js` (`import.meta.env.DEV` branch) | Auto-loads static fixtures for **reads** while mutation handlers **write** to the real backend → split brain; "Reload fixtures" stomps backend state back to the static file. | One source per session; mock at the transport boundary; no auto-switch. |
-| 2 | `ElementList.svelte`, `ModuleGraph.svelte` | Each mutation handler re-implements `await api(); Promise.all([fetchAssembly, fetchDocument]); store.set(...)` (5+ copies). Miss one and the view goes stale. | One `applyMutation()` in the store; components call thin actions and `await`. |
-| 3 | components import `assembly as assemblyStore`, `roomDoc as docStore` and call `.set()` | Components hold write access to the cache. | Components import actions only; `.set()` is private to the store module. |
+| # | Where | Was (wrong) | Now |
+| - | ----- | ----------- | --- |
+| 1 | `stores/model.js` (`import.meta.env.DEV` branch) | Auto-loaded static fixtures for **reads** while mutation handlers **wrote** to the real backend → split brain; "Reload fixtures" stomped backend state. | One source per session; mock at the transport boundary (`mockServer.js`, `VITE_USE_FIXTURES`); no auto-switch. |
+| 2 | `ElementList.svelte`, `ModuleGraph.svelte` | Each mutation handler re-implemented `await api(); Promise.all([fetchAssembly, fetchDocument]); store.set(...)`. | One `applyMutation()` in the store; components call thin actions and `await`. |
+| 3 | components imported `assembly as assemblyStore`, `roomDoc as docStore` and called `.set()` | Components held write access to the cache. | Components import actions only; `.set()` is private to the store module. |
 
 ## Acceptance checklist
 
-- [ ] Adding / editing / deleting an element updates the element cards **and** the routing
+- [x] Adding / editing / deleting an element updates the element cards **and** the routing
       matrix **and** the topology **and** the parameter table, with no manual refresh.
-- [ ] Adding / deleting a module, and changing routing, do the same.
-- [ ] No component imports raw `api.js` mutators or `*.set`.
-- [ ] Removing the dev fixture path does not change any component's code (the mutation path
+- [x] Adding / deleting a module, and changing routing, do the same.
+- [x] No component imports raw `api.js` mutators or `*.set`.
+- [x] Removing the dev fixture path does not change any component's code (the mutation path
       is identical in mock and live modes).
-- [ ] A failed mutation surfaces an error and leaves all stores consistent with the last
+- [x] A failed mutation surfaces an error and leaves all stores consistent with the last
       good server state.

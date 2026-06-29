@@ -35,9 +35,9 @@ around that authoring core.
 | #   | Spec                          | Scope                                                                 | Status   |
 | --- | ----------------------------- | --------------------------------------------------------------------- | -------- |
 | 00  | this file                     | overview, spec map, reading order                                     | —        |
-| 10  | [`10_state.md`](10_state.md)  | **frontend data flow** — store as single source of truth, mutation→re-pull invariant, fixtures | **target** (not yet built) |
-| 20  | [`20_layout.md`](20_layout.md)| **UI layout** — 2-column single-page; routing matrix demoted to diagnostic | **target** (not yet built) |
-| 30  | [`30_api.md`](30_api.md)      | the FastAPI ↔ Svelte contract (endpoints, JSON shapes)                | **frozen, mostly built** |
+| 10  | [`10_state.md`](10_state.md)  | **frontend data flow** — store as single source of truth, mutation→re-pull invariant, fixtures, multi-model | **built** |
+| 20  | [`20_layout.md`](20_layout.md)| **UI layout** — 2-column single-page; routing matrix demoted to diagnostic | **built** |
+| 30  | [`30_api.md`](30_api.md)      | the FastAPI ↔ Svelte contract (endpoints, JSON shapes, model management) | **frozen, built** |
 | 40  | [`40_physics.md`](40_physics.md) | engine invariants as checkable statements (star topology, exactly-once ownership, channels, forms, band rule) | **built** (Steps 0–1) |
 
 **Status legend.** *target* = the spec describes the intended design; the current code
