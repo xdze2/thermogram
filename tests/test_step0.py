@@ -8,6 +8,7 @@ from thnodes import (
     Channel,
     DirectLoss,
     HeavyWall,
+    IndoorMass,
     Layer,
     OuterWall,
     RoomMass,
@@ -19,9 +20,14 @@ from thnodes import (
 
 # ── shared fixtures ────────────────────────────────────────────────────────────
 
-FLOOR_AREA = 20.0  # m²
+# 5 m × 4 m × 2.5 m room → 20 m² floor area
 N_HOURS = 48
 DT = 3600.0        # 1-hour step
+
+
+def _indoor_mass():
+    """Standard 5×4×2.5 m normal room for tests."""
+    return IndoorMass(a=5.0, b=4.0, c=2.5, furniture="normal")
 
 
 def _light_wall():
@@ -57,8 +63,10 @@ def _constant_signals(n: int, T_ext: float = 20.0, G_sol: float = 0.0) -> dict:
 def _build_caravan():
     win = _window()
     wall = _light_wall()
+    indoor = _indoor_mass()
     asm = Assembler()
-    asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+    asm.add_element(indoor)
+    asm.add_module(RoomMass())
     asm.add_module(DirectLoss(), elements=[wall, win])
     asm.add_module(SolarGainModule(), elements=[win])
     return asm.build()
@@ -88,8 +96,10 @@ def test_caravan_signal_names():
 def _build_heavy():
     heavy = _heavy_wall()
     win = _window()
+    indoor = _indoor_mass()
     asm = Assembler()
-    asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+    asm.add_element(indoor)
+    asm.add_module(RoomMass())
     asm.add_module(DirectLoss(), elements=[win])          # window conduction only
     asm.add_module(HeavyWall(), elements=[heavy])         # heavy wall CONDUCTION+STORAGE+SOLAR_OPAQUE
     asm.add_module(SolarGainModule(), elements=[win])     # window SOLAR_TRANSMISSION
@@ -112,8 +122,10 @@ def test_heavy_param_names():
 def test_double_count_raises():
     """Same element routed to two modules that both claim CONDUCTION must raise."""
     heavy = _heavy_wall()
+    indoor = _indoor_mass()
     asm = Assembler()
-    asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+    asm.add_element(indoor)
+    asm.add_module(RoomMass())
     asm.add_module(DirectLoss(), elements=[heavy])   # claims CONDUCTION
     asm.add_module(HeavyWall(), elements=[heavy])    # also claims CONDUCTION → double-count
     with pytest.raises(ValueError, match="[Dd]ouble"):

@@ -55,8 +55,15 @@ ELEMENT_TYPES: dict[str, dict] = {
     "IndoorMass": {
         "ctor": IndoorMass,
         "fields": [
-            {"name": "area", "type": "float", "default": 0.0},
-            {"name": "C", "type": "float"},
+            {"name": "a", "type": "float"},
+            {"name": "b", "type": "float"},
+            {"name": "c", "type": "float"},
+            {
+                "name": "furniture",
+                "type": "enum",
+                "options": ["bare", "normal", "heavy"],
+                "default": "normal",
+            },
         ],
     },
     "HeatSource": {
@@ -80,9 +87,7 @@ MODULE_TYPES: dict[str, dict] = {
         "ctor": RoomMass,
         "owns": [],
         "params": ["C_room"],
-        "fields": [
-            {"name": "floor_area", "type": "float"},
-        ],
+        "fields": [],
     },
     "DirectLoss": {
         "ctor": DirectLoss,

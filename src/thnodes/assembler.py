@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 
 from .channels import Budget, Channel
-from .elements import EnvelopeElement
+from .elements import EnvelopeElement, IndoorMass
 from .modules import RoomMass, TopologyModule
 
 Params = dict[str, float]
@@ -91,6 +91,8 @@ class Assembler:
         self._room_mass: RoomMass | None = None
         # list of (module, [elements routed to it])
         self._routes: list[tuple[TopologyModule, list[EnvelopeElement]]] = []
+        # All elements ever registered (routed or not), keyed by id()
+        self._all_elements: dict[int, EnvelopeElement] = {}
 
     def add_module(
         self,
@@ -99,12 +101,28 @@ class Assembler:
     ) -> "Assembler":
         """
         Register a module and, optionally, the elements whose channel budgets it spends.
-        RoomMass takes no elements (it derives its prior from floor_area alone).
+        RoomMass takes no elements — the assembler auto-pairs it with the room's
+        IndoorMass element (the element carrying the STORAGE budget for the room node).
         """
+        elems = list(elements or [])
+        # Track all registered elements for IndoorMass auto-pairing.
+        for e in elems:
+            self._all_elements[id(e)] = e
         if isinstance(module, RoomMass):
             self._room_mass = module
         else:
-            self._routes.append((module, list(elements or [])))
+            self._routes.append((module, elems))
+        return self
+
+    def add_element(self, element: EnvelopeElement) -> "Assembler":
+        """
+        Register a standalone element (not routed to any module).
+
+        Needed so IndoorMass can be registered with the assembler without being
+        attached to a module — the assembler detects it and auto-routes its STORAGE
+        budget to RoomMass.
+        """
+        self._all_elements[id(element)] = element
         return self
 
     def build(self, strict: bool = True) -> "System | tuple[System | None, list[Problem]]":
@@ -126,8 +144,30 @@ class Assembler:
             else:
                 problems.append(Problem(kind=kind, message=message, cell=cell))
 
-        if self._room_mass is None:
-            _problem("missing_room_mass", "RoomMass module is required.")
+        # ── Locate IndoorMass element for RoomMass auto-pairing ───────────────
+        # Scan _all_elements (registered via add_module or add_element).
+        indoor_mass_elem: IndoorMass | None = None
+        for elem in self._all_elements.values():
+            if isinstance(elem, IndoorMass):
+                indoor_mass_elem = elem
+                break  # exactly one IndoorMass expected; use the first found
+
+        # ── Validate RoomMass + IndoorMass presence ───────────────────────────
+        # Per spec I3: absence of either is a missing_room_mass problem.
+        if self._room_mass is None or indoor_mass_elem is None:
+            if self._room_mass is None and indoor_mass_elem is None:
+                _problem(
+                    "missing_room_mass",
+                    "RoomMass module and IndoorMass element are both required.",
+                )
+            elif self._room_mass is None:
+                _problem("missing_room_mass", "RoomMass module is required.")
+            else:
+                _problem(
+                    "missing_room_mass",
+                    "IndoorMass element is required alongside RoomMass (the assembler "
+                    "auto-routes its STORAGE budget to C_room).",
+                )
             if not strict:
                 return None, problems
             # strict path already raised above
@@ -219,7 +259,17 @@ class Assembler:
         priors: dict[str, tuple[float, float]] = {}
         contributions: dict[str, list[dict]] = {}
 
-        priors.update(self._room_mass.derive_priors({}))
+        # Auto-pair: compute IndoorMass STORAGE budget and feed it to RoomMass.
+        # The (element_id, Channel.STORAGE) key mirrors the format used by other
+        # modules — RoomMass.derive_priors iterates cells by (_, ch) to find STORAGE.
+        assert indoor_mass_elem is not None  # guaranteed by the guard above
+        indoor_mass_channels = indoor_mass_elem.channels()
+        room_storage_cells: dict[tuple[int, Channel], Budget] = {}
+        if Channel.STORAGE in indoor_mass_channels:
+            room_storage_cells[(id(indoor_mass_elem), Channel.STORAGE)] = (
+                indoor_mass_channels[Channel.STORAGE]
+            )
+        priors.update(self._room_mass.derive_priors(room_storage_cells))
 
         for mod, _ in self._routes:
             cells = module_cells[mod.name]

@@ -165,11 +165,11 @@ Returns the type schemas the frontend uses to render add/edit forms.
     {"type_name": "Window",     "fields": [{"name":"area","type":"float"},{"name":"orientation","type":"enum","options":["S","SE","SW","E","W","NE","NW","N"]},{"name":"U","type":"float"},{"name":"shgc","type":"float"}]},
     {"type_name": "Floor",      "fields": [{"name":"area","type":"float"},{"name":"boundary","type":"enum","options":["ground","adjacent","exposed"]},{"name":"layers","type":"list[layer]"}]},
     {"type_name": "Partition",  "fields": [{"name":"area","type":"float"},{"name":"layers","type":"list[layer]"}]},
-    {"type_name": "IndoorMass", "fields": [{"name":"area","type":"float","default":0.0},{"name":"C","type":"float"}]},
+    {"type_name": "IndoorMass", "fields": [{"name":"a","type":"float"},{"name":"b","type":"float"},{"name":"c","type":"float"},{"name":"furniture","type":"enum","options":["bare","normal","heavy"],"default":"normal"}]},
     {"type_name": "HeatSource", "fields": [{"name":"area","type":"float","default":0.0}]}
   ],
   "module_types": [
-    {"type_name": "RoomMass",       "owns": [],                                    "params": ["C_room"],             "fields": [{"name":"floor_area","type":"float"}]},
+    {"type_name": "RoomMass",       "owns": [],                                    "params": ["C_room"],             "fields": []},
     {"type_name": "DirectLoss",     "owns": ["CONDUCTION"],                        "params": ["H_ve"],               "fields": []},
     {"type_name": "SolarGainModule","owns": ["SOLAR_TRANSMISSION"],                "params": ["shgcA"],              "fields": []},
     {"type_name": "HeavyWall",      "owns": ["CONDUCTION","STORAGE","SOLAR_OPAQUE"],"params": ["H_out","H_in","C_wall"],"fields": []}
@@ -246,7 +246,10 @@ Add a module.
 ```json
 {"type": "HeavyWall", "fields": {}}
 ```
-For `RoomMass`: `{"type": "RoomMass", "fields": {"floor_area": 20.0}}`
+`RoomMass` takes no fields (`{"type": "RoomMass", "fields": {}}`): it is pure topology and
+derives `C_room` by spending the `STORAGE` budget of the room's `IndoorMass` element, to
+which the assembler auto-routes it. The room geometry lives on that element:
+`{"type": "IndoorMass", "fields": {"a": 5.0, "b": 4.0, "c": 2.5, "furniture": "normal"}}`.
 
 **Response `201`:** `<Module>`
 

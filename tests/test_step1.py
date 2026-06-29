@@ -9,6 +9,7 @@ from thnodes import (
     Assembler,
     DirectLoss,
     HeavyWall,
+    IndoorMass,
     Layer,
     OuterWall,
     RoomMass,
@@ -20,7 +21,6 @@ from thnodes import (
     input_excitation,
 )
 
-FLOOR_AREA = 20.0
 DT = 3600.0  # 1-hour steps
 N = 8760     # 1-year synthetic series
 
@@ -29,6 +29,11 @@ N = 8760     # 1-year synthetic series
 
 def _prior_means(sys) -> dict:
     return {p: math.exp(mu) for p, (mu, _) in sys.priors.items()}
+
+
+def _indoor_mass():
+    """Standard 5×4×2.5 m normal room."""
+    return IndoorMass(a=5.0, b=4.0, c=2.5, furniture="normal")
 
 
 def _light_wall():
@@ -49,8 +54,10 @@ def _window():
 def _build_caravan():
     win = _window()
     wall = _light_wall()
+    indoor = _indoor_mass()
     asm = Assembler()
-    asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+    asm.add_element(indoor)
+    asm.add_module(RoomMass())
     asm.add_module(DirectLoss(), elements=[wall, win])
     asm.add_module(SolarGainModule(), elements=[win])
     return asm.build()
@@ -59,8 +66,10 @@ def _build_caravan():
 def _build_heavy():
     heavy = _heavy_wall()
     win = _window()
+    indoor = _indoor_mass()
     asm = Assembler()
-    asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+    asm.add_element(indoor)
+    asm.add_module(RoomMass())
     asm.add_module(DirectLoss(), elements=[win])
     asm.add_module(HeavyWall(), elements=[heavy])
     asm.add_module(SolarGainModule(), elements=[win])

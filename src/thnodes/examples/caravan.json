@@ -2,6 +2,15 @@
   "name": "Caravan",
   "elements": {
     "e0": {
+      "type": "IndoorMass",
+      "fields": {
+        "a": 5.0,
+        "b": 3.0,
+        "c": 2.2,
+        "furniture": "bare"
+      }
+    },
+    "e1": {
       "type": "OuterWall",
       "fields": {
         "area": 12.0,
@@ -15,7 +24,7 @@
         "alpha": 0.6
       }
     },
-    "e1": {
+    "e2": {
       "type": "Window",
       "fields": {
         "area": 3.0,
@@ -28,9 +37,7 @@
   "modules": {
     "m0": {
       "type": "RoomMass",
-      "fields": {
-        "floor_area": 15.0
-      }
+      "fields": {}
     },
     "m1": {
       "type": "DirectLoss",
@@ -44,11 +51,11 @@
   "routes": {
     "m0": [],
     "m1": [
-      "e0",
-      "e1"
+      "e1",
+      "e2"
     ],
     "m2": [
-      "e1"
+      "e2"
     ]
   }
 }

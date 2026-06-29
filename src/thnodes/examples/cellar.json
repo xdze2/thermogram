@@ -2,6 +2,15 @@
   "name": "Cellar",
   "elements": {
     "e0": {
+      "type": "IndoorMass",
+      "fields": {
+        "a": 5.0,
+        "b": 5.0,
+        "c": 2.2,
+        "furniture": "heavy"
+      }
+    },
+    "e1": {
       "type": "Window",
       "fields": {
         "area": 1.0,
@@ -14,9 +23,7 @@
   "modules": {
     "m0": {
       "type": "RoomMass",
-      "fields": {
-        "floor_area": 25.0
-      }
+      "fields": {}
     },
     "m1": {
       "type": "DirectLoss",
@@ -26,7 +33,7 @@
   "routes": {
     "m0": [],
     "m1": [
-      "e0"
+      "e1"
     ]
   }
 }

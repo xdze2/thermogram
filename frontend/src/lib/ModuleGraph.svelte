@@ -338,7 +338,7 @@
               </select>
             </div>
 
-            <!-- Module-type-specific fields (e.g. RoomMass needs floor_area) -->
+            <!-- Module-type-specific fields (all current module types have fields: []) -->
             {#if addModuleTypeDef?.fields?.length}
               {#each addModuleTypeDef.fields as f}
                 <div class="form-control">

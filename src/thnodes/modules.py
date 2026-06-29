@@ -45,13 +45,15 @@ class TopologyModule:
 
 class RoomMass(TopologyModule):
     """
-    The room node itself. Owns T_room and C_room.
-    No form (it IS the integration node); contributes no flux, only C_room.
-    Prior: fast lumped mass from floor area heuristic.
+    The room node itself.  Pure topology: owns T_room and C_room but carries no
+    physical descriptors.  Its C_room prior is derived by spending the STORAGE
+    budget of the room's IndoorMass element, which the assembler auto-routes here.
+
+    No geometry, no floor_area, no heuristic — per spec I4 ("modules spend budgets,
+    they never re-invent them").
     """
 
-    def __init__(self, floor_area: float):
-        self.floor_area = floor_area
+    def __init__(self):
         super().__init__(
             name="RoomMass",
             params=["C_room"],
@@ -61,9 +63,27 @@ class RoomMass(TopologyModule):
         )
 
     def derive_priors(self, cells: dict) -> dict[str, tuple[float, float]]:
-        # ~10 kJ/(m²·K) fast lumped mass (air + light furnishings + surface skins)
-        C_nom = 10_000.0 * self.floor_area
-        return {"C_room": (math.log(C_nom), _SIGMA_LOG)}
+        """
+        Set C_room prior from the STORAGE budget supplied by the assembler.
+
+        ``cells`` is a dict keyed by (element_id, Channel) with Budget values.
+        The assembler injects the IndoorMass STORAGE budget here via auto-pairing.
+        If no STORAGE budget is found (assembler-level error), fall back to a
+        conservative 50 kJ/K so downstream code stays numerically safe.
+        """
+        from .channels import Channel  # local import avoids circular at module level
+
+        C_storage: float | None = None
+        for (_, ch), budget in cells.items():
+            if ch is Channel.STORAGE and budget.C is not None:
+                C_storage = budget.C
+                break
+
+        if C_storage is None or C_storage <= 0.0:
+            # Guard: should not happen when an IndoorMass element is present.
+            C_storage = 50_000.0  # 50 kJ/K conservative fallback
+
+        return {"C_room": (math.log(C_storage), _SIGMA_LOG)}
 
     def flux_room(self, params, signals, states) -> float:
         return 0.0

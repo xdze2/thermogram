@@ -71,9 +71,31 @@ module presents a physically meaningless control.
   field (the matrix already computes this `hasBudget` test).
 - `m.owns` is already in the registry payload (`module_types[].owns`) — **no backend change
   is needed**; the frontend simply must use it.
-- **`RoomMass` owns nothing and takes no elements.** Its card shows its `floor_area` field
-  and **no** element checkboxes at all. (Routing a Window into RoomMass is already a no-op
+- **`RoomMass` owns nothing, takes no fields, and the user routes nothing into it.** The
+  assembler auto-pairs it with the room's `IndoorMass` element. Its card shows **no** fields
+  and **no** element checkboxes. The room geometry (`a, b, c`, `furniture`) is authored on the
+  `IndoorMass` **element** card instead. (Routing a Window into RoomMass is a no-op
   server-side; the UI must not offer it.)
+
+## Every shown value carries its physical unit
+
+This is a correctness-of-communication requirement, not decoration. A thermal model is a pile
+of quantities in different orders of magnitude (J/K, W/K, m, W/m²); a bare number is
+ambiguous and invites the user to mis-enter or mis-read it.
+
+> **Rule.** Every numeric value the UI **displays or accepts** — element fields, derived
+> budgets, module parameters/priors, simulation outputs, axis labels — is shown with its SI
+> physical unit.
+
+- **Inputs:** the unit appears next to the field (label suffix or input-group addon), e.g.
+  `a [m]`, `b [m]`, `c [m]`; `area [m²]`, `U [W/(m²·K)]`, `thickness [m]`.
+- **Derived budgets / parameters / priors:** shown with units too — `UA [W/K]`,
+  `C [J/K]`, `C_room [J/K]`, `H_in [W/K]`, `shgcA [m²]`.
+- **Graphs:** every axis is labelled with its unit (`T_room [°C]`, flux `[W]`, time `[h]`).
+- **Source of truth:** units are a property of the quantity, not the widget. The unit for a
+  field/param/budget-key should come from a single shared map (so `UA` is always `[W/K]`
+  everywhere it appears), not be re-typed per component. `furniture` and other enums are
+  unitless and show no unit.
 
 ## Responsiveness
 
@@ -102,3 +124,5 @@ These were the violations the refactor fixed; all resolved:
 - [x] A module never shows a routing control for an element it cannot own; RoomMass shows no
       element checkboxes.
 - [x] Columns stack (not hide) on narrow widths.
+- [ ] Every displayed/accepted numeric value carries its SI physical unit (inputs, derived
+      budgets, parameters/priors, graph axes); units come from one shared map, not per-widget.

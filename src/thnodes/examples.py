@@ -56,6 +56,7 @@ def _caravan() -> dict:
     """
     Caravan — all-light, single fast band.
 
+    IndoorMass (5×3×2.2 m, bare) + OuterWall (light insulation) + Window.
     RoomMass + DirectLoss (wall + window) + SolarGainModule (window).
     No heavy mass → single T_room state.  Fast time constant.
     """
@@ -63,6 +64,15 @@ def _caravan() -> dict:
         "name": "Caravan",
         "elements": {
             "e0": {
+                "type": "IndoorMass",
+                "fields": {
+                    "a": 5.0,
+                    "b": 3.0,
+                    "c": 2.2,
+                    "furniture": "bare",
+                },
+            },
+            "e1": {
                 "type": "OuterWall",
                 "fields": {
                     "area": 12.0,
@@ -71,7 +81,7 @@ def _caravan() -> dict:
                     "alpha": 0.6,
                 },
             },
-            "e1": {
+            "e2": {
                 "type": "Window",
                 "fields": {
                     "area": 3.0,
@@ -82,14 +92,14 @@ def _caravan() -> dict:
             },
         },
         "modules": {
-            "m0": {"type": "RoomMass", "fields": {"floor_area": 15.0}},
+            "m0": {"type": "RoomMass", "fields": {}},
             "m1": {"type": "DirectLoss", "fields": {}},
             "m2": {"type": "SolarGainModule", "fields": {}},
         },
         "routes": {
             "m0": [],
-            "m1": ["e0", "e1"],
-            "m2": ["e1"],
+            "m1": ["e1", "e2"],
+            "m2": ["e2"],
         },
     }
 
@@ -98,6 +108,7 @@ def _heavy_wall() -> dict:
     """
     Heavy-wall — two bands, good excitation.
 
+    IndoorMass (5×4×2.5 m, normal) + OuterWall (concrete/insulation) + Window.
     RoomMass + DirectLoss (window) + HeavyWall (concrete wall) + SolarGainModule (window).
     T_wall (slow) + T_room (fast).  Independent diurnal signals → both bands identifiable.
     """
@@ -105,6 +116,15 @@ def _heavy_wall() -> dict:
         "name": "Heavy-wall",
         "elements": {
             "e0": {
+                "type": "IndoorMass",
+                "fields": {
+                    "a": 5.0,
+                    "b": 4.0,
+                    "c": 2.5,
+                    "furniture": "normal",
+                },
+            },
+            "e1": {
                 "type": "OuterWall",
                 "fields": {
                     "area": 20.0,
@@ -116,7 +136,7 @@ def _heavy_wall() -> dict:
                     "alpha": 0.6,
                 },
             },
-            "e1": {
+            "e2": {
                 "type": "Window",
                 "fields": {
                     "area": 4.0,
@@ -127,16 +147,16 @@ def _heavy_wall() -> dict:
             },
         },
         "modules": {
-            "m0": {"type": "RoomMass", "fields": {"floor_area": 20.0}},
+            "m0": {"type": "RoomMass", "fields": {}},
             "m1": {"type": "DirectLoss", "fields": {}},
             "m2": {"type": "HeavyWall", "fields": {}},
             "m3": {"type": "SolarGainModule", "fields": {}},
         },
         "routes": {
             "m0": [],
-            "m1": ["e1"],
-            "m2": ["e0"],
-            "m3": ["e1"],
+            "m1": ["e2"],
+            "m2": ["e1"],
+            "m3": ["e2"],
         },
     }
 
@@ -158,15 +178,24 @@ def _cellar() -> dict:
     """
     Cellar — ground-coupled, near-constant interior.
 
-    RoomMass + DirectLoss (small north window to T_ext).  No solar module — the
-    window's SOLAR_TRANSMISSION channel is intentionally unclaimed, which the
-    assembler will warn about.  HeavySlab deferred until a T_ground signal is
-    available.
+    IndoorMass (5×5×2.2 m, heavy furniture/stored items) + small north Window.
+    RoomMass + DirectLoss (window).  No solar module — the window's
+    SOLAR_TRANSMISSION channel is intentionally unclaimed, which the assembler
+    will warn about.  HeavySlab deferred until a T_ground signal is available.
     """
     return {
         "name": "Cellar",
         "elements": {
             "e0": {
+                "type": "IndoorMass",
+                "fields": {
+                    "a": 5.0,
+                    "b": 5.0,
+                    "c": 2.2,
+                    "furniture": "heavy",
+                },
+            },
+            "e1": {
                 "type": "Window",
                 "fields": {
                     "area": 1.0,
@@ -177,12 +206,12 @@ def _cellar() -> dict:
             },
         },
         "modules": {
-            "m0": {"type": "RoomMass", "fields": {"floor_area": 25.0}},
+            "m0": {"type": "RoomMass", "fields": {}},
             "m1": {"type": "DirectLoss", "fields": {}},
         },
         "routes": {
             "m0": [],
-            "m1": ["e0"],
+            "m1": ["e1"],
         },
     }
 

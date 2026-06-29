@@ -57,6 +57,12 @@ The assembler enforces this. In `strict=True` it raises on `double_count` /
 `missing_room_mass` / `duplicate_state`; in `strict=False` (the API path) it collects every
 violation into `problems[]` and still returns partial data — `/assembly` **never 500s**
 (see [`30_api.md`](30_api.md)).
+
+**Room auto-pairing.** `RoomMass` is mandatory (its absence is `missing_room_mass`). It owns
+no channels of its own; instead the assembler **auto-routes the room's `IndoorMass` element**
+(the element carrying the room's `STORAGE` budget) to it — the user never wires the room
+manually. Consequently an `IndoorMass` element is now required alongside `RoomMass`; its
+absence is also a `missing_room_mass` problem.
 → implementation: `assembler.py`; rationale: app_proposal §"The ownership rule".
 
 ## I4 — Modules spend budgets, they never re-invent them
@@ -67,6 +73,13 @@ violation into `problems[]` and still returns partial data — `/assembly` **nev
 Canonical example: `HeavyWall` splits the element's single conserved `U·A` into
 `H_out`/`H_in` by the ISO 6946 inner/outer surface-resistance ratio, around the element's
 `C` (STORAGE). Energy and capacity are conserved by construction.
+
+**The room obeys the same rule.** The room's mass is *not* a module heuristic — it is an
+`IndoorMass` **element** that owns the room geometry (`a, b, c` dimensions + a `furniture`
+level) and computes a `STORAGE` budget from it (air mass `ρ_air·V·c_air` plus a furniture
+term). The `RoomMass` module is **pure topology**: it spends that `STORAGE` budget into the
+`C_room` prior and does no physics of its own. No physical descriptor and no geometry lives
+on a module — fields live on elements, period.
 → rationale: app_proposal §"Prior derivation", §"The ownership rule".
 
 ## I5 — Four canonical flux forms

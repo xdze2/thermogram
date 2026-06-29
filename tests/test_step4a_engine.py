@@ -25,7 +25,9 @@ from thnodes.channels import Channel
 
 # ── shared fixtures ────────────────────────────────────────────────────────────
 
-FLOOR_AREA = 20.0
+def _indoor_mass():
+    """Standard 5×4×2.5 m normal room for tests."""
+    return IndoorMass(a=5.0, b=4.0, c=2.5, furniture="normal")
 
 
 def _light_wall():
@@ -46,8 +48,10 @@ def _window():
 def _build_heavy_strict():
     heavy = _heavy_wall()
     win = _window()
+    indoor = _indoor_mass()
     asm = Assembler()
-    asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+    asm.add_element(indoor)
+    asm.add_module(RoomMass())
     asm.add_module(DirectLoss(), elements=[win])
     asm.add_module(HeavyWall(), elements=[heavy])
     asm.add_module(SolarGainModule(), elements=[win])
@@ -63,8 +67,10 @@ class TestE1NonRaisingAssembly:
     def test_strict_double_count_still_raises(self):
         """strict=True (default) must still raise on a double-counted element."""
         heavy = _heavy_wall()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[heavy])
         asm.add_module(HeavyWall(), elements=[heavy])
         with pytest.raises(ValueError, match="[Dd]ouble"):
@@ -73,8 +79,10 @@ class TestE1NonRaisingAssembly:
     def test_strict_default_double_count_raises(self):
         """strict parameter defaults to True — existing call sites unaffected."""
         heavy = _heavy_wall()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[heavy])
         asm.add_module(HeavyWall(), elements=[heavy])
         with pytest.raises(ValueError):
@@ -83,8 +91,10 @@ class TestE1NonRaisingAssembly:
     def test_non_strict_double_count_returns_problem(self):
         """strict=False returns a double_count problem instead of raising."""
         heavy = _heavy_wall()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[heavy])
         asm.add_module(HeavyWall(), elements=[heavy])
 
@@ -99,8 +109,10 @@ class TestE1NonRaisingAssembly:
     def test_non_strict_double_count_returns_system(self):
         """When RoomMass is present, strict=False returns a System even with double-count."""
         heavy = _heavy_wall()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[heavy])
         asm.add_module(HeavyWall(), elements=[heavy])
 
@@ -128,8 +140,10 @@ class TestE1NonRaisingAssembly:
         """A window routed only to DirectLoss (not SolarGainModule) leaves SOLAR_TRANSMISSION
         unclaimed — strict=False captures it as an unclaimed_channel problem."""
         win = _window()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[win])
         # SolarGainModule intentionally omitted → SOLAR_TRANSMISSION unclaimed
 
@@ -153,8 +167,10 @@ class TestE1NonRaisingAssembly:
         """A correct assembly under strict=False returns an empty problems list."""
         win = _window()
         wall = _light_wall()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[wall, win])
         asm.add_module(SolarGainModule(), elements=[win])
         result, problems = asm.build(strict=False)
@@ -240,7 +256,8 @@ class TestE2TypeRegistry:
 
     def test_construct_indoor_mass_from_schema(self):
         spec = ELEMENT_TYPES["IndoorMass"]
-        mass = spec["ctor"](area=0.0, C=500_000.0)
+        # New IndoorMass takes a, b, c, furniture (no 'area' or 'C' constructor args)
+        mass = spec["ctor"](a=5.0, b=4.0, c=2.5, furniture="normal")
         assert isinstance(mass, IndoorMass)
 
     def test_construct_heat_source_from_schema(self):
@@ -250,7 +267,8 @@ class TestE2TypeRegistry:
 
     def test_construct_room_mass_from_schema(self):
         spec = MODULE_TYPES["RoomMass"]
-        rm = spec["ctor"](floor_area=20.0)
+        # RoomMass is pure topology — takes no fields
+        rm = spec["ctor"]()
         assert isinstance(rm, RoomMass)
 
     def test_construct_direct_loss_from_schema(self):
@@ -362,8 +380,10 @@ class TestE3ParameterContributions:
         """In the caravan, H_ve consumes the wall and window CONDUCTION budgets."""
         win = _window()
         wall = _light_wall()
+        indoor = _indoor_mass()
         asm = Assembler()
-        asm.add_module(RoomMass(floor_area=FLOOR_AREA))
+        asm.add_element(indoor)
+        asm.add_module(RoomMass())
         asm.add_module(DirectLoss(), elements=[wall, win])
         asm.add_module(SolarGainModule(), elements=[win])
         sys = asm.build()

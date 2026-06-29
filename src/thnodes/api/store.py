@@ -62,7 +62,12 @@ def _build_element(spec: ElementSpec) -> EnvelopeElement:
 
 def _build_module(spec: ModuleSpec) -> TopologyModule:
     ctor = MODULE_TYPES[spec.type]["ctor"]
-    return ctor(**spec.fields)
+    # Filter fields to only those declared in the registry for this module type.
+    # This ensures old JSON documents with now-removed fields (e.g. "floor_area"
+    # on RoomMass) load gracefully while a separate agent updates the examples.
+    known_fields = {f["name"] for f in MODULE_TYPES[spec.type].get("fields", [])}
+    filtered = {k: v for k, v in spec.fields.items() if k in known_fields}
+    return ctor(**filtered)
 
 
 # ── serialisation ──────────────────────────────────────────────────────────────
@@ -104,13 +109,18 @@ def roomboc_to_assembler(doc: RoomDoc) -> Assembler:
     """Build an Assembler from the current RoomDoc state."""
     asm = Assembler()
 
-    # Build element objects once, keyed by element id
+    # Build element objects once, keyed by element id.
     elem_objs: dict[str, EnvelopeElement] = {}
     for eid, spec in doc.elements.items():
         try:
             elem_objs[eid] = _build_element(spec)
         except Exception:
             pass  # skip malformed elements; assembler will report problems
+
+    # Register ALL elements with the assembler so IndoorMass is discoverable
+    # for RoomMass auto-pairing even when it is not explicitly routed.
+    for elem in elem_objs.values():
+        asm.add_element(elem)
 
     for mid, spec in doc.modules.items():
         try:

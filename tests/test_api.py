@@ -58,6 +58,13 @@ WINDOW_FIELDS = {
     "shgc": 0.6,
 }
 
+INDOOR_MASS_FIELDS = {
+    "a": 5.0,
+    "b": 4.0,
+    "c": 2.5,
+    "furniture": "normal",
+}
+
 
 def _add_element(client, type_: str, fields: dict) -> str:
     r = client.post(f"{BASE}/elements", json={"type": type_, "fields": fields})
@@ -76,22 +83,24 @@ def _set_routing(client, mid: str, element_ids: list[str]) -> None:
     assert r.status_code == 200, r.text
 
 
-def _build_caravan(client) -> tuple[str, str, str, str, str]:
+def _build_caravan(client) -> tuple[str, str, str, str, str, str]:
     """
-    Build the caravan: OuterWall (light) + Window, RoomMass, DirectLoss, SolarGainModule.
-    Returns (wall_eid, win_eid, rm_mid, dl_mid, sg_mid).
+    Build the caravan: IndoorMass + OuterWall (light) + Window,
+    RoomMass (no fields), DirectLoss, SolarGainModule.
+    Returns (im_eid, wall_eid, win_eid, rm_mid, dl_mid, sg_mid).
     """
+    im_eid = _add_element(client, "IndoorMass", INDOOR_MASS_FIELDS)
     wall_eid = _add_element(client, "OuterWall", LIGHT_WALL_FIELDS)
     win_eid = _add_element(client, "Window", WINDOW_FIELDS)
 
-    rm_mid = _add_module(client, "RoomMass", {"floor_area": 20.0})
+    rm_mid = _add_module(client, "RoomMass")  # no fields — pure topology
     dl_mid = _add_module(client, "DirectLoss")
     sg_mid = _add_module(client, "SolarGainModule")
 
     _set_routing(client, dl_mid, [wall_eid, win_eid])
     _set_routing(client, sg_mid, [win_eid])
 
-    return wall_eid, win_eid, rm_mid, dl_mid, sg_mid
+    return im_eid, wall_eid, win_eid, rm_mid, dl_mid, sg_mid
 
 
 # ── registry ───────────────────────────────────────────────────────────────────
@@ -148,7 +157,7 @@ def test_element_budgets_non_null(client):
 
 
 def test_add_and_delete_module(client):
-    mid = _add_module(client, "RoomMass", {"floor_area": 20.0})
+    mid = _add_module(client, "RoomMass")  # no fields — pure topology
     r = client.get(f"{BASE}/document")
     assert any(m["id"] == mid for m in r.json()["modules"])
 
@@ -189,7 +198,7 @@ def test_assembly_caravan_no_problems(client):
     Test 1: caravan assembled correctly — ownership/parameters/states present,
     problems is empty.
     """
-    wall_eid, win_eid, rm_mid, dl_mid, sg_mid = _build_caravan(client)
+    im_eid, wall_eid, win_eid, rm_mid, dl_mid, sg_mid = _build_caravan(client)
 
     r = client.get(f"{BASE}/assembly")
     assert r.status_code == 200
@@ -226,7 +235,7 @@ def test_assembly_graph_nodes_and_edges(client):
 
 
 def test_assembly_parameter_contributions(client):
-    wall_eid, win_eid, rm_mid, dl_mid, sg_mid = _build_caravan(client)
+    im_eid, wall_eid, win_eid, rm_mid, dl_mid, sg_mid = _build_caravan(client)
     r = client.get(f"{BASE}/assembly")
     data = r.json()
 
@@ -256,8 +265,9 @@ def test_assembly_double_count_in_problems(client):
     Test 2: two modules claiming the same (element, CONDUCTION) cell surfaces
     in problems[] without a 500.
     """
+    _add_element(client, "IndoorMass", INDOOR_MASS_FIELDS)
     win_eid = _add_element(client, "Window", WINDOW_FIELDS)
-    _add_module(client, "RoomMass", {"floor_area": 20.0})
+    _add_module(client, "RoomMass")  # no fields
 
     dl1 = _add_module(client, "DirectLoss")
     dl2 = _add_module(client, "DirectLoss")

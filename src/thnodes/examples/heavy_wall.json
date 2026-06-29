@@ -2,6 +2,15 @@
   "name": "Heavy-wall",
   "elements": {
     "e0": {
+      "type": "IndoorMass",
+      "fields": {
+        "a": 5.0,
+        "b": 4.0,
+        "c": 2.5,
+        "furniture": "normal"
+      }
+    },
+    "e1": {
       "type": "OuterWall",
       "fields": {
         "area": 20.0,
@@ -19,7 +28,7 @@
         "alpha": 0.6
       }
     },
-    "e1": {
+    "e2": {
       "type": "Window",
       "fields": {
         "area": 4.0,
@@ -32,9 +41,7 @@
   "modules": {
     "m0": {
       "type": "RoomMass",
-      "fields": {
-        "floor_area": 20.0
-      }
+      "fields": {}
     },
     "m1": {
       "type": "DirectLoss",
@@ -52,13 +59,13 @@
   "routes": {
     "m0": [],
     "m1": [
-      "e1"
+      "e2"
     ],
     "m2": [
-      "e0"
+      "e1"
     ],
     "m3": [
-      "e1"
+      "e2"
     ]
   }
 }

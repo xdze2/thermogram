@@ -190,7 +190,7 @@ def test_roomdoc_roundtrip_serialisation():
     original = RoomDoc(uid="abc123", name="Round-trip")
     original.elements["e0"] = ElementSpec(type="Window", fields={"area": 5.0, "orientation": "S", "U": 1.1, "shgc": 0.5})
     original.elements["e1"] = ElementSpec(type="OuterWall", fields={"area": 10.0})
-    original.modules["m0"] = ModuleSpec(type="RoomMass", fields={"floor_area": 20.0})
+    original.modules["m0"] = ModuleSpec(type="RoomMass", fields={})
     original.routes["m0"] = ["e0", "e1"]
     original._elem_counter = 2
     original._mod_counter = 1
