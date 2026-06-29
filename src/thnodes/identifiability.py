@@ -98,7 +98,11 @@ def band_overlap(
 class BandExcitation:
     """Excitation summary for one time-constant band."""
     tau: float               # band centre time constant (seconds)
-    band_freq: float         # 1/(2π τ) in Hz
+    band_freq: float         # 1/(2π τ) in Hz — DISPLAY ONLY; does not gate any verdict.
+                             # The lens deliberately uses broadband metrics (has_power +
+                             # max_correlation) rather than a power-at-pole-frequency check,
+                             # because an integrating thermal node is driven by forcing
+                             # faster than its own pole. See docs/TODO.md Step 1 closeout #1.
     has_power: bool          # at least one boundary signal has non-zero variance
     signal_names: list[str]  # which signals are non-constant
     max_correlation: float   # max pairwise |Pearson r| among boundary signals (NaN if <2 sigs)

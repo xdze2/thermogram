@@ -19,6 +19,49 @@ Everything else (FastAPI, Svelte, schemdraw, element editor) is plumbing around 
 So we build whatever **falsifies the bet fastest**, with zero UI. The app earns its place
 only after the engine survives validation.
 
+### Sequencing amendment (2026-06 — UI-first for the authoring layer)
+
+We are **pulling the authoring/visualization half of Step 4 ahead of Steps 2–3**, deliberately.
+Rationale: the genuinely *novel* part of thnodes is not the fit (the Kalman/NUTS layer is
+standard inverse-problem machinery) — it is the **authoring vocabulary** (elements → channels →
+modules) and the **"make the mapping visible"** routing matrix. Those concepts can only be
+validated by *using* them, and Streamlit's widget model fights the routing-matrix + graph
+editing hard enough that prototyping there would push us toward the wrong architecture. Steps
+0–1 already produce everything this UI needs (assembled `System`, `ownership_map()`, the
+identifiability report, forward sim) — so the authoring UI is buildable now and does **not**
+depend on the fit.
+
+What this changes:
+- **Step 4 splits.** Step 4a = authoring + topology + identifiability UI (now). Step 4b = the
+  fit view ③ (after Steps 2–3 land). The fit view simply does not exist in 4a.
+- **Steps 2–3 still happen** — they're deferred, not dropped. The central bet is still the
+  central bet; we're just validating the *novel UX* first while the engine for it already exists.
+- **The Golden Rule "no FastAPI/Svelte until Step 4" is honored in spirit** — this *is* Step 4
+  work, reordered. The engine (Steps 0–1) stays pure NumPy; FastAPI/Svelte are a layer on top,
+  never imported by the physics.
+
+### Multi-model / multi-study (decided 2026-06 — adopt the address space, build no machinery)
+
+The app will eventually manage **many models** (save/load/clone rooms) and **many studies**
+(one identification per data time-range). Decision on doing this now:
+
+- **Multi-model — adopt the *address space*, not the machinery.** Every model-scoped endpoint is
+  `/models/{model_id}/…` from day one, with a single auto-created `default` model; the server
+  holds `dict[model_id, RoomDoc]`. This is ~free now and the *only* genuinely expensive future
+  retrofit (a bare global room would bake "the one room" into every route/store/URL). **Do not**
+  build save/load, persistence, a model list, or a switcher UI yet — that's pure machinery that
+  adds nothing to concept validation. Adding it later is *additive* (new routes), touching no
+  existing endpoint.
+- **Multi-study — design nothing, just don't block it.** A "study" = (model + data time-range +
+  resulting posterior) — it models the *fit*, which doesn't exist yet (Steps 2–3). Its shape is
+  determined by how the Kalman/NUTS layer consumes data; guessing now guesses at the wrong layer.
+  Keep the seam clean by making leaf endpoints (`/simulate`, `/identifiability`) take their data
+  **in the request body**, never from an implicit "current data" singleton. Then a study later
+  becomes a *named, persisted* version of exactly that payload — an additive nesting
+  (`/models/{id}/studies/{sid}/…`), no rewrite. **Do not** add `study_id` anywhere yet.
+
+In one line: **`model_id` in the URL space now; persistence, studies, and their UIs later.**
+
 **Validate with synthetic data first, not real sensor data.** With real data you can never
 tell whether a bad fit is the *method's* fault or the *data's* fault — and our data
 (collinear, occupancy-corrupted) is exactly the kind that fits badly for *data* reasons.
@@ -122,15 +165,35 @@ Cheap once Step 2 exists; how we read every subsequent posterior.
 
 ---
 
-## Step 4 — The app (plumbing)
+## Step 4 — The app
 
-Only after the engine is trusted.
+Split into 4a (authoring/visualization — pulled ahead, see amendment above) and 4b (fit view —
+after Steps 2–3). FastAPI backend wrapping the engine; local, single-user, single-session;
+server-side physics. Svelte + DaisyUI frontend.
 
-- FastAPI backend wrapping the engine. Local, single-user, single-session.
-- Svelte + DaisyUI frontend: element editor, scenario sliders, plots.
-- schemdraw topology rendering (server-side → SVG/PNG).
-- Surface the identifiability report in the UI; make clear it is about *fitting*, not
-  *simulating*.
+### Step 4a — Authoring + topology + identifiability UI (build now)
+
+Validates the novel UX (element/channel/module vocabulary + the routing matrix) against the
+Steps 0–1 engine. **Detailed, parallelizable spec lives in `docs/TODO.md` → "Step 4a".** Summary:
+
+- FastAPI backend: in-memory `dict[model_id, RoomDoc]`; CRUD on elements/modules/routing;
+  `GET /models/{id}/assembly` (the one projection feeding all views — ownership matrix,
+  parameter table + per-element contributions, graph, problems); `POST …/simulate`;
+  `GET …/identifiability`; `GET …/topology.svg`.
+- Engine additions (headless, pure NumPy): non-raising assembly (`problems[]` instead of
+  raise/warn), a type **registry** (element/module schemas for data-driven forms), and surfacing
+  per-parameter **contributions** (which element/channel budget fed each prior — already computed
+  inside `build()`, currently discarded).
+- Svelte + DaisyUI: element cards (add/delete/edit + computed channel budgets), module graph
+  (add/remove modules, wire module→elements, problems highlighted), parameter table (priors +
+  per-element contribution breakdown).
+
+### Step 4b — Fit view ③ (after Steps 2–3)
+
+- Surface the posterior, prior-vs-posterior movement, corner plot, sampler health.
+- The "study" abstraction (per data time-range) lands here, not in 4a (see amendment).
+- Surface the identifiability report alongside; **make clear it is about *fitting*, not
+  *simulating*.**
 
 ---
 

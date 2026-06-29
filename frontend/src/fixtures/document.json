@@ -1,0 +1,76 @@
+{
+  "model_id": "default",
+  "elements": [
+    {
+      "id": "e0",
+      "type": "OuterWall",
+      "label": "OuterWall (S)",
+      "fields": {
+        "area": 12.0,
+        "orientation": "S",
+        "layers": [
+          {"material": "concrete", "thickness": 0.2}
+        ],
+        "alpha": 0.6
+      },
+      "budgets": {
+        "CONDUCTION":   {"UA": 3.2,    "shgcA": null, "alphaA": null,  "C": null},
+        "SOLAR_OPAQUE": {"UA": null,   "shgcA": null, "alphaA": 7.2,   "C": null},
+        "STORAGE":      {"UA": null,   "shgcA": null, "alphaA": null,  "C": 52000.0}
+      }
+    },
+    {
+      "id": "e1",
+      "type": "Window",
+      "label": "Window (S)",
+      "fields": {
+        "area": 3.0,
+        "orientation": "S",
+        "U": 1.2,
+        "shgc": 0.6
+      },
+      "budgets": {
+        "CONDUCTION":         {"UA": 3.6,  "shgcA": null, "alphaA": null, "C": null},
+        "SOLAR_TRANSMISSION": {"UA": null, "shgcA": 1.8,  "alphaA": null, "C": null}
+      }
+    },
+    {
+      "id": "e2",
+      "type": "Floor",
+      "label": "Floor (ground)",
+      "fields": {
+        "area": 20.0,
+        "boundary": "ground",
+        "layers": [
+          {"material": "concrete", "thickness": 0.1}
+        ]
+      },
+      "budgets": {
+        "CONDUCTION": {"UA": 2.1, "shgcA": null, "alphaA": null, "C": null}
+      }
+    },
+    {
+      "id": "e3",
+      "type": "OuterWall",
+      "label": "OuterWall (N)",
+      "fields": {
+        "area": 8.0,
+        "orientation": "N",
+        "layers": [
+          {"material": "brick",      "thickness": 0.12},
+          {"material": "glass_wool", "thickness": 0.08}
+        ],
+        "alpha": 0.5
+      },
+      "budgets": {
+        "CONDUCTION": {"UA": 0.9, "shgcA": null, "alphaA": null, "C": null}
+      }
+    }
+  ],
+  "modules": [
+    {"id": "m0", "type": "RoomMass",       "element_ids": []},
+    {"id": "m1", "type": "DirectLoss",     "element_ids": ["e1","e2","e3"]},
+    {"id": "m2", "type": "HeavyWall",      "element_ids": ["e0"]},
+    {"id": "m3", "type": "SolarGainModule","element_ids": ["e1"]}
+  ]
+}

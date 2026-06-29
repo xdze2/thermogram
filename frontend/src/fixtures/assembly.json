@@ -1,0 +1,80 @@
+{
+  "ownership": [
+    {"element_id": "e0", "element_label": "OuterWall (S)",   "channel": "CONDUCTION",         "module_id": "m2"},
+    {"element_id": "e0", "element_label": "OuterWall (S)",   "channel": "SOLAR_OPAQUE",        "module_id": "m2"},
+    {"element_id": "e0", "element_label": "OuterWall (S)",   "channel": "STORAGE",             "module_id": "m2"},
+    {"element_id": "e1", "element_label": "Window (S)",      "channel": "CONDUCTION",          "module_id": "m1"},
+    {"element_id": "e1", "element_label": "Window (S)",      "channel": "SOLAR_TRANSMISSION",  "module_id": "m3"},
+    {"element_id": "e2", "element_label": "Floor (ground)",  "channel": "CONDUCTION",          "module_id": "m1"},
+    {"element_id": "e3", "element_label": "OuterWall (N)",   "channel": "CONDUCTION",          "module_id": "m1"}
+  ],
+  "parameters": [
+    {
+      "name": "C_room",
+      "module_id": "m0",
+      "prior": {"mu_log": 11.92, "sigma_log": 0.47},
+      "contributions": []
+    },
+    {
+      "name": "H_ve",
+      "module_id": "m1",
+      "prior": {"mu_log": 1.61, "sigma_log": 0.47},
+      "contributions": [
+        {"element_id": "e1", "element_label": "Window (S)",     "channel": "CONDUCTION", "budget_field": "UA", "value": 1.8},
+        {"element_id": "e2", "element_label": "Floor (ground)", "channel": "CONDUCTION", "budget_field": "UA", "value": 2.1},
+        {"element_id": "e3", "element_label": "OuterWall (N)",  "channel": "CONDUCTION", "budget_field": "UA", "value": 0.9}
+      ]
+    },
+    {
+      "name": "shgcA",
+      "module_id": "m3",
+      "prior": {"mu_log": 0.69, "sigma_log": 0.47},
+      "contributions": [
+        {"element_id": "e1", "element_label": "Window (S)", "channel": "SOLAR_TRANSMISSION", "budget_field": "shgcA", "value": 2.0}
+      ]
+    },
+    {
+      "name": "H_out",
+      "module_id": "m2",
+      "prior": {"mu_log": 1.10, "sigma_log": 0.47},
+      "contributions": [
+        {"element_id": "e0", "element_label": "OuterWall (S)", "channel": "CONDUCTION", "budget_field": "UA", "value": 3.2}
+      ]
+    },
+    {
+      "name": "H_in",
+      "module_id": "m2",
+      "prior": {"mu_log": 1.95, "sigma_log": 0.47},
+      "contributions": [
+        {"element_id": "e0", "element_label": "OuterWall (S)", "channel": "CONDUCTION", "budget_field": "UA", "value": 3.2}
+      ]
+    },
+    {
+      "name": "C_wall",
+      "module_id": "m2",
+      "prior": {"mu_log": 12.61, "sigma_log": 0.47},
+      "contributions": [
+        {"element_id": "e0", "element_label": "OuterWall (S)", "channel": "STORAGE", "budget_field": "C", "value": 52000.0}
+      ]
+    }
+  ],
+  "states":  ["T_wall", "T_room"],
+  "signals": ["T_ext", "G_sol"],
+  "graph": {
+    "nodes": [
+      {"id": "T_room", "kind": "room"},
+      {"id": "T_wall", "kind": "state"},
+      {"id": "T_ext",  "kind": "boundary"},
+      {"id": "G_sol",  "kind": "boundary"}
+    ],
+    "edges": [
+      {"from": "T_ext",  "to": "T_room", "module_id": "m1"},
+      {"from": "T_ext",  "to": "T_room", "module_id": "m3"},
+      {"from": "T_ext",  "to": "T_wall", "module_id": "m2"},
+      {"from": "T_wall", "to": "T_room", "module_id": "m2"},
+      {"from": "G_sol",  "to": "T_room", "module_id": "m3"},
+      {"from": "G_sol",  "to": "T_wall", "module_id": "m2"}
+    ]
+  },
+  "problems": []
+}

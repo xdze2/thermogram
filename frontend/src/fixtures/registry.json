@@ -1,0 +1,82 @@
+{
+  "element_types": [
+    {
+      "type_name": "OuterWall",
+      "fields": [
+        {"name": "area",        "type": "float"},
+        {"name": "orientation", "type": "enum", "options": ["S","SE","SW","E","W","NE","NW","N"]},
+        {"name": "layers",      "type": "list[layer]"},
+        {"name": "alpha",       "type": "float", "default": 0.6}
+      ]
+    },
+    {
+      "type_name": "Window",
+      "fields": [
+        {"name": "area",        "type": "float"},
+        {"name": "orientation", "type": "enum", "options": ["S","SE","SW","E","W","NE","NW","N"]},
+        {"name": "U",           "type": "float"},
+        {"name": "shgc",        "type": "float"}
+      ]
+    },
+    {
+      "type_name": "Floor",
+      "fields": [
+        {"name": "area",     "type": "float"},
+        {"name": "boundary", "type": "enum", "options": ["ground","adjacent","exposed"]},
+        {"name": "layers",   "type": "list[layer]"}
+      ]
+    },
+    {
+      "type_name": "Partition",
+      "fields": [
+        {"name": "area",   "type": "float"},
+        {"name": "layers", "type": "list[layer]"}
+      ]
+    },
+    {
+      "type_name": "IndoorMass",
+      "fields": [
+        {"name": "area", "type": "float", "default": 0.0},
+        {"name": "C",    "type": "float"}
+      ]
+    },
+    {
+      "type_name": "HeatSource",
+      "fields": [
+        {"name": "area", "type": "float", "default": 0.0}
+      ]
+    }
+  ],
+  "module_types": [
+    {
+      "type_name": "RoomMass",
+      "owns": [],
+      "params": ["C_room"],
+      "fields": [{"name": "floor_area", "type": "float"}]
+    },
+    {
+      "type_name": "DirectLoss",
+      "owns": ["CONDUCTION"],
+      "params": ["H_ve"],
+      "fields": []
+    },
+    {
+      "type_name": "SolarGainModule",
+      "owns": ["SOLAR_TRANSMISSION"],
+      "params": ["shgcA"],
+      "fields": []
+    },
+    {
+      "type_name": "HeavyWall",
+      "owns": ["CONDUCTION","STORAGE","SOLAR_OPAQUE"],
+      "params": ["H_out","H_in","C_wall"],
+      "fields": []
+    }
+  ],
+  "layer_schema": {
+    "fields": [
+      {"name": "material",  "type": "enum", "options": ["concrete","brick","wood","glass_wool","steel","air"]},
+      {"name": "thickness", "type": "float"}
+    ]
+  }
+}

@@ -11,7 +11,11 @@ enough to start work, but you **must** read these first:
    prediction-error likelihood, not least-squares).
 
 **Golden rules**
-- `uv`-managed. **No FastAPI / Svelte until Step 4.**
+- `uv`-managed. **No FastAPI / Svelte until Step 4.** *(Amended 2026-06: the authoring/visualization
+  half of Step 4 — "Step 4a" — is pulled ahead of the fit (Steps 2–3) to validate the novel UX
+  early. This is still Step 4 work, reordered, not new work before it. The engine stays pure NumPy;
+  FastAPI/Svelte remain a layer on top that the physics never imports. See `docs/roadmap.md` →
+  "Sequencing amendment" and "Step 4a" below.)*
 - **The fit target is the FULL POSTERIOR, sampled with NUTS — not a MAP point.** The data is
   collinear; the posterior is degenerate (ridges); its *shape* is the identifiability answer.
   This dictates the backend: NUTS needs gradients → the Kalman log-likelihood must be
@@ -193,44 +197,43 @@ Goal: predict, **before fitting**, which parameters the data can resolve.
   flagged; the two modules' params marked `borderline/prior_dominated`.
 - A node whose boundary signal has no spectral power in its band → `prior_dominated`.
 
-### 🔧 Step 1 — closeout (DEFERRED — resolve before Step 2 trusts the lens)
+### ✅ Step 1 — closeout (RESOLVED)
 
-The four functions exist, 21 tests green, the three written acceptance criteria are met. **But a
-green lens that is physically *wrong* is worse than no lens — and Step 2's "the lens predicted it
-in advance" validation depends on the lens being right, not just passing.** Resolve these first.
+All four closeout concerns are addressed; 21 tests green with no warnings; the case notebook
+renders the verdicts side by side.
 
-1. **[CORRECTNESS — the big one] Pole-frequency vs excitation-frequency mismatch.**
-   `input_excitation` checks for spectral power **at the pole frequency** `f_band = 1/(2πτ)`. But
-   a slow thermal node is *driven by diurnal forcing that is faster than its own time constant* —
-   it **integrates** that forcing. Example: a τ=40 h wall has `f_band ≈ 1.1e-6 Hz`, while the
-   real excitation (diurnal, 1/24 h ≈ 1.16e-5 Hz) sits ~10× higher. So the lens can mark a node
-   `prior_dominated` ("no power at its band frequency") even though it *is* being driven. The
-   current tests pass only because they place power *exactly at* the pole τ
-   (`test_diurnal_signal_has_power_in_fast_band` sets `taus=[24h]` — signal tuned to the pole,
-   not a realistic τ). **Re-derive what "excited" should mean for an integrating node:** likely
-   "is there power at *or above* the pole frequency" (the node low-passes faster forcing), or use
-   the transfer-function gain `|H(jω)|` from boundary→node across the input's actual spectrum,
-   not a point check at `1/(2πτ)`. Fix, then re-tune the tests to realistic τ values.
+1. **[CORRECTNESS — the big one] Pole-frequency vs excitation-frequency mismatch — RESOLVED by
+   dropping the frequency-point-check entirely.** The original `input_excitation` asked "is there
+   spectral power *at* the pole frequency `f_band = 1/(2πτ)`?" — wrong for an integrating thermal
+   node, which low-passes diurnal forcing that sits ~10× *above* its own pole. Rather than chase
+   the right frequency window (power "at or above" the pole, or a transfer-function `|H(jω)|`
+   sweep), the lens was **re-derived to two broadband metrics that are τ-independent**:
+   - `has_power` = "is the boundary signal non-constant" (`std > 1e-9`). A constant input carries
+     no information about any parameter regardless of τ; a non-constant diurnal input *does* drive
+     a slow node (via integration), so band-frequency placement is irrelevant to whether it's
+     excited at all.
+   - `max_correlation` = max pairwise **broadband Pearson r** among the non-constant boundary
+     signals. Collinearity is a property of the *inputs*, not of the node time constant, so it's
+     computed once and shared across bands. For passive diurnal data (`T_ext`/`G_sol` co-varying
+     all day) this is the metric that actually decides identifiability.
+   `f_band` is still computed and stored on `BandExcitation` for **display only** — it no longer
+   gates any verdict. This is deliberately the simple model for now; a transfer-function gain
+   sweep can replace it later if a case ever needs band-specific excitation, but passive single-
+   room data does not. Tests re-tuned accordingly (no signal-tuned-to-the-pole fixtures remain).
+   *(Decision recorded here because it diverges from the fix originally sketched above — same
+   spirit as the sol-air Plan A/Plan B reconciliation in "Known placeholders".)*
 
-2. **[TEST INTEGRITY] Coherence test threshold doesn't match the verdict threshold.**
-   `test_correlated_signals_flagged` asserts `max_coherence >= 0.4`, but the report flags
-   `borderline` only at `_HIGH_COHERENCE_THRESHOLD = 0.7`. So the test passes at 0.4 while never
-   verifying that genuinely-correlated inputs cross the *flagging* threshold. Either assert
-   `>= 0.7`, or decide that real correlated signals only reach ~0.4–0.7 and lower the verdict
-   threshold to match — but make test and verdict agree.
+2. **[TEST INTEGRITY] Threshold agreement — RESOLVED.** Verdict and test now agree at
+   `_HIGH_CORRELATION_THRESHOLD = 0.7`: `test_step1.py` asserts correlated inputs reach `|r| ≥ 0.7`
+   and independent inputs stay `|r| < 0.7`. (The metric is now Pearson `r`, not scipy `coherence`.)
 
-3. **[ROBUSTNESS] Guard `coherence()` on zero-variance signals.** A constant signal → `0/0` →
-   scipy `RuntimeWarning: invalid value in divide`, NaN coherence flowing into `max()`. Skip
-   coherence when a signal's variance ≈ 0 (it can't be coherent with anything). Silences the
-   warning and removes a NaN-propagation path.
+3. **[ROBUSTNESS] Zero-variance guard — RESOLVED.** Constant signals are excluded up front by the
+   `std > 1e-9` filter, so no `0/0` / NaN path exists. (Moot now that the metric is `corrcoef`
+   over non-constant signals rather than scipy `coherence`.)
 
-4. **[ARTIFACT] Print the report on the canonical cases (see "Case notebooks" below).** Step 1's
-   value is interpretive; there must be an eyeball artifact showing the lens's verdicts on
-   caravan / heavy-diurnal / heavy-collinear side by side. This is also how concern #1 gets
-   caught — the verdicts have to *read* sensibly to a human, not just be green.
-
-**Done when:** #1 re-derived and fixed (tests re-tuned to realistic τ), #2/#3 fixed, `pytest`
-green with no warnings, and the case notebook shows lens verdicts that match physical intuition.
+4. **[ARTIFACT] RESOLVED.** `notebooks/case_rooms.py` renders the per-parameter identifiability
+   report (resolvable / borderline / prior_dominated + reason) across caravan / heavy-wall /
+   collinear.
 
 ---
 
@@ -352,12 +355,187 @@ calibrated and the lens predicts the wide cases, the engine is trusted.
 
 ---
 
-## Step 4 — The app (only after Steps 0–3 are trusted)
+## Step 4a — Authoring + topology + identifiability UI (PULLED AHEAD of Steps 2–3)
 
-- FastAPI backend wrapping the engine. Local, single-user, single-session, server-side physics.
-- Svelte + DaisyUI: element editor, scenario sliders (the simulation toy ①②), fit view (③).
-- schemdraw topology rendering → static SVG/PNG, served by FastAPI.
-- Surface the identifiability report; **make explicit it is about fitting, not simulating.**
+> **Sequencing note:** This is Step 4 work reordered ahead of the fit (Steps 2–3), by decision
+> recorded in `docs/roadmap.md` → "Sequencing amendment". We validate the *novel UX* (the
+> element/channel/module authoring vocabulary + the routing matrix) first, because the engine it
+> needs (Steps 0–1) already exists and the fit does not change the authoring layer. The **fit
+> view ③ is Step 4b** and is out of scope here. Steps 2–3 are deferred, not dropped.
+
+Goal: a FastAPI + Svelte app that lets a user author a room (elements → modules → routing), see
+the **(element × channel) → module ownership matrix**, the **star topology graph**, the
+**parameter table with per-element prior contributions**, run the **forward-sim toy**, and read
+the **identifiability report** — with no fit. Local, single-user, single-session, server-side
+physics.
+
+### Working in parallel — three tracks, one frozen contract
+
+This step is structured so **a backend agent and a frontend agent can work independently** and
+in parallel. The enabling artifact is a **frozen API contract** that both code against. Tracks:
+
+- **Track E (Engine) — pure NumPy, no web deps. MUST LAND FIRST (it is the only shared
+  dependency).** Small, headless, fully testable without the API.
+- **Track B (Backend) — FastAPI over the engine.** Depends on Track E. Codes against the
+  contract; testable with `pytest` + `httpx` (TestClient) without any frontend.
+- **Track F (Frontend) — Svelte + DaisyUI.** Depends on the *contract only*, **not** on Track B
+  running. Built against a **mock server / fixture JSON** of the contract, so it proceeds in
+  parallel with B. Integration (point F at real B) is the last sub-step.
+
+**Rule for parallelism:** the contract (§4a.1) is the interface boundary. Once it's frozen, B and
+F never need to talk — they meet at the JSON. Any contract change is a coordinated edit to §4a.1
+*first*, then both sides adapt. Do not let B or F drift the contract unilaterally.
+
+**Global API conventions (apply to every endpoint):**
+- All model-scoped routes are nested under `/api/models/{model_id}/…`. A single model `"default"`
+  is auto-created at startup. (Multi-model *address space* now; save/load/list/persistence later —
+  see roadmap "Multi-model / multi-study" decision. **Do not** build persistence or a model
+  switcher in 4a.)
+- **No `study_id` anywhere in 4a.** Leaf endpoints (`/simulate`, `/identifiability`) take their
+  signals/data **in the request body**, never from server-side "current data" — this keeps the
+  multi-study seam clean for Step 4b without modeling it now.
+- IDs are server-assigned opaque strings. Mutations return the affected resource; the frontend
+  re-fetches `/assembly` to refresh derived views (no optimistic derived-state on the client).
+
+---
+
+### Track E — Engine additions (pure NumPy, headless, no web deps) — **land first**
+
+These three are the only engine changes 4a needs. Each is independently testable with `pytest`.
+
+- **E1 — Non-raising assembly.** Add an assembly path that **collects problems instead of
+  raising/warning**, returning `(System | None, problems: list[Problem])`. Today
+  `Assembler.build()` raises `ValueError` on double-count, `warnings.warn`s on unclaimed channels,
+  and raises if `RoomMass` is missing. Provide `build(strict=True)` (current behavior, keep it —
+  the headless test suite *wants* the raise) and `build(strict=False)` /
+  `assemble_report()` that returns as-complete-as-possible a `System` plus structured problems.
+  `Problem = {kind, message, cell?: (element_label, channel)}` with
+  `kind ∈ {double_count, unclaimed_channel, missing_room_mass, duplicate_state}`. When `RoomMass`
+  is missing, `System` may be `None` (no `C_room`) — that's a reported problem, not a crash.
+  *Acceptance:* a double-counted room returns a `double_count` problem (not a raise) under
+  `strict=False`; the existing strict raise test still passes.
+
+- **E2 — Type registry.** A module-level registry mapping type-name → constructor + a
+  JSON-serializable **param schema** for both elements and modules, so the frontend renders
+  "add/edit" forms generically instead of hardcoding every type. Shape (suggestion):
+  `ELEMENT_TYPES: dict[str, {ctor, fields: [{name, type, default?, options?}]}]` (e.g. `OuterWall`
+  → `area:float, orientation:enum[S,SE,…], layers:list[{material:enum, thickness:float}],
+  alpha:float`), `MODULE_TYPES: dict[str, {ctor, owns: [channel], params: [str]}]`. Materials enum
+  comes from `materials_db`. *Acceptance:* registry round-trips — constructing every element/module
+  from its schema defaults succeeds and matches the hand-written constructors.
+
+- **E3 — Surface prior contributions.** Expose, per parameter, **which (element, channel) budget
+  fed its prior**. This data already exists inside `build()` as `module_cells`
+  (`{module_name: {(element_id, channel): Budget}}`) but is discarded after `derive_priors`. Add a
+  `System.parameter_contributions()` (or include in the report) →
+  `{param: [{element_label, channel, budget_field, value}]}`. This is the data the parameter
+  table's per-element breakdown and the element card's "what this contributes" both read (one is
+  the transpose of the other). *Acceptance:* on the heavy-wall room, `C_wall`'s contributions list
+  the heavy wall's `STORAGE` budget; `H_ve`'s list the light elements' `CONDUCTION` budgets.
+
+---
+
+### 4a.1 — The frozen API contract (write this doc FIRST, before B or F code)
+
+Produce `docs/api_contract.md` (or an OpenAPI/JSON-schema file) — the single source of truth both
+tracks code against. It must specify request/response JSON for every endpoint below. **Freeze it
+before parallel work starts.** Endpoints:
+
+**Model-scoped CRUD (Track B owns; F consumes):**
+```
+GET    /api/models/{id}/document        full RoomDoc (elements, modules, routes)
+POST   /api/models/{id}/elements        add element {type, fields}        -> {element}
+PATCH  /api/models/{id}/elements/{eid}  modify fields                     -> {element}
+DELETE /api/models/{id}/elements/{eid}
+POST   /api/models/{id}/modules         add module {type}                 -> {module}
+DELETE /api/models/{id}/modules/{mid}
+PUT    /api/models/{id}/modules/{mid}/routing  {element_ids:[...]}        -> {module}
+GET    /api/registry                    ELEMENT_TYPES + MODULE_TYPES + materials (for forms)
+```
+
+**The projection endpoint (the heart — feeds all three views):**
+```
+GET /api/models/{id}/assembly  -> {
+  ownership:   [{element_id, element_label, channel, module_id}]   # routing-matrix cells
+  parameters:  [{name, module_id, prior:{mu_log, sigma_log},
+                 contributions:[{element_id, channel, budget_field, value}]}]   # E3
+  states:      [str]            # state_names (T_room last)
+  signals:     [str]
+  graph:       {nodes:[{id, kind:'room'|'state'|'boundary'}], edges:[{from, to, module_id}]}
+  problems:    [{kind, message, cell?}]    # from E1; never 500 on a mid-edit room
+}
+```
+
+**Physics views (Track B wraps engine; data in request body — no stored "study"):**
+```
+POST /api/models/{id}/simulate         {signals:{T_ext:[…], G_sol:[…]}, x0:[…], params?, dt?}
+                                       -> {t:[…], states:{name:[…]}}   # simulation toy ①②
+GET  /api/models/{id}/identifiability  -> {param_status:{name:{status, reason, tau_h, correlation}}}
+GET  /api/models/{id}/topology.svg     -> image/svg+xml   (wraps draw.py)
+```
+
+*Routing model (decided):* **per-module element lists** — `PUT …/routing {element_ids}`. The
+per-(element×channel) ownership is **computed** (`module.owns ∩ element.channels()`) and surfaced
+read-only in `/assembly.ownership`; the matrix is a derived view, not a hand-edited primitive.
+
+*Invalid-state model (decided):* **always assemble, report problems.** `GET /assembly` never 500s
+on a structurally-incomplete room — it returns partial data + `problems[]`. The UI highlights bad
+cells inline. (This is exactly what E1 enables.)
+
+---
+
+### Track B — FastAPI backend (depends on E + contract)
+
+- `src/thnodes/api/` (new). FastAPI app; in-memory `dict[model_id, RoomDoc]` session store;
+  `RoomDoc` = `{elements:{id→spec}, modules:{id→spec}, routes:{module_id→[element_ids]}}`.
+  Server-assigned IDs. **No persistence** (in-memory only — restart loses state; that's fine for
+  4a).
+- Implement every endpoint in §4a.1. `/assembly` rebuilds via the **E1 non-raising path** on each
+  call (cheap; the room is tiny) and maps engine output → contract JSON.
+- Pydantic schemas mirror the E2 registry (generate from it where practical so they can't drift).
+- Keep all physics **server-side**; the engine is imported, never reimplemented.
+- *Acceptance (headless, no frontend):* `pytest` with FastAPI `TestClient` — author the caravan
+  via CRUD calls, `GET /assembly` returns the expected ownership/parameters/graph; a deliberate
+  double-count surfaces in `problems[]` (not a 500); `/simulate` on the caravan returns a settling
+  `T_room`. Backend is "done" when these pass **without any frontend existing.**
+
+### Track F — Svelte + DaisyUI frontend (depends on contract only)
+
+- Scaffold under `frontend/` (Vite + Svelte + DaisyUI). Build against **mock fixtures** of the
+  §4a.1 contract first (commit a `fixtures/` of example `/assembly`, `/registry` JSON), so F does
+  **not** block on Track B.
+- One shared store hydrated from `GET /assembly`; mutations call CRUD then re-fetch `/assembly`.
+- Three views (build in this order — each is independently demoable against fixtures):
+  1. **Element cards** — list/add/delete/edit (forms driven by `/registry`); each card shows its
+     computed channel budgets + which module-param it feeds (from `parameters[].contributions`).
+  2. **Module graph + routing matrix** — the star topology (`graph`) with add/remove modules and
+     module→element wiring (`PUT …/routing`); the (element × channel) ownership matrix with
+     `problems[]` highlighted on offending cells. *This is the novel "make the mapping visible"
+     artifact — the centerpiece.*
+  3. **Parameter table** — name, prior (μ_log/σ_log), per-element contribution breakdown; plus the
+     **identifiability report** rendered as resolvable/borderline/prior_dominated tags (**label it
+     clearly: about *fitting*, not *simulating***). Scenario sliders → `/simulate` → `T_room` plot
+     (the simulation toy).
+- *Acceptance:* all three views render correctly against the committed fixtures; then the
+  integration sub-step points F at a live Track-B server and the same flows work end-to-end.
+
+### ✅ Step 4a acceptance (integration — after E, B, F land)
+
+- Author the **caravan** and the **current-default (heavy-wall)** rooms entirely through the UI
+  (no Python) — this *is* the authoring-usability test the case notebooks foreshadowed.
+- The ownership matrix matches `System.ownership_map()` for both rooms; the graph shows the star
+  with `T_wall` as a private node on the heavy room.
+- A deliberate double-count (wire two modules to claim one `(element, CONDUCTION)` cell) shows as a
+  highlighted problem in the matrix — **the app does not crash** (E1 + always-assemble contract).
+- The parameter table shows `C_wall` fed by the heavy wall's `STORAGE` budget; the identifiability
+  report renders the same verdicts the Step-1 case notebook produced, labeled as a *fit* property.
+- The forward-sim toy reproduces the Step-0 step-response curves (heavy lags caravan).
+
+### Step 4b — Fit view ③ (deferred to after Steps 2–3)
+
+Out of scope for 4a. Surfaces the posterior (corner plot, prior-vs-posterior movement, sampler
+health) and introduces the **study** abstraction (one identification per data time-range) as the
+additive `/api/models/{id}/studies/{sid}/…` nesting (see roadmap decision). Do not build in 4a.
 
 ---
 
