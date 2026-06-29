@@ -163,7 +163,7 @@ Each element exposes a set of **channels**, each a conserved physical budget com
 | -------------------- | -------------------------------- | ---------------------------------- |
 | `CONDUCTION`         | `U·A`                            | opaque walls, windows, roof, floor |
 | `SOLAR_TRANSMISSION` | `SHGC·A`                         | glazing                            |
-| `SOLAR_OPAQUE`       | `α·A` (sol-air on outer surface) | opaque exterior elements           |
+| `SOLAR_OPAQUE`       | `α·A` (sol-air on outer surface) | **all** opaque exterior elements (light + heavy) |
 | `STORAGE`            | `C` of heavy layers (ρ > 500)    | walls/roof/floor with heavy layers |
 
 Keeping `SOLAR_TRANSMISSION` (glazing) separate from `SOLAR_OPAQUE` (sol-air absorptance on
@@ -195,11 +195,12 @@ hard error at assembly time, not a silent bug in the fit.**
 A wall's `CONDUCTION` channel routes to one of two modules, and *that routing is the topology
 choice* (Bacher's "give this wall its own `Te` state, or not"):
 
-- **`DirectLoss`** — lumped memoryless `H`; the wall's `STORAGE` channel (if any) is ignored.
-  "Light wall." Adds **no new time-constant band**.
-- **`HeavyWall`** — claims the wall's `CONDUCTION` *and* `STORAGE` channels; re-splits the
-  U·A into `H_out`/`H_in` around `C`; adds a private `T_wall` state in a **slow band**.
-  "Heavy wall."
+- **`DirectLoss`** — lumped memoryless `H`; the wall's `STORAGE` channel (if any) is ignored,
+  but it **does** claim the wall's `SOLAR_OPAQUE` (as a memoryless gain — see §Sol-air on a
+  light opaque wall). "Light wall." Adds **no new time-constant band**.
+- **`HeavyWall`** — claims the wall's `CONDUCTION`, `STORAGE` *and* `SOLAR_OPAQUE` channels;
+  re-splits the U·A into `H_out`/`H_in` around `C`; routes sol-air to its private outer node;
+  adds a private `T_wall` state in a **slow band**. "Heavy wall."
 
 The default route is **inferred** from materials (`is_heavy`, ρ > 500, in `materials_db.py`),
 with an **optional per-element override**. The principled criterion for the override is the
@@ -234,6 +235,32 @@ magnitude.
 flux (the `SOLAR_OPAQUE` budget) to `T_ext`. The absorptance enters there, internal to the
 module — consistent with star topology.
 
+**Sol-air on a light opaque wall** (no mass node) reduces to a memoryless gain. The standard
+lumped device is the **sol-air temperature**: absorbed solar is folded into an effective
+outdoor temperature `T_sa = T_ext + α·G_poa / h_se` (the long-wave term is usually dropped),
+and the wall's conduction is driven by `T_sa` instead of `T_ext`:
+
+```
+Q = U·A·(T_sa − T_room) = U·A·(T_ext − T_room)  +  U·A·(α·G_poa)/h_se
+    └──────────────────────┘   └──────── solar bonus term ────────┘
+                 ordinary conduction (DirectLoss)
+```
+
+The second term is the `SOLAR_OPAQUE` budget entering the balance. It is **not a new form**:
+it is a `SolarGain`-shaped flux into `T_room` with **effective area `α·A·(U/h_se)`** instead
+of `SHGC·A`. So a light opaque wall's solar gain is a window-like gain through a *reduced
+aperture*, throttled by the fraction `U/h_se` of absorbed heat that conducts inward rather
+than re-radiating to outdoor air. `DirectLoss` therefore claims **both** `CONDUCTION` and
+`SOLAR_OPAQUE` of its light walls (mirroring how `HeavyWall` claims both, just memoryless).
+
+**Why the throttle matters — and why it's not always negligible.** `h_se ≈ 25 W/m²K`
+(≈ 1/Rse). For an *insulated* light wall `U ≈ 0.3`, so `U/h_se ≈ 1%`: the inward solar gain is
+genuinely negligible and dropping `SOLAR_OPAQUE` is defensible. But for a **thin/uninsulated/
+metal** skin — high `U`, often high `α` if dark — the factor is no longer tiny and the gain is
+a real daytime driver. This is exactly the **caravan** case (all-light, thin-skinned), so the
+"light walls have no solar gain" simplification fails precisely on a headline scenario. The
+gain is throttled, not absent.
+
 ---
 
 ## Module catalogue (canonical)
@@ -252,9 +279,9 @@ wall surface skins) — see §The C_room splitting problem.
 
 ### Memoryless branches
 
-| Module          | Class         | Boundary | Channels it owns                          | Prior logic                          |
-| --------------- | ------------- | -------- | ----------------------------------------- | ------------------------------------ |
-| `DirectLoss`    | `Conductance` | T_ext    | CONDUCTION of light walls + windows + ACH | Σ U×A + 0.34×ACH×V                   |
+| Module          | Class         | Boundary  | Channels it owns                          | Prior logic                          |
+| --------------- | ------------- | --------- | ----------------------------------------- | ------------------------------------ |
+| `DirectLoss`    | `Conductance` | T_ext, G_sol | CONDUCTION + SOLAR_OPAQUE of light walls, CONDUCTION of windows + ACH | Σ U×A + 0.34×ACH×V (loss); Σ α×A×(U/h_se) per orientation (solar) |
 | `GroundLoss`    | `Conductance` | T_ground | CONDUCTION of light ground-contact floor  | Σ U×A                                |
 | `AdjacentLoss`  | `Conductance` | T_adj    | CONDUCTION of partitions                  | Σ U×A                                |
 | `SolarGain`     | `SolarGain`   | G_sol    | SOLAR_TRANSMISSION of windows             | Σ SHGC×A per orientation (8-orient.) |

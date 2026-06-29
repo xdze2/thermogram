@@ -301,8 +301,23 @@ of Kalman. **Never enters the deploy.**
 - **Heavy-wall sol-air** (Step 0 deferral): `forward_sim` uses `_T_sol_air = T_ext`, so the
   heavy wall's `SOLAR_OPAQUE` budget is owned but inactive in the dynamics. Finish with the
   `pvlib` POA work (`T_sa = T_ext + α·G_poa/h_se`).
-- **Sol-air on light walls** (Step 0 deferral): `OuterWall` emits `SOLAR_OPAQUE` but no
-  memoryless module claims it; the proper fix is `DirectLoss` shifting `T_ext → T_sa`.
+- **Sol-air on light walls** (Step 0 deferral — un-deferral spec below). **Note the code chose
+  a different deferral than the original plan and they must be reconciled when un-deferring:**
+  - *What Step 0 did (Plan B):* `OuterWall.channels()` only emits `SOLAR_OPAQUE` when
+    `C_heavy > 0`, so light walls don't offer the channel at all → no warning, but the physics
+    is dropped at the element level. Fine for Step 0; **wrong long-term** (silently zeroes solar
+    on thin/metal light walls — see the caravan).
+  - *What to do when un-deferring (Plan A — the correct model):*
+    1. `OuterWall.channels()` always emits `SOLAR_OPAQUE = Budget(alphaA=α·A)` (drop the
+       `C_heavy > 0` gate on that channel).
+    2. `DirectLoss` claims **both** `CONDUCTION` and `SOLAR_OPAQUE` of its light walls.
+    3. `DirectLoss` adds a **memoryless** solar flux into `T_room`, *not* a new node:
+       a `SolarGain`-shaped term with effective area **`α·A·(U/h_se)`** (`h_se ≈ 25 W/m²K`),
+       per orientation, via `solar_boundary`. Equivalent to driving the conduction off the
+       sol-air temperature `T_sa = T_ext + α·G_poa/h_se`.
+    4. Keep `U/h_se` explicit — it *is* the documentation of why insulated walls (`U/h_se≈1%`)
+       can ignore this but caravan-skin walls (high `U`, high `α`) cannot.
+    See proposal §"Sol-air on a light opaque wall" for the full derivation.
 - `solar_boundary`: cosine-projection placeholder → proper 8-orientation POA model.
 - Band-overlap threshold (~1 decade in τ): empirical, depends on data length/sampling. Pin
   down once real fits run.
