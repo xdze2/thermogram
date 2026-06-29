@@ -4,7 +4,7 @@ Single-room dynamic thermal building simulation + parameter identification.
 
 A user describes a room physically (walls, windows, floor, HVAC…); the app assembles a minimal RC model and either **simulates** indoor temperature forward from weather inputs, or **fits** thermal parameters from sensor data by Bayesian inference.
 
-![Building elements authoring UI](screenshots/app-1782751554268.png)
+![thnodes app — building elements authoring, topology, thermal parameters, identifiability analysis, and forward simulation](screenshots/screeenshot_004.png)
 
 ## Stack
 
