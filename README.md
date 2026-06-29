@@ -1,10 +1,10 @@
-# thnodes `v0.3` *(third prototype)*
+# thnodes `v0.3` _(third prototype)_
 
 Single-room dynamic thermal building simulation + parameter identification.
 
 A user describes a room physically (walls, windows, floor, HVAC…); the app assembles a minimal RC model and either **simulates** indoor temperature forward from weather inputs, or **fits** thermal parameters from sensor data by Bayesian inference.
 
-![thnodes app — building elements authoring, topology, thermal parameters, identifiability analysis, and forward simulation](screenshots/screeenshot_004.png)
+![thnodes app — building elements authoring, topology, thermal parameters, identifiability analysis, and forward simulation](screenshots/screenshot_0004.png)
 
 ## Stack
 
@@ -14,14 +14,14 @@ A user describes a room physically (walls, windows, floor, HVAC…); the app ass
 
 ## Docs
 
-| Doc | Contents |
-|-----|----------|
-| [docs/specs/00_overview.md](docs/specs/00_overview.md) | Start here — spec map and reading order |
-| [docs/specs/30_api.md](docs/specs/30_api.md) | FastAPI ↔ Svelte contract |
-| [docs/specs/40_physics.md](docs/specs/40_physics.md) | Engine invariants (star topology, channels, forms) |
-| [docs/background/app_proposal.md](docs/background/app_proposal.md) | Full design rationale and physics derivation |
-| [docs/roadmap.md](docs/roadmap.md) | Implementation sequencing |
-| [docs/TODO.md](docs/TODO.md) | Current task list |
+| Doc                                                                | Contents                                           |
+| ------------------------------------------------------------------ | -------------------------------------------------- |
+| [docs/specs/00_overview.md](docs/specs/00_overview.md)             | Start here — spec map and reading order            |
+| [docs/specs/30_api.md](docs/specs/30_api.md)                       | FastAPI ↔ Svelte contract                          |
+| [docs/specs/40_physics.md](docs/specs/40_physics.md)               | Engine invariants (star topology, channels, forms) |
+| [docs/background/app_proposal.md](docs/background/app_proposal.md) | Full design rationale and physics derivation       |
+| [docs/roadmap.md](docs/roadmap.md)                                 | Implementation sequencing                          |
+| [docs/TODO.md](docs/TODO.md)                                       | Current task list                                  |
 
 ## Status
 
