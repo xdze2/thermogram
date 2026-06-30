@@ -135,19 +135,21 @@ class GroupResult:
     derived_modules: list[DerivedModule]
     # Auto-created signals (liveness: only signals referenced by at least one element).
     signals: list[Signal]
-    # The IndoorMass element, if present (passed through to Assembler.add_element).
-    _indoor_mass: IndoorMass | None = field(default=None, repr=False)
+    # All IndoorMass elements found (passed through to Assembler.add_element so the
+    # assembler can detect multiples and emit a multiple_room_mass problem).
+    _indoor_masses: list[IndoorMass] = field(default_factory=list, repr=False)
 
     def to_assembler(self) -> Assembler:
         """
         Build a fully-wired Assembler from this GroupResult.
 
-        - Adds the IndoorMass element (for RoomMass auto-pairing).
+        - Adds all IndoorMass elements (the assembler uses the first and emits a
+          problem if more than one is present).
         - Adds every derived module with its claimed elements.
         """
         asm = Assembler()
-        if self._indoor_mass is not None:
-            asm.add_element(self._indoor_mass)
+        for im in self._indoor_masses:
+            asm.add_element(im)
         for dm in self.derived_modules:
             asm.add_module(dm.module, elements=dm.elements)
         return asm
@@ -331,7 +333,7 @@ def group(elements: list[EnvelopeElement]) -> GroupResult:
     # value: list of (element, list[Channel])
     grouped: dict[tuple[str, str | None], list[tuple[EnvelopeElement, list[Channel]]]] = {}
 
-    indoor_mass: IndoorMass | None = None
+    indoor_masses: list[IndoorMass] = []
     room_mass_key: tuple[str, str | None] = ("RoomMass", None)
 
     def _add(key: tuple[str, str | None], elem: EnvelopeElement, channels: list[Channel]) -> None:
@@ -341,7 +343,7 @@ def group(elements: list[EnvelopeElement]) -> GroupResult:
 
         # ── IndoorMass → RoomMass (auto-paired by Assembler) ──────────────────
         if isinstance(elem, IndoorMass):
-            indoor_mass = elem
+            indoor_masses.append(elem)
             # RoomMass entry: no element needed (assembler auto-routes IndoorMass).
             grouped.setdefault(room_mass_key, [])
             continue
@@ -452,7 +454,7 @@ def group(elements: list[EnvelopeElement]) -> GroupResult:
     return GroupResult(
         derived_modules=derived,
         signals=signals,
-        _indoor_mass=indoor_mass,
+        _indoor_masses=indoor_masses,
     )
 
 

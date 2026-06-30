@@ -43,6 +43,7 @@ from thnodes import (
     group,
     derive_signals,
 )
+from thnodes.channels import Channel
 from thnodes.grouping import DerivedModule, GroupResult
 
 
@@ -924,8 +925,8 @@ class TestDerivedModuleStructure:
         """GroupResult must expose the IndoorMass element for to_assembler()."""
         im = _indoor_mass()
         result = group([im, _window("S")])
-        # _indoor_mass is accessible (used internally by to_assembler)
-        assert result._indoor_mass is im
+        # _indoor_masses carries all IndoorMass elements (used internally by to_assembler)
+        assert im in result._indoor_masses
 
     def test_heavy_wall_channels_claimed(self):
         """HeavyWall DerivedModule must claim CONDUCTION, STORAGE, SOLAR_OPAQUE."""
@@ -1033,3 +1034,194 @@ class TestGroupedVsManualCaravan:
         assert T_room[-1] > T_room[0], "T_room should rise toward T_ext"
         assert T_room[-1] < 20.5, "T_room should not overshoot T_ext"
         assert np.all(np.isfinite(T_room))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 13. Heavy ground-floor slab: STORAGE is surfaced, never silent
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHeavyGroundFloorStorage:
+    """
+    A Floor(boundary="ground") with a concrete layer is heavy — it carries a
+    STORAGE budget.  The grouping rule only claims CONDUCTION (routes to
+    DirectLoss[T_ground]); the STORAGE budget is unclaimed.  The assembler must
+    surface this as an explicit, actionable problem — never silently drop it.
+    """
+
+    @pytest.fixture
+    def elements_with_heavy_floor(self):
+        return [
+            _indoor_mass(),
+            Floor(area=20.0, boundary="ground", layers=[_CONCRETE]),
+        ]
+
+    def test_heavy_ground_floor_surfaces_unclaimed_storage(self, elements_with_heavy_floor):
+        """An unclaimed_channel problem is reported for the STORAGE budget."""
+        result = group(elements_with_heavy_floor)
+        asm = result.to_assembler()
+        system, problems = asm.build(strict=False)
+        assert system is not None, "assembly should still succeed (non-fatal problem)"
+
+        storage_probs = [
+            p for p in problems
+            if p.kind == "unclaimed_channel" and p.cell is not None and p.cell[1] == "STORAGE"
+        ]
+        assert storage_probs, (
+            "Expected an unclaimed_channel/STORAGE problem for the heavy ground floor; "
+            f"got problems: {problems}"
+        )
+
+    def test_heavy_ground_floor_problem_message_is_actionable(self, elements_with_heavy_floor):
+        """The problem message must mention 'slab', 'deferred', or 'not yet modelled'."""
+        result = group(elements_with_heavy_floor)
+        asm = result.to_assembler()
+        _, problems = asm.build(strict=False)
+
+        storage_probs = [
+            p for p in problems
+            if p.kind == "unclaimed_channel" and p.cell is not None and p.cell[1] == "STORAGE"
+        ]
+        assert storage_probs
+        msg = storage_probs[0].message.lower()
+        assert "deferred" in msg or "not yet modelled" in msg, (
+            f"Message should explain that the slab mass is a known deferred feature; got: {msg!r}"
+        )
+        assert "floor" in msg or "slab" in msg, (
+            f"Message should identify the element as a floor/slab; got: {msg!r}"
+        )
+
+    def test_heavy_ground_floor_no_fatal_problems(self, elements_with_heavy_floor):
+        """The STORAGE problem is non-fatal — double_count and missing_room_mass must be absent."""
+        result = group(elements_with_heavy_floor)
+        asm = result.to_assembler()
+        system, problems = asm.build(strict=False)
+        fatal = [p for p in problems if p.kind in ("double_count", "missing_room_mass")]
+        assert fatal == []
+        assert system is not None
+
+    def test_light_ground_floor_no_storage_problem(self):
+        """A light floor (insulation only, no STORAGE budget) produces no unclaimed_channel."""
+        light_floor = Floor(area=20.0, boundary="ground", layers=[_LIGHT_LAYER])
+        result = group([_indoor_mass(), light_floor])
+        asm = result.to_assembler()
+        _, problems = asm.build(strict=False)
+        unclaimed = [p for p in problems if p.kind == "unclaimed_channel"]
+        assert unclaimed == [], f"Light floor should have no unclaimed channels; got: {unclaimed}"
+
+    def test_heavy_ground_floor_forward_sim_still_runs(self, elements_with_heavy_floor):
+        """Assembly with an unclaimed STORAGE still produces a runnable system."""
+        result = group(elements_with_heavy_floor)
+        asm = result.to_assembler()
+        system, _ = asm.build(strict=False)
+        assert system is not None
+
+        params = _prior_mean_params(system)
+        n = 50
+        sigs = {name: np.full(n, 10.0) for name in system.signal_names}
+        x0 = np.full(len(system.state_names), 20.0)
+        t_span = (0, (n - 1) * 3600.0)
+
+        t, x = forward_sim(system, sigs, t_span, x0, params, dt=3600.0)
+        assert np.all(np.isfinite(x[-1]))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 14. Multiple IndoorMass: surfaced as a problem, never silent
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestMultipleIndoorMass:
+    """
+    Only one room node (C_room) is supported.  Authoring two or more IndoorMass
+    elements must produce a multiple_room_mass problem — not silently drop the
+    extra capacity.  The assembler should still assemble using the first element.
+    """
+
+    @pytest.fixture
+    def two_mass_elements(self):
+        return [
+            _indoor_mass(),                                    # 5×4×2.5, C ≈ 180900 J/K
+            IndoorMass(a=3, b=4, c=2.5, furniture="normal"),  # 3×4×2.5, C ≈ 108540 J/K
+            _window("S"),
+        ]
+
+    def test_two_indoor_mass_emits_problem(self, two_mass_elements):
+        """Two IndoorMass elements yield a multiple_room_mass problem in non-strict mode."""
+        result = group(two_mass_elements)
+        asm = result.to_assembler()
+        system, problems = asm.build(strict=False)
+
+        mm_probs = [p for p in problems if p.kind == "multiple_room_mass"]
+        assert mm_probs, (
+            f"Expected a multiple_room_mass problem; got problems: {problems}"
+        )
+
+    def test_two_indoor_mass_problem_message_informative(self, two_mass_elements):
+        """The problem message must state the count and explain the limitation."""
+        result = group(two_mass_elements)
+        asm = result.to_assembler()
+        _, problems = asm.build(strict=False)
+
+        mm_probs = [p for p in problems if p.kind == "multiple_room_mass"]
+        assert mm_probs
+        msg = mm_probs[0].message
+        assert "2" in msg, f"Message should state count '2'; got: {msg!r}"
+        assert "one" in msg.lower() or "single" in msg.lower(), (
+            f"Message should state only one node is supported; got: {msg!r}"
+        )
+
+    def test_two_indoor_mass_nonstrict_still_assembles(self, two_mass_elements):
+        """In non-strict mode the assembly succeeds despite the problem."""
+        result = group(two_mass_elements)
+        asm = result.to_assembler()
+        system, problems = asm.build(strict=False)
+        assert system is not None
+
+    def test_two_indoor_mass_uses_first_element(self, two_mass_elements):
+        """C_room must reflect only the first IndoorMass, not both summed."""
+        import math
+
+        first_mass = two_mass_elements[0]  # a=5, b=4, c=2.5
+        expected_C = first_mass.channels()[Channel.STORAGE].C  # ≈ 180900 J/K
+
+        result = group(two_mass_elements)
+        asm = result.to_assembler()
+        system, _ = asm.build(strict=False)
+        assert system is not None
+
+        C_room = math.exp(system.priors["C_room"][0])
+        assert abs(C_room - expected_C) / expected_C < 0.01, (
+            f"C_room ({C_room:.0f}) should match first IndoorMass capacity "
+            f"({expected_C:.0f}), not their sum."
+        )
+
+    def test_two_indoor_mass_strict_raises(self, two_mass_elements):
+        """In strict mode, multiple IndoorMass elements raise ValueError."""
+        result = group(two_mass_elements)
+        asm = result.to_assembler()
+        with pytest.raises(ValueError, match="IndoorMass"):
+            asm.build(strict=True)
+
+    def test_single_indoor_mass_no_multiple_room_mass_problem(self):
+        """The single-IndoorMass happy path must have no multiple_room_mass problem."""
+        elements = [_indoor_mass(), _window("S")]
+        result = group(elements)
+        asm = result.to_assembler()
+        system, problems = asm.build(strict=False)
+        assert system is not None
+        mm_probs = [p for p in problems if p.kind == "multiple_room_mass"]
+        assert mm_probs == [], f"Single IndoorMass should produce no such problem; got: {mm_probs}"
+
+    def test_single_indoor_mass_c_room_unchanged(self):
+        """C_room from a single IndoorMass is unaffected by the new detection logic."""
+        import math
+
+        mass = _indoor_mass()  # a=5, b=4, c=2.5
+        expected_C = mass.channels()[Channel.STORAGE].C
+
+        result = group([mass, _window("S")])
+        asm = result.to_assembler()
+        system, _ = asm.build(strict=False)
+        assert system is not None
+
+        C_room = math.exp(system.priors["C_room"][0])
+        assert abs(C_room - expected_C) / expected_C < 0.01

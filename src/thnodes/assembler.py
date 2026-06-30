@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 
 from .channels import Budget, Channel
-from .elements import EnvelopeElement, IndoorMass
+from .elements import EnvelopeElement, Floor, IndoorMass
 from .modules import RoomMass, TopologyModule
 
 Params = dict[str, float]
@@ -34,7 +34,7 @@ Signals = dict[str, Any]
 class Problem:
     """A structured assembly problem reported in non-raising mode."""
 
-    kind: str        # double_count | unclaimed_channel | missing_room_mass | duplicate_state
+    kind: str        # double_count | unclaimed_channel | missing_room_mass | duplicate_state | multiple_room_mass
     message: str
     cell: tuple[str, str] | None = None  # (element_label, channel_name) or None
 
@@ -137,7 +137,7 @@ class Assembler:
 
         def _problem(kind: str, message: str, cell: tuple[str, str] | None = None) -> None:
             if strict:
-                if kind in ("double_count", "missing_room_mass", "duplicate_state"):
+                if kind in ("double_count", "missing_room_mass", "multiple_room_mass", "duplicate_state"):
                     raise ValueError(message)
                 else:
                     warnings.warn(message, stacklevel=3)
@@ -146,11 +146,14 @@ class Assembler:
 
         # ── Locate IndoorMass element for RoomMass auto-pairing ───────────────
         # Scan _all_elements (registered via add_module or add_element).
+        # Use the first encountered; if multiple exist, emit a problem below.
         indoor_mass_elem: IndoorMass | None = None
+        indoor_mass_count: int = 0
         for elem in self._all_elements.values():
             if isinstance(elem, IndoorMass):
-                indoor_mass_elem = elem
-                break  # exactly one IndoorMass expected; use the first found
+                indoor_mass_count += 1
+                if indoor_mass_elem is None:
+                    indoor_mass_elem = elem  # keep the first found
 
         # ── Validate RoomMass + IndoorMass presence ───────────────────────────
         # Per spec I3: absence of either is a missing_room_mass problem.
@@ -171,6 +174,21 @@ class Assembler:
             if not strict:
                 return None, problems
             # strict path already raised above
+
+        # ── Detect multiple IndoorMass elements ───────────────────────────────
+        # Only one room node (air + furniture lumped as C_room) is supported.
+        # A separate heavy interior mass node is not yet modelled; authoring more
+        # than one IndoorMass cannot be resolved automatically — surface it.
+        if indoor_mass_count > 1:
+            _problem(
+                "multiple_room_mass",
+                f"{indoor_mass_count} IndoorMass elements were found, but only one "
+                "room node is supported. Air and furniture thermal mass are lumped "
+                "into a single fast-band C_room (use the furniture multiplier to "
+                "adjust effective mass). Only the first IndoorMass will be used; "
+                "the remaining ones are ignored. A separate heavy interior mass "
+                "node is not yet modelled.",
+            )
 
         # Step 1: compute (element_id, channel) → Budget for every routed element
         all_element_cells: dict[int, dict[Channel, Budget]] = {}
@@ -226,11 +244,30 @@ class Assembler:
         # Unclaimed channels
         for eid, ch_map in all_element_cells.items():
             label = elem_labels[eid]
+            elem_obj = self._all_elements.get(eid)
             for ch in ch_map:
                 if (eid, ch) not in ownership:
+                    # Provide an actionable message for the known deferred case:
+                    # a heavy floor slab has a STORAGE budget that no module claims
+                    # (a ground-floor heavy-mass node is not yet modelled).
+                    if (
+                        ch is Channel.STORAGE
+                        and isinstance(elem_obj, Floor)
+                        and elem_obj.boundary == "ground"
+                    ):
+                        msg = (
+                            f"Floor slab thermal mass (STORAGE) on element '{label}' "
+                            "is not yet modelled: the ground-floor heavy-mass node is "
+                            "deferred. Its heat capacity is ignored in this assembly. "
+                            "Use a light floor slab (no concrete layer) to suppress "
+                            "this warning, or treat the slab mass as part of IndoorMass "
+                            "by increasing its furniture multiplier."
+                        )
+                    else:
+                        msg = f"Unclaimed channel {ch.name} on element '{label}'."
                     _problem(
                         "unclaimed_channel",
-                        f"Unclaimed channel {ch} on element '{label}'.",
+                        msg,
                         cell=(label, ch.name),
                     )
 

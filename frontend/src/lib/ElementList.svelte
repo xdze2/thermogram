@@ -36,22 +36,34 @@
   let formLoading = false;
 
   // ---------------------------------------------------------------------------
-  // Derived: map from element_id -> [param names that use it]
+  // Derived: map from element_id -> [{ module_id, params: [name, ...] }]
+  // Groups params by their owning module so the card can render
+  // "DirectLoss[T_ext]: H_ve" rather than bare param-name badges.
   // ---------------------------------------------------------------------------
   $: paramsByElement = buildParamsByElement($assembly);
 
   function buildParamsByElement(asm) {
-    const map = {};
-    if (!asm?.parameters) return map;
+    // map: element_id -> Map<module_id, Set<param_name>>
+    const raw = {};
+    if (!asm?.parameters) return {};
     for (const param of asm.parameters) {
       for (const contrib of param.contributions ?? []) {
-        if (!map[contrib.element_id]) map[contrib.element_id] = [];
-        if (!map[contrib.element_id].includes(param.name)) {
-          map[contrib.element_id].push(param.name);
-        }
+        const eid = contrib.element_id;
+        const mid = param.module_id ?? '';
+        if (!raw[eid]) raw[eid] = {};
+        if (!raw[eid][mid]) raw[eid][mid] = new Set();
+        raw[eid][mid].add(param.name);
       }
     }
-    return map;
+    // Convert to a stable array of { module_id, params } per element.
+    const out = {};
+    for (const [eid, moduleMap] of Object.entries(raw)) {
+      out[eid] = Object.entries(moduleMap).map(([mid, nameSet]) => ({
+        module_id: mid,
+        params: [...nameSet],
+      }));
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -355,12 +367,17 @@
               </div>
             {/if}
 
-            <!-- Which parameters this element feeds -->
+            <!-- Which parameters this element feeds, grouped by owning module -->
             {#if paramsByElement[elem.id]?.length}
               <div class="divider my-1 text-xs">Feeds parameters</div>
-              <div class="flex flex-wrap gap-1">
-                {#each paramsByElement[elem.id] as pname}
-                  <span class="badge badge-primary badge-sm">{pname}</span>
+              <div class="flex flex-col gap-1">
+                {#each paramsByElement[elem.id] as group}
+                  <div class="flex flex-wrap items-center gap-1">
+                    <span class="badge badge-ghost badge-xs font-mono">{group.module_id}</span>
+                    {#each group.params as pname}
+                      <span class="badge badge-primary badge-sm">{pname}</span>
+                    {/each}
+                  </div>
                 {/each}
               </div>
             {/if}
