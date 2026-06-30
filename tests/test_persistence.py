@@ -35,7 +35,7 @@ from thnodes.api.store import (
     roomdoc_to_dict,
     save_model,
 )
-from thnodes.api.models import RoomDoc, ElementSpec, ModuleSpec
+from thnodes.api.models import RoomDoc, ElementSpec
 
 
 # ── fixtures ───────────────────────────────────────────────────────────────────
@@ -190,10 +190,7 @@ def test_roomdoc_roundtrip_serialisation():
     original = RoomDoc(uid="abc123", name="Round-trip")
     original.elements["e0"] = ElementSpec(type="Window", fields={"area": 5.0, "orientation": "S", "U": 1.1, "shgc": 0.5})
     original.elements["e1"] = ElementSpec(type="OuterWall", fields={"area": 10.0})
-    original.modules["m0"] = ModuleSpec(type="RoomMass", fields={})
-    original.routes["m0"] = ["e0", "e1"]
     original._elem_counter = 2
-    original._mod_counter = 1
 
     d = roomdoc_to_dict(original)
     restored = roomdoc_from_dict(d)
@@ -203,10 +200,27 @@ def test_roomdoc_roundtrip_serialisation():
     assert set(restored.elements.keys()) == {"e0", "e1"}
     assert restored.elements["e0"].type == "Window"
     assert restored.elements["e0"].fields["area"] == pytest.approx(5.0)
-    assert restored.modules["m0"].type == "RoomMass"
-    assert restored.routes["m0"] == ["e0", "e1"]
     assert restored._elem_counter == 2
-    assert restored._mod_counter == 1
+
+
+def test_roomdoc_roundtrip_ignores_legacy_modules_routes():
+    """
+    Old JSON that contains modules/routes/``_mod_counter`` keys must load
+    without error — those keys are simply ignored.
+    """
+    legacy_dict = {
+        "uid": "legacy1",
+        "name": "Legacy Doc",
+        "elements": {"e0": {"type": "Window", "fields": {"area": 3.0, "orientation": "S", "U": 1.0, "shgc": 0.5}}},
+        "modules": {"m0": {"type": "RoomMass", "fields": {}}},
+        "routes": {"m0": ["e0"]},
+        "_elem_counter": 1,
+        "_mod_counter": 1,
+    }
+    doc = roomdoc_from_dict(legacy_dict)
+    assert doc.uid == "legacy1"
+    assert "e0" in doc.elements
+    assert doc._elem_counter == 1
 
 
 def test_roomdoc_from_dict_missing_counters():
@@ -218,15 +232,11 @@ def test_roomdoc_from_dict_missing_counters():
         "uid": "ex1",
         "name": "Example",
         "elements": {"e0": {"type": "Window", "fields": {}}, "e3": {"type": "Window", "fields": {}}},
-        "modules": {"m1": {"type": "RoomMass", "fields": {}}},
-        "routes": {},
-        # No _elem_counter / _mod_counter
+        # No _elem_counter / _signal_counter
     }
     doc = roomdoc_from_dict(d)
     # max element suffix is 3, so counter = 4
     assert doc._elem_counter == 4
-    # max module suffix is 1, so counter = 2
-    assert doc._mod_counter == 2
 
 
 # ── PATCH /api/models/{uid} (rename) ──────────────────────────────────────────

@@ -1,12 +1,10 @@
 # 20 — UI Layout
 
-**Status: PARTLY BUILT.** The 2-column split (commit `3259ea0`), server-rendered schematic
-(`b47d815`), and multi-model home page are built and current. **The authoring model is
-mid-change**, per [`15_signals_and_grouping.md`](15_signals_and_grouping.md): the left column
-must move from "add modules + tick element×channel cells" to **per-element-type forms whose
-fields include the element's boundary**, with the **topology and modules derived (read-only)**
-and a **generated inputs panel**. Sections below tagged **[§15-pending]** describe that target;
-where they conflict with the still-built routing-matrix behavior, `15` wins.
+**Status: BUILT.** The 2-column split, server-rendered schematic, multi-model home page,
+and per-element-type authoring forms (with boundary fields, treatment toggle, and derived
+read-only topology/modules) are all live. The inputs panel ("Required signals") is rendered
+in the right column from `assembly.required_signals` but currently displays signal badges
+only — series binding (upload/scenario per signal) is not yet wired.
 
 ---
 
@@ -17,7 +15,7 @@ the assembled parameters → changes the simulation. Tabs slice that chain into 
 and hide two-thirds of it at any moment, so the user cannot see cause and effect. The first
 UI test confirmed it "feels hard to understand" for exactly this reason.
 
-## Target: a single-page, 2-column split
+## A single-page, 2-column split
 
 thnodes is a **large-screen, single-user** tool. Use the width. One page, no top-level tabs.
 The left column is **what the room *is*** (authoring / structure); the right column is **how
@@ -28,53 +26,55 @@ it *behaves*** (results). Cause sits on the left, effect on the right, both visi
 ├─────────────────────────────────────────┬───────────────────────────────────────────────┤
 │ LEFT — authoring / structure            │ RIGHT — behavior / results                    │
 │                                         │                                               │
-│  ┌─ Elements ───────────────────────┐   │   ┌─ Time range & signals ───────────────┐    │
-│  │ element cards; + Add element      │   │   │ range selector, scenario / signals    │    │
-│  │ (edit / delete inline)            │   │   │                                       │    │
+│  ┌─ Elements ───────────────────────┐   │   ┌─ Required signals ───────────────────┐    │
+│  │ element cards; + Add element      │   │   │ one badge per boundary signal the     │    │
+│  │ (edit / delete inline)            │   │   │ derived modules demand                │    │
 │  └───────────────────────────────────┘   │   └───────────────────────────────────────┘    │
 │                                         │                                               │
-│  ┌─ Topology ───────────────────────┐   │   ┌─ Graphs ──────────────────────────────┐    │
-│  │ star schematic (server SVG)       │   │   │ T_room (+ states) time series         │    │
-│  │ modules + routing controls        │   │   │ flux / parameter views                │    │
+│  ┌─ Topology ───────────────────────┐   │   ┌─ Simulation & identifiability ────────┐    │
+│  │ star schematic (server SVG)       │   │   │ scenario sliders, T_room trajectory   │    │
+│  │ derived module list (read-only)   │   │   │ identifiability verdict per param      │    │
 │  │ ▸ Ownership check (collapsible)   │   │   │                                       │    │
 │  └───────────────────────────────────┘   │   └───────────────────────────────────────┘    │
 └─────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
 
-- **Left-top — Elements.** The element cards + add/edit/delete. Each element form carries its
-  **boundary** field(s) (orientation / adjacent-room / ground…) and, for a heavy wall, its
-  **treatment** toggle. **[§15-pending]** This is now the *only* authoring surface — there is
-  no "add module" form and no routing control here.
+- **Left-top — Elements.** The element cards + add/edit/delete. Each element form carries
+  its **boundary** field(s) (orientation for OuterWall/Window; boundary enum + adjacent_room
+  for Floor; adjacent room-label for Partition; signal label for HeatSource) and, for a heavy
+  wall, its **treatment** toggle. This is the *only* authoring surface — there is no "add
+  module" form and no routing control here.
 - **Left-bottom — Topology.** The server-rendered star schematic + a **derived, read-only**
   module list (one branch per `(treatment, signal)`, labelled by its boundary signal).
-  **[§15-pending]** Read, don't wire. The "Ownership check" matrix stays as a collapsible
-  diagnostic beneath it.
-- **Right-top — Time range & signals.** Simulation window + the **inputs panel generated from
-  the assembly**: one entry per `Signal` the derived modules require (`T_ext`, `T_kitchen`,
-  `G_sol_S`, `Q_hvac`…), each needing a series or scenario. **[§15-pending]**
-- **Right-bottom — Graphs.** `T_room` (and other states) time series; parameter / flux
-  views (today's `ParameterTable` content folds in here).
+  The "Ownership check" matrix stays as a collapsible diagnostic beneath it.
+- **Right-top — Required signals.** Generated from `assembly.required_signals`: one badge
+  per `Signal` the derived modules demand (`T_ext`, `T_kitchen`, `G_sol_S`, `Q_hvac`…),
+  showing name, kind, and orientation metadata. Series binding (upload/scenario per signal)
+  is not yet built — this section is a display-only list for now.
+- **Right-bottom — Simulation & identifiability.** Scenario sliders (T_ext offset,
+  peak G_sol), `T_room` (and other states) time-series graph, and the identifiability
+  verdict (τ / correlation) per parameter. The parameter / flux budget detail from
+  `ParameterTable` is folded into the derived-module cards (left column).
 
-## Authoring is element forms; the matrix is a diagnostic **[§15-pending]**
+## Authoring is element forms; the matrix is a diagnostic
 
-Under [`15_signals_and_grouping.md`](15_signals_and_grouping.md), **authoring is: add
-elements, set each element's boundary, and (for a heavy wall) pick its treatment.** Modules
-are *derived*; the user neither adds them nor routes elements into them. The element × channel
-matrix is therefore **purely a diagnostic** — the *check* that the grouping rule produced
-exactly-once, complete ownership.
+**Authoring is: add elements, set each element's boundary, and (for a heavy wall) pick its
+treatment.** Modules are *derived* by the server's grouping rule; the user neither adds them
+nor routes elements into them. The element × channel matrix is therefore **purely a
+diagnostic** — the *check* that the grouping rule produced exactly-once, complete ownership.
 
 - The matrix lives **under the topology**, in a **collapsible "Ownership check" panel**, not
   at primary prominence.
-- It draws attention only when it must: if `assembly.problems` is non-empty (which now means
-  an **engine bug** in the rule, not a user mistake — see [`40_physics.md`](40_physics.md)
-  I3), the panel auto-expands and the offending cells are flagged. When the room is clean, it
+- It draws attention only when it must: if `assembly.problems` is non-empty (which means an
+  **engine bug** in the rule, not a user mistake — see [`40_physics.md`](40_physics.md) I3),
+  the panel auto-expands and the offending cells are flagged. When the room is clean, it
   stays collapsed and quiet.
 
-> **Resolved by the direction change.** The old "show a routing control only if `m.owns ∩ e`'s
-> offered channels ≠ ∅" rule, and the per-element routing checkboxes it governed, are
-> **removed** — there are no routing controls to filter. Their correctness concern (never
-> present a physically meaningless wiring) is now satisfied *by construction*: the grouping
-> rule only ever produces meaningful `(treatment, signal)` modules.
+> **Resolved.** The old "show a routing control only if `m.owns ∩ e`'s offered channels ≠ ∅"
+> rule, and the per-element routing checkboxes it governed, are **removed** — there are no
+> routing controls to filter. Their correctness concern (never present a physically meaningless
+> wiring) is now satisfied *by construction*: the grouping rule only ever produces meaningful
+> `(treatment, signal)` modules.
 
 - **The room.** `IndoorMass` is an element with geometry fields (`a, b, c`, `furniture`); the
   assembler auto-pairs it to `RoomMass` (derived). No RoomMass card to author, no routing.
@@ -102,8 +102,8 @@ ambiguous and invites the user to mis-enter or mis-read it.
 ## Responsiveness
 
 The 2-column split is the large-screen target. Below a width threshold (e.g. `lg`), the two
-columns stack vertically (left column first: Elements, Topology, then Time range, Graphs).
-No information is hidden behind tabs at any width — narrow screens scroll.
+columns stack vertically (left column first: Elements, Topology, then Required signals,
+Simulation). No information is hidden behind tabs at any width — narrow screens scroll.
 
 ## Resolved divergences
 
@@ -113,25 +113,30 @@ These were the violations the refactor fixed; all resolved:
 | ----- | ----------- | --- |
 | `App.svelte` | 3 top-level tabs; only one third of the causal chain visible at a time. | Single-page 2-column split; nothing hidden behind tabs. |
 | `ModuleGraph.svelte` routing matrix | A top-level section with its own heading, always shown. | Collapsible "Ownership check" diagnostic under the topology; auto-expands only on problems. |
-| `ModuleGraph.svelte` routing checkboxes | A checkbox rendered for **every** element under **every** module, ignoring `owns` (so RoomMass offered to route a Window, etc.). | Filtered by `m.owns ∩ e`'s offered channels; RoomMass shows no element checkboxes. |
+| `ModuleGraph.svelte` routing checkboxes | A checkbox rendered for **every** element under **every** module, ignoring `owns`. | Removed entirely — modules are derived; there are no routing controls. |
+| Element forms | No boundary or treatment fields; authoring surface was "add module + tick routing cells". | Per-element-type forms with boundary fields and treatment toggle; modules are read-only derived. |
 
 ## Acceptance checklist
 
-Built (layout):
-- [x] No top-level tabs; Elements, Topology, Time-range, and Graphs are simultaneously
-      reachable on a large screen.
+Built (layout + signal-grouping authoring):
+- [x] No top-level tabs; Elements, Topology, Required signals, and Simulation are
+      simultaneously reachable on a large screen.
 - [x] Editing an element on the left visibly updates the topology and the right-hand graphs
       without navigation.
 - [x] The routing matrix is collapsed by default and auto-expands when `problems` is
       non-empty.
 - [x] Columns stack (not hide) on narrow widths.
-
-Pending — signal-grouping direction (**[§15-pending]**):
-- [ ] No "add module" form and no routing controls anywhere in the edit loop; modules are a
+- [x] No "add module" form and no routing controls anywhere in the edit loop; modules are a
       derived read-only list.
-- [ ] Every element form exposes its boundary field(s) (orientation / adjacent-room / ground);
-      a heavy wall exposes its treatment toggle.
-- [ ] The right-column inputs panel is **generated** from the assembly's required `Signal`
-      set (one entry per signal the derived modules demand).
+- [x] Every element form exposes its boundary field(s) (orientation / adjacent-room /
+      adjacent / signal); a heavy wall exposes its treatment toggle.
+- [x] Boundary summary badge and treatment badge shown on element cards.
+
+Pending — narrow gaps:
+- [ ] The right-column "Required signals" panel is display-only (badges). Series binding
+      (upload/scenario/constant per signal) is not yet wired — the user cannot yet assign
+      actual data to each required signal from the UI.
 - [ ] Every displayed/accepted numeric value carries its SI physical unit (inputs, derived
-      budgets, parameters/priors, graph axes); units come from one shared map, not per-widget.
+      budgets, parameters/priors, graph axes); the shared unit map (`UNITS` in
+      `ElementList.svelte`) currently covers only the most common field keys and is not yet
+      a single authoritative map shared across all components.

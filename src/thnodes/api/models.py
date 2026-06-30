@@ -44,35 +44,18 @@ class ElementSpec:
 
 
 @dataclass
-class ModuleSpec:
-    type: str
-    fields: dict[str, Any]
-
-
-@dataclass
 class RoomDoc:
     uid: str = field(default="")              # stable server-assigned opaque UID
     name: str = field(default="Untitled")     # mutable human-readable label
     elements: dict[str, ElementSpec] = field(default_factory=dict)   # id -> spec
-    modules: dict[str, ModuleSpec] = field(default_factory=dict)     # id -> spec
-    # routes: DEPRECATED — slated for removal in D3 once derived-module API lands.
-    # Kept here so that /assembly, /simulate, /topology.svg, examples, and tests
-    # continue to work until the D3 cutover.
-    routes: dict[str, list[str]] = field(default_factory=dict)       # module_id -> [element_ids]
     signals: dict[str, Signal] = field(default_factory=dict)         # id -> Signal
     _elem_counter: int = field(default=0, repr=False)
-    _mod_counter: int = field(default=0, repr=False)
     _signal_counter: int = field(default=0, repr=False)
 
     def next_element_id(self) -> str:
         eid = f"e{self._elem_counter}"
         self._elem_counter += 1
         return eid
-
-    def next_module_id(self) -> str:
-        mid = f"m{self._mod_counter}"
-        self._mod_counter += 1
-        return mid
 
     def next_signal_id(self) -> str:
         sid = f"s{self._signal_counter}"
@@ -139,12 +122,6 @@ class ElementOut(BaseModel):
 class ModuleIn(BaseModel):
     type: str
     fields: dict[str, Any] = {}
-
-
-class ModuleOut(BaseModel):
-    id: str
-    type: str
-    element_ids: list[str]
 
 
 class RoutingIn(BaseModel):

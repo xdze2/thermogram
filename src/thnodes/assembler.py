@@ -1,6 +1,6 @@
 """
-Assembler: routes (element, channel) cells to modules, enforces exactly-once ownership,
-builds the star ODE system.
+Assembler: groups elements into modules, enforces exactly-once ownership of each
+(element, channel) cell, and builds the star ODE system.
 
 Usage:
     asm = Assembler()
@@ -10,7 +10,7 @@ Usage:
     asm.add_module(SolarGainModule(), elements=[window])
     sys = asm.build()
 
-Each element is explicitly routed to a module (or multiple modules for distinct channels).
+Each element is assigned to a module (or multiple modules for distinct channels).
 The assembler then asserts exactly-once ownership per (element, channel) cell.
 """
 
@@ -55,7 +55,7 @@ class System:
     _contributions: dict[str, list[dict]] = field(repr=False, default_factory=dict)
 
     def ownership_map(self) -> dict[tuple[str, "Channel"], str]:
-        """Return the (element_type, channel) -> module_name routing table."""
+        """Return the (element_type, channel) -> module_name ownership table."""
         return dict(self._ownership)
 
     def parameter_contributions(self) -> dict[str, list[dict]]:
@@ -89,9 +89,9 @@ class System:
 class Assembler:
     def __init__(self):
         self._room_mass: RoomMass | None = None
-        # list of (module, [elements routed to it])
-        self._routes: list[tuple[TopologyModule, list[EnvelopeElement]]] = []
-        # All elements ever registered (routed or not), keyed by id()
+        # list of (module, [elements claimed by it])
+        self._module_entries: list[tuple[TopologyModule, list[EnvelopeElement]]] = []
+        # All elements ever registered (grouped or standalone), keyed by id()
         self._all_elements: dict[int, EnvelopeElement] = {}
 
     def add_module(
@@ -111,16 +111,16 @@ class Assembler:
         if isinstance(module, RoomMass):
             self._room_mass = module
         else:
-            self._routes.append((module, elems))
+            self._module_entries.append((module, elems))
         return self
 
     def add_element(self, element: EnvelopeElement) -> "Assembler":
         """
-        Register a standalone element (not routed to any module).
+        Register a standalone element (not grouped into any module).
 
         Needed so IndoorMass can be registered with the assembler without being
-        attached to a module — the assembler detects it and auto-routes its STORAGE
-        budget to RoomMass.
+        attached to a module — the assembler detects it and auto-claims its STORAGE
+        budget for RoomMass.
         """
         self._all_elements[id(element)] = element
         return self
@@ -169,7 +169,7 @@ class Assembler:
                 _problem(
                     "missing_room_mass",
                     "IndoorMass element is required alongside RoomMass (the assembler "
-                    "auto-routes its STORAGE budget to C_room).",
+                    "auto-claims its STORAGE budget for C_room).",
                 )
             if not strict:
                 return None, problems
@@ -190,11 +190,11 @@ class Assembler:
                 "node is not yet modelled.",
             )
 
-        # Step 1: compute (element_id, channel) → Budget for every routed element
+        # Step 1: compute (element_id, channel) → Budget for every claimed element
         all_element_cells: dict[int, dict[Channel, Budget]] = {}
         elem_labels: dict[int, str] = {}
         elem_counter: dict[str, int] = {}
-        for mod, elems in self._routes:
+        for mod, elems in self._module_entries:
             for elem in elems:
                 eid = id(elem)
                 if eid not in all_element_cells:
@@ -204,21 +204,21 @@ class Assembler:
                     elem_labels[eid] = base if n == 0 else f"{base}_{n}"
                     elem_counter[base] = n + 1
 
-        # Step 2: route; enforce exactly-once per (element_id, channel) cell.
+        # Step 2: assign elements to modules; enforce exactly-once per (element_id, channel) cell.
         # Key module_cells by id(mod) so that two modules with the same .name
         # (e.g. DirectLoss[T_ext] and DirectLoss[T_kitchen]) stay separate.
         ownership: dict[tuple[int, Channel], str] = {}
         # Map id(mod) → cells dict; also keep an id→module map for label lookup.
         module_cells: dict[int, dict[tuple[int, Channel], Budget]] = {
-            id(mod): {} for mod, _ in self._routes
+            id(mod): {} for mod, _ in self._module_entries
         }
         # id(mod) → human-readable label for ownership map and problem messages.
         mod_labels: dict[int, str] = {}
-        for mod, _ in self._routes:
+        for mod, _ in self._module_entries:
             sig = getattr(mod, "signal", None)
             mod_labels[id(mod)] = f"{mod.name}[{sig}]" if sig is not None else mod.name
 
-        for mod, elems in self._routes:
+        for mod, elems in self._module_entries:
             mod_id = id(mod)
             mod_label = mod_labels[mod_id]
             for elem in elems:
@@ -279,7 +279,7 @@ class Assembler:
 
         # Step 3: collect state names (private states first, T_room last)
         private_states: list[str] = []
-        for mod, _ in self._routes:
+        for mod, _ in self._module_entries:
             for s in mod.private_states:
                 if s in private_states:
                     _problem("duplicate_state", f"Duplicate private state name {s!r}.")
@@ -290,14 +290,14 @@ class Assembler:
 
         # Step 4: collect param names
         all_params: list[str] = list(self._room_mass.params)
-        for mod, _ in self._routes:
+        for mod, _ in self._module_entries:
             for p in mod.params:
                 if p not in all_params:
                     all_params.append(p)
 
         # Step 5: collect signal names
         all_signals: list[str] = []
-        for mod, _ in self._routes:
+        for mod, _ in self._module_entries:
             for s in mod.signals:
                 if s not in all_signals:
                     all_signals.append(s)
@@ -318,7 +318,7 @@ class Assembler:
             )
         priors.update(self._room_mass.derive_priors(room_storage_cells))
 
-        for mod, _ in self._routes:
+        for mod, _ in self._module_entries:
             cells = module_cells[id(mod)]
             priors.update(mod.derive_priors(cells))
             # Surface which (element, channel) budget fields fed each param's prior.
@@ -338,7 +338,7 @@ class Assembler:
                 if entries:
                     contributions.setdefault(param, []).extend(entries)
 
-        all_mods: list[TopologyModule] = [self._room_mass] + [m for m, _ in self._routes]
+        all_mods: list[TopologyModule] = [self._room_mass] + [m for m, _ in self._module_entries]
         system = System(
             state_names=state_names,
             param_names=all_params,

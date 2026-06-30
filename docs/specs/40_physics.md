@@ -1,10 +1,10 @@
 # 40 — Engine Invariants
 
-**Status: BUILT (Steps 0–1), I8 pending.** The assembler, forward simulation, and
-identifiability lens conform to invariants I1–I7 today. **I8 (the grouping rule) is a
-TARGET** — it specifies how modules are *derived* from element boundaries under the
-direction change in [`15_signals_and_grouping.md`](15_signals_and_grouping.md); the current
-assembler still takes hand-routed modules instead. This spec states the invariants as
+**Status: BUILT.** The assembler, forward simulation, and identifiability lens conform to
+invariants I1–I8 today. I8 (the grouping rule) derives modules from element boundaries per
+[`15_signals_and_grouping.md`](15_signals_and_grouping.md) and is implemented in
+[`../../src/thnodes/grouping.py`](../../src/thnodes/grouping.py); the hand-routed assembler
+path has been retired. This spec states the invariants as
 **checkable rules** the engine and its tests must uphold; the *derivation and rationale* live
 in [`../background/app_proposal.md`](../background/app_proposal.md), which this file links
 into rather than restates.
@@ -167,10 +167,8 @@ problem", §"Identifiability".
   any double-count/unclaimed channel is an engine bug, not user error.
 
 Full specification (Signal object, roles, per-element boundary fields, treatment menus, the
-grouping algorithm, migration from routing) in
+grouping algorithm) in
 **[`15_signals_and_grouping.md`](15_signals_and_grouping.md)**.
-→ status: TARGET — the current assembler takes hand-routed modules
-(`add_module(..., elements=[...])`); the rule layer that derives them is not yet built.
 
 ---
 

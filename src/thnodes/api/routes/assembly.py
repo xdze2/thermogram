@@ -145,8 +145,8 @@ def get_assembly(model_id: str) -> AssemblyOut:
         mid = mod_asmname_to_id.get(mod_name, mod_name)
         # Find the module instance to check private_states and signals.
         from_node = None
-        for route_entry in asm._routes:
-            mod_obj = route_entry[0]
+        for entry in asm._module_entries:
+            mod_obj = entry[0]
             if mod_obj.name == mod_name:
                 if mod_obj.private_states:
                     from_node = mod_obj.private_states[0]

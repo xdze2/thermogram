@@ -27,10 +27,10 @@ def get_document(model_id: str) -> dict:
     doc = get_doc(model_id)
     elements = [element_to_out(eid, spec) for eid, spec in doc.elements.items()]
 
-    # D3: modules and signals are DERIVED from the grouping rule, not from
-    # doc.modules / doc.routes (which are vestigial load-compatibility fields).
-    # doc_to_group_with_elem_map returns the same element objects used inside
-    # the GroupResult, so we can translate dm.elements → doc element IDs.
+    # D3: modules and signals are DERIVED from the grouping rule, not stored
+    # in the document.  doc_to_group_with_elem_map returns the same element
+    # objects used inside the GroupResult, so we can translate
+    # dm.elements → doc element IDs.
     gr, elem_obj_to_eid = doc_to_group_with_elem_map(doc)
 
     # Derived modules: one per (type, signal) key.

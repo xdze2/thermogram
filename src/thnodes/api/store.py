@@ -1,7 +1,7 @@
 """
 In-memory session store: a single dict[model_id, RoomDoc].
-Also contains the roomboc_to_assembler helper, element/module serialisation,
-and the JSON persistence layer (save_model / load_all_models).
+Contains element serialisation and the JSON persistence layer
+(save_model / load_all_models).
 """
 
 from __future__ import annotations
@@ -10,18 +10,14 @@ import json
 import pathlib
 from typing import Any
 
-from ..assembler import Assembler, System
 from ..channels import Budget, Channel
 from ..elements import EnvelopeElement, Layer
 from ..grouping import GroupResult, group
-from ..modules import TopologyModule
-from ..registry import ELEMENT_TYPES, MODULE_TYPES
+from ..registry import ELEMENT_TYPES
 from .models import (
     BudgetOut,
     ElementOut,
     ElementSpec,
-    ModuleOut,
-    ModuleSpec,
     RoomDoc,
     Signal,
     SignalOut,
@@ -63,16 +59,6 @@ def _build_element(spec: ElementSpec) -> EnvelopeElement:
     return ctor(**kwargs)
 
 
-def _build_module(spec: ModuleSpec) -> TopologyModule:
-    ctor = MODULE_TYPES[spec.type]["ctor"]
-    # Filter fields to only those declared in the registry for this module type.
-    # This ensures old JSON documents with now-removed fields (e.g. "floor_area"
-    # on RoomMass) load gracefully while a separate agent updates the examples.
-    known_fields = {f["name"] for f in MODULE_TYPES[spec.type].get("fields", [])}
-    filtered = {k: v for k, v in spec.fields.items() if k in known_fields}
-    return ctor(**filtered)
-
-
 # ── serialisation ──────────────────────────────────────────────────────────────
 
 def _budget_out(budget: Budget) -> BudgetOut:
@@ -98,14 +84,6 @@ def element_to_out(eid: str, spec: ElementSpec) -> ElementOut:
     )
 
 
-def module_to_out(mid: str, spec: ModuleSpec, doc: RoomDoc) -> ModuleOut:
-    return ModuleOut(
-        id=mid,
-        type=spec.type,
-        element_ids=doc.routes.get(mid, []),
-    )
-
-
 def signal_to_out(signal: "Signal | Any") -> SignalOut:
     """
     Serialise a Signal to its API response shape.
@@ -123,37 +101,6 @@ def signal_to_out(signal: "Signal | Any") -> SignalOut:
     )
 
 
-# ── assembler construction ─────────────────────────────────────────────────────
-
-def roomboc_to_assembler(doc: RoomDoc) -> Assembler:
-    """Build an Assembler from the current RoomDoc state."""
-    asm = Assembler()
-
-    # Build element objects once, keyed by element id.
-    elem_objs: dict[str, EnvelopeElement] = {}
-    for eid, spec in doc.elements.items():
-        try:
-            elem_objs[eid] = _build_element(spec)
-        except Exception:
-            pass  # skip malformed elements; assembler will report problems
-
-    # Register ALL elements with the assembler so IndoorMass is discoverable
-    # for RoomMass auto-pairing even when it is not explicitly routed.
-    for elem in elem_objs.values():
-        asm.add_element(elem)
-
-    for mid, spec in doc.modules.items():
-        try:
-            mod = _build_module(spec)
-        except Exception:
-            continue
-        element_ids = doc.routes.get(mid, [])
-        elements = [elem_objs[eid] for eid in element_ids if eid in elem_objs]
-        asm.add_module(mod, elements=elements)
-
-    return asm
-
-
 # ── grouping-rule assembler path (D3) ─────────────────────────────────────────
 
 def doc_to_group(doc: RoomDoc) -> GroupResult:
@@ -161,15 +108,14 @@ def doc_to_group(doc: RoomDoc) -> GroupResult:
     Build element objects from ``doc.elements`` and apply the deterministic
     grouping rule (spec 15 / I8).
 
-    This is the D3 replacement for ``roomboc_to_assembler``.  It derives
-    modules from element boundaries + treatments rather than from the stored
-    ``doc.modules`` / ``doc.routes``.  The returned ``GroupResult`` can be
-    converted to a ready-to-build Assembler via ``result.to_assembler()``.
+    Derives modules from element boundaries + treatments.  The returned
+    ``GroupResult`` can be converted to a ready-to-build Assembler via
+    ``result.to_assembler()``.
 
     Parameters
     ----------
     doc:
-        The in-memory ``RoomDoc`` (elements only; modules/routes are ignored).
+        The in-memory ``RoomDoc`` (elements only).
 
     Returns
     -------
@@ -224,34 +170,6 @@ def doc_to_group_with_elem_map(
 
 
 # ── assembly mapping helpers ───────────────────────────────────────────────────
-
-def _module_name_to_id(doc: RoomDoc) -> dict[str, str]:
-    """
-    Map module internal name (e.g. "DirectLoss") to session ID (e.g. "m1").
-
-    Module names are not unique if the same type is added twice, so we build
-    the reverse map by position: same iteration order as roomboc_to_assembler.
-    We rely on the fact that modules are iterated in insertion order (dict).
-
-    DEPRECATED (routing era): used only by ``roomboc_to_assembler`` callers.
-    The grouping path uses ``_group_module_key_to_id`` instead.
-    """
-    # Build ordered list of (mid, mod_name) as they would be added to assembler.
-    result: dict[str, str] = {}
-    # Track which module names have been seen so we can handle duplicates.
-    name_seen: dict[str, int] = {}
-    for mid, spec in doc.modules.items():
-        try:
-            mod = _build_module(spec)
-            mname = mod.name
-        except Exception:
-            continue
-        count = name_seen.get(mname, 0)
-        key = mname if count == 0 else f"{mname}_{count}"
-        name_seen[mname] = count + 1
-        result[key] = mid
-    return result
-
 
 def _group_module_key_to_stable_id(gr: GroupResult) -> dict[tuple[str, str | None], str]:
     """
@@ -337,10 +255,9 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
           "uid": "...",
           "name": "Untitled",
           "elements": {"e0": {"type": "OuterWall", "fields": {...}}, ...},
-          "modules":  {"m0": {"type": "RoomMass",  "fields": {...}}, ...},
-          "routes":   {"m0": ["e0", "e1"], ...},
+          "signals":  {"s0": {"name": "T_ext", "kind": "temperature", ...}, ...},
           "_elem_counter": 3,
-          "_mod_counter":  2
+          "_signal_counter": 1
         }
 
     This is also the shape that ``examples.load_example`` returns (minus the
@@ -353,11 +270,6 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
             eid: {"type": spec.type, "fields": spec.fields}
             for eid, spec in doc.elements.items()
         },
-        "modules": {
-            mid: {"type": spec.type, "fields": spec.fields}
-            for mid, spec in doc.modules.items()
-        },
-        "routes": dict(doc.routes),
         "signals": {
             sid: {
                 "name": sig.name,
@@ -368,7 +280,6 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
             for sid, sig in doc.signals.items()
         },
         "_elem_counter": doc._elem_counter,
-        "_mod_counter": doc._mod_counter,
         "_signal_counter": doc._signal_counter,
     }
 
@@ -378,19 +289,17 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
     Deserialise a dict (from JSON or from ``examples.load_example``) into a
     RoomDoc.
 
-    The ``_elem_counter`` / ``_mod_counter`` fields are optional.  When absent
-    (examples dict), the counters are set to max-existing-numeric-suffix + 1 so
-    that newly minted IDs never collide with existing ones.
+    The ``_elem_counter`` / ``_signal_counter`` fields are optional.  When
+    absent (examples dict), the counters are set to max-existing-numeric-suffix
+    + 1 so that newly minted IDs never collide with existing ones.
+
+    Old JSON that contains ``modules``, ``routes``, or ``_mod_counter`` keys is
+    accepted silently — those keys are simply ignored.
     """
     elements = {
         eid: ElementSpec(type=v["type"], fields=dict(v["fields"]))
         for eid, v in d.get("elements", {}).items()
     }
-    modules = {
-        mid: ModuleSpec(type=v["type"], fields=dict(v["fields"]))
-        for mid, v in d.get("modules", {}).items()
-    }
-    routes = {mid: list(eids) for mid, eids in d.get("routes", {}).items()}
 
     signals = {
         sid: Signal(
@@ -412,14 +321,6 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
         ]
         elem_counter = (max(nums) + 1) if nums else 0
 
-    if "_mod_counter" in d:
-        mod_counter = int(d["_mod_counter"])
-    else:
-        nums = [
-            int(mid[1:]) for mid in modules if mid.startswith("m") and mid[1:].isdigit()
-        ]
-        mod_counter = (max(nums) + 1) if nums else 0
-
     if "_signal_counter" in d:
         signal_counter = int(d["_signal_counter"])
     else:
@@ -433,11 +334,8 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
         uid=d.get("uid", ""),
         name=d.get("name", "Untitled"),
         elements=elements,
-        modules=modules,
-        routes=routes,
         signals=signals,
         _elem_counter=elem_counter,
-        _mod_counter=mod_counter,
         _signal_counter=signal_counter,
     )
     return doc

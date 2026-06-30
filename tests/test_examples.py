@@ -24,7 +24,7 @@ import warnings
 import pytest
 
 from thnodes.examples import list_examples, load_example
-from thnodes.api.store import doc_to_group, roomboc_to_assembler
+from thnodes.api.store import doc_to_group
 from thnodes.api.models import ElementSpec, RoomDoc
 from thnodes.api.store import roomdoc_from_dict
 

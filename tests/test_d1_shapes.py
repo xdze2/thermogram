@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from thnodes.api.app import app
-from thnodes.api.models import RoomDoc, Signal, ElementSpec, ModuleSpec
+from thnodes.api.models import RoomDoc, Signal, ElementSpec
 from thnodes.api.store import (
     _store,
     roomdoc_from_dict,
@@ -476,10 +476,6 @@ def test_examples_still_load_via_roundtrip():
 
         # Must have elements.
         assert doc.elements, f"[{key}] no elements"
-
-        # D3 examples carry no modules/routes (derived at read time).
-        # doc.modules and doc.routes are empty (vestigial fields, default empty).
-        assert doc.modules == {}, f"[{key}] expected no stored modules in D3 example"
 
         # doc.signals is empty (signals are derived, not stored).
         assert doc.signals == {}, f"[{key}] expected no stored signals in D3 example"

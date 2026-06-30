@@ -1,14 +1,10 @@
 # 30 — API Contract (FastAPI ↔ Svelte)
 
-**Status: IN REVISION.** The model-management, element-CRUD, simulation, identifiability, and
-topology-SVG endpoints below are **frozen and built** — code against them. The **module-CRUD +
-routing** endpoints and the channel-routing shapes are **superseded** by the direction change
-in [`15_signals_and_grouping.md`](15_signals_and_grouping.md); see
-[§Direction change: signal-grouping deltas](#direction-change-signal-grouping-deltas) at the
-end for the target shapes (Signal resource, per-element boundary/treatment fields, derived
-modules). Until those land, the existing module/routing endpoints remain as-is so the current
-app keeps working. The freeze discipline still applies *within* each frozen block: change the
-contract here first.
+**Status: BUILT.** All endpoints below are live. The signal-grouping model
+([`15_signals_and_grouping.md`](15_signals_and_grouping.md)) is the actual contract: modules
+are derived from element boundaries by the server's grouping rule; per-element boundary and
+treatment fields are present on all registry and document shapes; `GET /assembly` returns
+`required_signals`. The freeze discipline applies: change the contract here first, then code.
 
 > **Note for the state spec.** Line item: *"After any mutation the frontend re-fetches to
 > refresh all derived views."* The *mechanism* for that (the store-owned `applyMutation`
@@ -83,23 +79,32 @@ DELETE /api/models/{uid}           -> 204                          remove model 
 ```json
 {
   "type_name": "OuterWall",
-  "fields": [<FieldSchema>, …]
+  "fields": [<FieldSchema>, …],
+  "boundary": {"field": "orientation", "role": "solar+exterior"},
+  "treatments": [
+    {"key": "thermal_mass", "label": "Thermal-mass wall", "default": true},
+    {"key": "simple_loss",  "label": "Simple loss"}
+  ]
 }
 ```
+
+`boundary` describes how this element pins boundary signals. `treatments` is `[]` for element
+types with no treatment knob (everything except heavy `OuterWall`). The frontend uses these
+to render per-type boundary fields and the treatment radio group.
 
 ### `ModuleTypeSchema`
 ```json
 {
   "type_name": "RoomMass",
-  "owns": [],               // list of Channel names this module claims
+  "owns": [],               // list of Channel names this module claims (engine metadata)
   "params": ["C_room"],
   "fields": [<FieldSchema>, …]
 }
 ```
 
-> **`owns` is the channel-compatibility source for the routing UI.** It is already part of
-> this payload. The frontend routing controls must filter on it (`m.owns ∩ element channels`,
-> see [`20_layout.md`](20_layout.md)). No backend change is needed for that fix.
+> **`owns` is engine metadata only.** It is present in the registry for diagnostics and the
+> ownership-check panel. The frontend does **not** use it to gate routing controls — there
+> are no routing controls.
 
 ### `Element` (resource)
 ```json
@@ -107,7 +112,7 @@ DELETE /api/models/{uid}           -> 204                          remove model 
   "id": "e0",
   "type": "OuterWall",
   "label": "OuterWall",
-  "fields": {"area": 10.0, "orientation": "S", "layers": [{"material": "concrete", "thickness": 0.2}], "alpha": 0.6},
+  "fields": {"area": 10.0, "orientation": "S", "layers": [{"material": "concrete", "thickness": 0.2}], "alpha": 0.6, "treatment": "thermal_mass"},
   "budgets": {
     "CONDUCTION":        {"UA": 3.2, "shgcA": null, "alphaA": null, "C": null},
     "SOLAR_OPAQUE":      {"UA": null, "shgcA": null, "alphaA": 6.0, "C": null},
@@ -116,23 +121,51 @@ DELETE /api/models/{uid}           -> 204                          remove model 
 }
 ```
 
-### `Module` (resource)
+`fields` includes boundary fields (e.g. `orientation`, `adjacent`, `adjacent_room`, `signal`)
+and, where applicable, `treatment`. These are authored on the element; there is no separate
+module-authoring step.
+
+### `DerivedModule` (resource — read-only, computed by grouping rule)
 ```json
 {
-  "id": "m0",
+  "id": "HeavyWall[T_ext]",
   "type": "HeavyWall",
+  "signal": "T_ext",
   "element_ids": ["e0"]
 }
 ```
 
+Derived modules are returned by `GET /document` and implied by `GET /assembly`. The stable
+`id` is `"{type}[{signal}]"` (or just `"{type}"` for signal-less modules like `RoomMass`).
+The client never creates, deletes, or routes these — they are server-computed.
+
+### `Signal` (resource — derived from element boundaries)
+```json
+{
+  "id": "s_T_ext",
+  "name": "T_ext",
+  "kind": "temperature",
+  "role": "exterior",
+  "meta": {}
+}
+```
+
+Signals are derived by the grouping rule's liveness invariant: they exist when at least one
+element's boundary field references them, and are garbage-collected automatically when the
+last such element is removed or its boundary field changes. No Signal CRUD endpoints exist —
+they are read-only projections on `/document` and `/assembly`.
+
 ### `Problem`
 ```json
 {
-  "kind": "double_count",       // "double_count" | "unclaimed_channel" | "missing_room_mass" | "duplicate_state"
+  "kind": "double_count",       // "double_count" | "unclaimed_channel" | "missing_room_mass" | "duplicate_state" | "internal_error"
   "message": "Double-count: (element OuterWall, CONDUCTION) already owned by 'DirectLoss'.",
   "cell": ["OuterWall", "CONDUCTION"]   // [element_label, channel_name] or null
 }
 ```
+
+A non-empty `problems` list signals an **engine bug** in the grouping rule, not a user
+routing mistake (users no longer route elements).
 
 ### `Contribution`
 ```json
@@ -151,7 +184,9 @@ DELETE /api/models/{uid}           -> 204                          remove model 
 
 ### `GET /api/registry`
 
-Returns the type schemas the frontend uses to render add/edit forms.
+Returns the type schemas the frontend uses to render add/edit forms. Element type entries
+now include `boundary` and `treatments` so the form knows which boundary fields to render
+and whether to show the treatment radio group.
 
 **Response `200`:**
 ```json
@@ -164,19 +199,29 @@ Returns the type schemas the frontend uses to render add/edit forms.
         {"name": "orientation", "type": "enum", "options": ["S","SE","SW","E","W","NE","NW","N"]},
         {"name": "layers",      "type": "list[layer]"},
         {"name": "alpha",       "type": "float", "default": 0.6}
+      ],
+      "boundary":   {"field": "orientation", "role": "solar+exterior"},
+      "treatments": [
+        {"key": "thermal_mass", "label": "Thermal-mass wall", "default": true},
+        {"key": "simple_loss",  "label": "Simple loss"}
       ]
     },
-    {"type_name": "Window",     "fields": [{"name":"area","type":"float"},{"name":"orientation","type":"enum","options":["S","SE","SW","E","W","NE","NW","N"]},{"name":"U","type":"float"},{"name":"shgc","type":"float"}]},
-    {"type_name": "Floor",      "fields": [{"name":"area","type":"float"},{"name":"boundary","type":"enum","options":["ground","adjacent","exposed"]},{"name":"layers","type":"list[layer]"}]},
-    {"type_name": "Partition",  "fields": [{"name":"area","type":"float"},{"name":"layers","type":"list[layer]"}]},
-    {"type_name": "IndoorMass", "fields": [{"name":"a","type":"float"},{"name":"b","type":"float"},{"name":"c","type":"float"},{"name":"furniture","type":"enum","options":["bare","normal","heavy"],"default":"normal"}]},
-    {"type_name": "HeatSource", "fields": [{"name":"area","type":"float","default":0.0}]}
+    {"type_name": "Window",     "fields": [{"name":"area","type":"float"},{"name":"orientation","type":"enum","options":["S","SE","SW","E","W","NE","NW","N"]},{"name":"U","type":"float"},{"name":"shgc","type":"float"}],
+     "boundary": {"field": "orientation", "role": "solar+exterior"}, "treatments": []},
+    {"type_name": "Floor",      "fields": [{"name":"area","type":"float"},{"name":"boundary","type":"enum","options":["ground","adjacent","exposed"]},{"name":"layers","type":"list[layer]"},{"name":"adjacent_room","type":"str"}],
+     "boundary": {"field": "boundary", "role": "varies"}, "treatments": []},
+    {"type_name": "Partition",  "fields": [{"name":"area","type":"float"},{"name":"adjacent","type":"str"},{"name":"layers","type":"list[layer]"}],
+     "boundary": {"field": "adjacent", "role": "adjacent"}, "treatments": []},
+    {"type_name": "IndoorMass", "fields": [{"name":"a","type":"float"},{"name":"b","type":"float"},{"name":"c","type":"float"},{"name":"furniture","type":"enum","options":["bare","normal","heavy"],"default":"normal"}],
+     "boundary": null, "treatments": []},
+    {"type_name": "HeatSource", "fields": [{"name":"area","type":"float","default":0.0},{"name":"signal","type":"str"}],
+     "boundary": {"field": "signal", "role": "prescribed_flux"}, "treatments": []}
   ],
   "module_types": [
-    {"type_name": "RoomMass",       "owns": [],                                    "params": ["C_room"],             "fields": []},
-    {"type_name": "DirectLoss",     "owns": ["CONDUCTION"],                        "params": ["H_ve"],               "fields": []},
-    {"type_name": "SolarGainModule","owns": ["SOLAR_TRANSMISSION"],                "params": ["shgcA"],              "fields": []},
-    {"type_name": "HeavyWall",      "owns": ["CONDUCTION","STORAGE","SOLAR_OPAQUE"],"params": ["H_out","H_in","C_wall"],"fields": []}
+    {"type_name": "RoomMass",        "owns": [],                                     "params": ["C_room"],              "fields": []},
+    {"type_name": "DirectLoss",      "owns": ["CONDUCTION"],                         "params": ["H_ve"],                "fields": []},
+    {"type_name": "SolarGainModule", "owns": ["SOLAR_TRANSMISSION"],                 "params": ["shgcA"],               "fields": []},
+    {"type_name": "HeavyWall",       "owns": ["CONDUCTION","STORAGE","SOLAR_OPAQUE"],"params": ["H_out","H_in","C_wall"],"fields": []}
   ],
   "layer_schema": {
     "fields": [
@@ -193,20 +238,29 @@ Returns the type schemas the frontend uses to render add/edit forms.
 
 ### `GET /api/models/{id}/document`
 
-Returns the raw room document (elements, modules, routing) without projection.
+Returns the raw room document: authored elements, plus derived read-only modules and signals
+computed by the grouping rule.
 
 **Response `200`:**
 ```json
 {
   "model_id": "default",
   "elements": [<Element>, …],
-  "modules":  [<Module>, …]
+  "modules":  [<DerivedModule>, …],
+  "signals":  [<Signal>, …]
 }
 ```
+
+`modules` and `signals` are derived (read-only) — they are computed from `elements` by the
+grouping rule on every request. `doc.modules` / `doc.routes` in the persisted JSON are
+vestigial load-compatibility fields only; the server never writes to them.
 
 ---
 
 ## Element CRUD
+
+The sole mutating authoring surface. After any element mutation the frontend re-fetches
+`/document` **and** `/assembly` to refresh all derived views.
 
 ### `POST /api/models/{id}/elements`
 
@@ -217,13 +271,22 @@ Add an element.
 {"type": "OuterWall", "fields": {"area": 10.0, "orientation": "S", "layers": [{"material": "concrete", "thickness": 0.2}], "alpha": 0.6}}
 ```
 
+Include boundary and treatment fields in `fields` as appropriate:
+- `OuterWall` / `Window`: `"orientation": "S"` (enum); `OuterWall` may also carry `"treatment": "thermal_mass"`.
+- `Floor`: `"boundary": "adjacent"` + `"adjacent_room": "kitchen"` (when adjacent).
+- `Partition`: `"adjacent": "kitchen"`.
+- `HeatSource`: `"signal": "hvac"` (creates boundary signal `Q_hvac`).
+- `IndoorMass`: no boundary field; auto-paired to derived `RoomMass`.
+
 **Response `201`:** `<Element>` (with server-assigned `id` and computed `budgets`)
 
 ---
 
 ### `PATCH /api/models/{id}/elements/{eid}`
 
-Update an element's fields (partial update — only provided fields are changed).
+Update an element's fields (partial update — only provided fields are changed). A boundary
+field edit may auto-create or garbage-collect `Signal` resources as a side effect; the
+re-pull invariant refreshes the derived signal list and modules.
 
 **Request body:**
 ```json
@@ -236,50 +299,20 @@ Update an element's fields (partial update — only provided fields are changed)
 
 ### `DELETE /api/models/{id}/elements/{eid}`
 
-**Response `204`** (no body). Also removes this element from any module's routing.
+**Response `204`** (no body). Signal GC happens at read time (liveness invariant in the
+grouping rule); no routing cleanup is needed because modules are derived, not stored.
 
 ---
 
-## Module CRUD
+## Retired endpoints
 
-> **[SUPERSEDED by `15`.]** This whole block (module create/delete + routing) is retired under
-> the signal-grouping model — modules are *derived*, not authored. It stays documented here
-> only because the current app still uses it; new work should target the
-> [§Direction change](#direction-change-signal-grouping-deltas) shapes instead.
+The following endpoints were removed in D3. They return **404** (no matching route):
 
-### `POST /api/models/{id}/modules`
-
-Add a module.
-
-**Request body:**
-```json
-{"type": "HeavyWall", "fields": {}}
-```
-`RoomMass` takes no fields (`{"type": "RoomMass", "fields": {}}`): it is pure topology and
-derives `C_room` by spending the `STORAGE` budget of the room's `IndoorMass` element, to
-which the assembler auto-routes it. The room geometry lives on that element:
-`{"type": "IndoorMass", "fields": {"a": 5.0, "b": 4.0, "c": 2.5, "furniture": "normal"}}`.
-
-**Response `201`:** `<Module>`
-
----
-
-### `DELETE /api/models/{id}/modules/{mid}`
-
-**Response `204`** (no body).
-
----
-
-### `PUT /api/models/{id}/modules/{mid}/routing`
-
-Set which elements are routed to this module (replaces the full list).
-
-**Request body:**
-```json
-{"element_ids": ["e0", "e1"]}
-```
-
-**Response `200`:** `<Module>` (updated)
+| Endpoint | Reason |
+|----------|--------|
+| `POST /api/models/{id}/modules` | Modules are derived, not authored. |
+| `DELETE /api/models/{id}/modules/{mid}` | Modules are derived, not authored. |
+| `PUT /api/models/{id}/modules/{mid}/routing` | Routing is determined by element boundary fields, not a routing table. |
 
 ---
 
@@ -287,7 +320,8 @@ Set which elements are routed to this module (replaces the full list).
 
 ### `GET /api/models/{id}/assembly`
 
-Rebuilds the system via the non-raising assembler path (`strict=False`) and returns all derived views. **Never 500s.**
+Rebuilds the system via the non-raising assembler path (`strict=False`) and returns all
+derived views. **Never 500s.**
 
 **Response `200`:**
 ```json
@@ -297,13 +331,13 @@ Rebuilds the system via the non-raising assembler path (`strict=False`) and retu
       "element_id":    "e0",
       "element_label": "OuterWall",
       "channel":       "CONDUCTION",
-      "module_id":     "m1"
+      "module_id":     "HeavyWall[T_ext]"
     }
   ],
   "parameters": [
     {
       "name":    "H_ve",
-      "module_id": "m1",
+      "module_id": "DirectLoss[T_ext]",
       "prior":   {"mu_log": 1.2, "sigma_log": 0.47},
       "contributions": [
         {
@@ -317,30 +351,35 @@ Rebuilds the system via the non-raising assembler path (`strict=False`) and retu
     }
   ],
   "states":  ["T_wall", "T_room"],
-  "signals": ["T_ext", "G_sol"],
+  "signals": ["T_ext", "G_sol_S"],
+  "required_signals": [
+    {"id": "s_T_ext",   "name": "T_ext",   "kind": "temperature", "role": "exterior",    "meta": {}},
+    {"id": "s_G_sol_S", "name": "G_sol_S", "kind": "irradiance",  "role": "solar",       "meta": {"orientation": "S"}}
+  ],
   "graph": {
     "nodes": [
       {"id": "T_room",  "kind": "room"},
       {"id": "T_wall",  "kind": "state"},
       {"id": "T_ext",   "kind": "boundary"},
-      {"id": "G_sol",   "kind": "boundary"}
+      {"id": "G_sol_S", "kind": "boundary"}
     ],
     "edges": [
-      {"from": "T_ext",  "to": "T_room", "module_id": "m1"},
-      {"from": "T_wall", "to": "T_room", "module_id": "m2"}
+      {"from": "T_ext",  "to": "T_room", "module_id": "DirectLoss[T_ext]"},
+      {"from": "T_wall", "to": "T_room", "module_id": "HeavyWall[T_ext]"}
     ]
   },
-  "problems": [
-    {
-      "kind":    "double_count",
-      "message": "Double-count: (element OuterWall, CONDUCTION) already owned by 'DirectLoss'.",
-      "cell":    ["OuterWall", "CONDUCTION"]
-    }
-  ]
+  "problems": []
 }
 ```
 
-*`problems` is empty `[]` when the room is valid. `ownership`, `parameters`, `states`, `signals`, `graph` may be partial when problems exist.*
+*`problems` is empty `[]` when the room is valid. A non-empty `problems` list indicates an
+**engine bug** in the grouping rule (not a user mistake). `ownership`, `parameters`,
+`states`, `signals`, `required_signals`, `graph` may be partial when problems exist.*
+
+`required_signals` is the input list the right-column "Required signals" panel renders:
+the set of `Signal`s the derived modules demand, each with `role`/`kind`/`meta` so the UI
+knows what series to ask for. It is always derived from the grouping result, even when
+`system` is `None` (problems exist).
 
 ---
 
@@ -354,15 +393,18 @@ Run the forward simulation. Signals and params are provided in the request body.
 ```json
 {
   "signals": {
-    "T_ext": [20.0, 20.1, 19.8, …],
-    "G_sol": [0.0, 50.0, 120.0, …]
+    "T_ext":   [20.0, 20.1, 19.8, …],
+    "G_sol_S": [0.0, 50.0, 120.0, …]
   },
   "x0":    [18.0, 18.0],
   "params": {"H_ve": 3.2, "C_room": 150000.0},
   "dt":    3600.0
 }
 ```
-`params` is optional — omitted fields use prior means. `dt` defaults to `3600.0` s.
+
+`signals` keys are the `Signal.name`s from `assembly.required_signals` (e.g. `T_ext`,
+`G_sol_S`, `T_kitchen`, `Q_hvac`). `params` is optional — omitted fields use prior means.
+`dt` defaults to `3600.0` s.
 
 **Response `200`:**
 ```json
@@ -416,7 +458,7 @@ Body: SVG text.
 | Status | When |
 |--------|------|
 | `400`  | Invalid request body (wrong type, missing required field) |
-| `404`  | Unknown `model_id`, `element_id`, or `module_id` |
+| `404`  | Unknown `model_id`, `element_id`, or retired endpoint |
 | `422`  | Pydantic validation error (field value out of range, bad enum) |
 | `500`  | Unexpected server error (should not happen for `/assembly`) |
 
@@ -424,66 +466,3 @@ All errors return:
 ```json
 {"detail": "human-readable message"}
 ```
-
----
-
-## Direction change: signal-grouping deltas
-
-**Status: TARGET** (not yet built). These are the contract changes
-[`15_signals_and_grouping.md`](15_signals_and_grouping.md) implies. Listed as deltas against
-the frozen shapes above; to be promoted into the body (and the old module/routing block
-deleted) once implemented.
-
-### Retired
-
-- `POST /modules`, `DELETE /modules/{mid}`, `PUT /modules/{mid}/routing` — modules are derived,
-  not authored. `doc.routes` and `Module.element_ids` disappear from the document.
-- `module_types[].owns` as a **routing-UI** input — `owns` stays as engine metadata but the
-  frontend no longer uses it to gate routing controls (there are none).
-
-### New / changed shapes
-
-**Registry** gains, per element type, a **boundary descriptor** and a **treatment menu**:
-```jsonc
-// element_types[] entry (additions)
-{
-  "type_name": "OuterWall",
-  "fields": [ … ],
-  "boundary": { "field": "orientation", "role": "solar+exterior" },   // how this element pins signals
-  "treatments": [                                                      // [] or forced => no UI knob
-    {"key": "thermal_mass", "label": "Thermal-mass wall", "default": true},
-    {"key": "simple_loss",  "label": "Simple loss"}
-  ]
-}
-```
-`Partition` gains `{"field": "adjacent", "role": "adjacent"}`; `Floor.boundary`'s `adjacent`
-option gains a room label. Treatments are `[]` (forced) for everything except heavy walls.
-
-**Signal** becomes a first-class document resource (see `15` for the full shape):
-```jsonc
-{ "id": "s_kitchen", "name": "T_kitchen", "kind": "temperature", "role": "adjacent", "meta": {} }
-```
-The Signal carries **no data binding** in this cut — it declares a required input, not its
-provenance. A future version adds a `binding` / `source` field (uploaded column, InfluxDB
-query, constant/schedule, derived) without changing identity or grouping; keep the shape
-binding-agnostic so that lands without a migration (see `15` §"A Signal is a declaration of a
-required input" + open questions).
-
-**`GET /document`** returns `signals: [<Signal>, …]` alongside `elements`; `modules` becomes a
-**derived** read-only list (no `element_ids` routing — membership is computed). Elements carry
-a `treatment` field and their boundary field(s).
-
-**`PATCH /elements/{eid}`** may **auto-create or garbage-collect Signals** as a side effect of
-a boundary edit (per the signal-liveness invariant in `15`). The mutation still returns the
-affected element; the re-pull invariant ([`10_state.md`](10_state.md)) refreshes the derived
-signal list and modules.
-
-**`GET /assembly`** gains a `required_signals` projection (the input list the right-column
-panel renders) — the set of `Signal`s the derived modules demand, each with role/kind/meta so
-the UI knows what series to ask for. `ownership`/`parameters`/`graph`/`problems` keep their
-shapes; `problems` now signals an **engine bug** in the grouping rule rather than a user
-routing mistake.
-
-**`POST /simulate`** `signals` keys become the model's `Signal.name`s (e.g. `T_kitchen`,
-`G_sol_S`), and the synthetic `_T_sol_air` hack is replaced by a real per-signal POA boundary
-(see `15` open questions; `solar.py` already computes POA per orientation).
