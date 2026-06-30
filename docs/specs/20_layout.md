@@ -1,10 +1,12 @@
 # 20 — UI Layout
 
-**Status: BUILT.** The layout refactor landed (commit `3259ea0`); the 3-tab layout is gone,
-replaced by the 2-column split described here. The topology panel shows the server-rendered
-schemdraw schematic (commit `b47d815`); the app is now multi-model with a home page (see
-[`10_state.md`](10_state.md)). The [§Resolved divergences](#resolved-divergences) section
-records what this replaced. Treat this document as describing existing behavior.
+**Status: PARTLY BUILT.** The 2-column split (commit `3259ea0`), server-rendered schematic
+(`b47d815`), and multi-model home page are built and current. **The authoring model is
+mid-change**, per [`15_signals_and_grouping.md`](15_signals_and_grouping.md): the left column
+must move from "add modules + tick element×channel cells" to **per-element-type forms whose
+fields include the element's boundary**, with the **topology and modules derived (read-only)**
+and a **generated inputs panel**. Sections below tagged **[§15-pending]** describe that target;
+where they conflict with the still-built routing-matrix behavior, `15` wins.
 
 ---
 
@@ -39,43 +41,43 @@ it *behaves*** (results). Cause sits on the left, effect on the right, both visi
 └─────────────────────────────────────────┴───────────────────────────────────────────────┘
 ```
 
-- **Left-top — Elements.** The element cards + add/edit/delete (today's `ElementList`).
-- **Left-bottom — Topology.** The server-rendered star schematic, the module list, and the
-  routing controls — "the structure of the assembled model."
-- **Right-top — Time range & signals.** Simulation window and input/scenario selection.
+- **Left-top — Elements.** The element cards + add/edit/delete. Each element form carries its
+  **boundary** field(s) (orientation / adjacent-room / ground…) and, for a heavy wall, its
+  **treatment** toggle. **[§15-pending]** This is now the *only* authoring surface — there is
+  no "add module" form and no routing control here.
+- **Left-bottom — Topology.** The server-rendered star schematic + a **derived, read-only**
+  module list (one branch per `(treatment, signal)`, labelled by its boundary signal).
+  **[§15-pending]** Read, don't wire. The "Ownership check" matrix stays as a collapsible
+  diagnostic beneath it.
+- **Right-top — Time range & signals.** Simulation window + the **inputs panel generated from
+  the assembly**: one entry per `Signal` the derived modules require (`T_ext`, `T_kitchen`,
+  `G_sol_S`, `Q_hvac`…), each needing a series or scenario. **[§15-pending]**
 - **Right-bottom — Graphs.** `T_room` (and other states) time series; parameter / flux
   views (today's `ParameterTable` content folds in here).
 
-## The routing matrix is a diagnostic, not a primary surface
+## Authoring is element forms; the matrix is a diagnostic **[§15-pending]**
 
-The element × channel matrix is how you *check* that ownership is exactly-once and complete
-— it is a **diagnostic**, not where the user does their authoring. Authoring is: add
-elements, add modules, tick which elements a module claims. So:
+Under [`15_signals_and_grouping.md`](15_signals_and_grouping.md), **authoring is: add
+elements, set each element's boundary, and (for a heavy wall) pick its treatment.** Modules
+are *derived*; the user neither adds them nor routes elements into them. The element × channel
+matrix is therefore **purely a diagnostic** — the *check* that the grouping rule produced
+exactly-once, complete ownership.
 
 - The matrix lives **under the topology**, in a **collapsible "Ownership check" panel**, not
-  at tab-level prominence.
-- It draws attention only when it must: if `assembly.problems` is non-empty (a double-count
-  or unclaimed channel), the panel auto-expands and the offending cells are flagged. When the
-  room is clean, it stays collapsed and quiet.
+  at primary prominence.
+- It draws attention only when it must: if `assembly.problems` is non-empty (which now means
+  an **engine bug** in the rule, not a user mistake — see [`40_physics.md`](40_physics.md)
+  I3), the panel auto-expands and the offending cells are flagged. When the room is clean, it
+  stays collapsed and quiet.
 
-## Routing controls must respect channel compatibility
+> **Resolved by the direction change.** The old "show a routing control only if `m.owns ∩ e`'s
+> offered channels ≠ ∅" rule, and the per-element routing checkboxes it governed, are
+> **removed** — there are no routing controls to filter. Their correctness concern (never
+> present a physically meaningless wiring) is now satisfied *by construction*: the grouping
+> rule only ever produces meaningful `(treatment, signal)` modules.
 
-This is a correctness requirement on the routing UI, not just aesthetics. A module can only
-own channels in its `owns` set; offering to route an element that shares no channel with the
-module presents a physically meaningless control.
-
-> **Rule.** For a given module `m` and element `e`, show a routing control **only if**
-> `m.owns ∩ {channels e actually offers a budget for} ≠ ∅`.
-
-- `e`'s offered channels = the keys of `e.budgets` whose budget has at least one non-null
-  field (the matrix already computes this `hasBudget` test).
-- `m.owns` is already in the registry payload (`module_types[].owns`) — **no backend change
-  is needed**; the frontend simply must use it.
-- **`RoomMass` owns nothing, takes no fields, and the user routes nothing into it.** The
-  assembler auto-pairs it with the room's `IndoorMass` element. Its card shows **no** fields
-  and **no** element checkboxes. The room geometry (`a, b, c`, `furniture`) is authored on the
-  `IndoorMass` **element** card instead. (Routing a Window into RoomMass is a no-op
-  server-side; the UI must not offer it.)
+- **The room.** `IndoorMass` is an element with geometry fields (`a, b, c`, `furniture`); the
+  assembler auto-pairs it to `RoomMass` (derived). No RoomMass card to author, no routing.
 
 ## Every shown value carries its physical unit
 
@@ -115,14 +117,21 @@ These were the violations the refactor fixed; all resolved:
 
 ## Acceptance checklist
 
+Built (layout):
 - [x] No top-level tabs; Elements, Topology, Time-range, and Graphs are simultaneously
       reachable on a large screen.
 - [x] Editing an element on the left visibly updates the topology and the right-hand graphs
       without navigation.
 - [x] The routing matrix is collapsed by default and auto-expands when `problems` is
       non-empty.
-- [x] A module never shows a routing control for an element it cannot own; RoomMass shows no
-      element checkboxes.
 - [x] Columns stack (not hide) on narrow widths.
+
+Pending — signal-grouping direction (**[§15-pending]**):
+- [ ] No "add module" form and no routing controls anywhere in the edit loop; modules are a
+      derived read-only list.
+- [ ] Every element form exposes its boundary field(s) (orientation / adjacent-room / ground);
+      a heavy wall exposes its treatment toggle.
+- [ ] The right-column inputs panel is **generated** from the assembly's required `Signal`
+      set (one entry per signal the derived modules demand).
 - [ ] Every displayed/accepted numeric value carries its SI physical unit (inputs, derived
       budgets, parameters/priors, graph axes); units come from one shared map, not per-widget.

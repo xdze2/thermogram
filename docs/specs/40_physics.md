@@ -1,14 +1,24 @@
 # 40 — Engine Invariants
 
-**Status: BUILT (Steps 0–1).** The assembler, forward simulation, and identifiability lens
-conform to these invariants today. This spec states them as **checkable rules** the engine
-and its tests must uphold; the *derivation and rationale* live in
-[`../background/app_proposal.md`](../background/app_proposal.md), which this file links into
-rather than restates.
+**Status: BUILT (Steps 0–1), I8 pending.** The assembler, forward simulation, and
+identifiability lens conform to invariants I1–I7 today. **I8 (the grouping rule) is a
+TARGET** — it specifies how modules are *derived* from element boundaries under the
+direction change in [`15_signals_and_grouping.md`](15_signals_and_grouping.md); the current
+assembler still takes hand-routed modules instead. This spec states the invariants as
+**checkable rules** the engine and its tests must uphold; the *derivation and rationale* live
+in [`../background/app_proposal.md`](../background/app_proposal.md), which this file links
+into rather than restates.
 
 This is a thin spec on purpose: it exists so the assembler's contract is checkable without
-reading the full proposal, and so the UI specs (`10`, `20`, `30`) have a stable reference for
-the terms `channel`, `ownership`, `module`, `band`.
+reading the full proposal, and so the UI specs (`10`, `15`, `20`, `30`) have a stable
+reference for the terms `channel`, `ownership`, `module`, `signal`, `band`.
+
+> **Framing change (2026-06).** Channels and the (element, channel) ownership model (I2–I4)
+> are **no longer the authoring vocabulary** — they are the assembler's *internal*
+> conservation bookkeeping. The user authors *elements with boundaries*; modules are
+> **derived** by the grouping rule (I8). So I2/I3 below are now properties the grouping rule
+> **guarantees**, not constraints the user must satisfy by hand. See
+> [`15_signals_and_grouping.md`](15_signals_and_grouping.md).
 
 ---
 
@@ -42,18 +52,24 @@ Each element exposes conserved **channel budgets**, computed once, model-agnosti
 [`30_api.md`](30_api.md) `Element.budgets`.)
 → rationale: app_proposal §"Ownership: the (element, channel) model".
 
-## I3 — Exactly-once ownership (hard error)
+## I3 — Exactly-once ownership (a guarantee the grouping rule must uphold)
 
-> **Per (element, channel): exactly one module may claim it. Across channels: an element may
-> be claimed by many modules.**
+> **Per (element, channel): exactly one module claims it. Across channels: an element may be
+> claimed by many modules.**
 
 - A south window's `CONDUCTION` and `SOLAR_TRANSMISSION` are distinct cells → both fire,
-  correct.
-- Two modules claiming the same `CONDUCTION` cell is a **double-count** → a hard assembly
-  error, never a silent bug in the fit.
+  correct. (They route to different modules — by **signal**: `DirectLoss[T_ext]` and
+  `SolarGain[G_sol_S]`. This is the canonical per-(element, channel) split, see I8.)
+- Two modules claiming the same `CONDUCTION` cell is a **double-count**.
 - A channel with a budget that no module claims is an **unclaimed_channel** problem.
 
-The assembler enforces this. In `strict=True` it raises on `double_count` /
+Under the **grouping-rule model** (I8) these are no longer user errors to police — a correct
+grouping rule produces exactly-once, complete ownership *by construction*. So I3 is now an
+**internal consistency assertion on the rule's output**: a double-count or unclaimed channel
+means the rule (or an element's budget computation) has an **engine bug**, surfaced as a
+`problem` — never blamed on the user, who has no routing control to get wrong.
+
+The assembler still checks it. In `strict=True` it raises on `double_count` /
 `missing_room_mass` / `duplicate_state`; in `strict=False` (the API path) it collects every
 violation into `problems[]` and still returns partial data — `/assembly` **never 500s**
 (see [`30_api.md`](30_api.md)).
@@ -124,6 +140,37 @@ The **simulation toy (①②) has no identifiability limit** — forward integra
 inversion, so it can stack as many modules/states as the physics warrants.
 → implementation: `identifiability.py`; rationale: app_proposal §"The C_room splitting
 problem", §"Identifiability".
+
+## I8 — The grouping rule (modules are derived, not routed) — **TARGET**
+
+> Modules are **derived from elements** by a fixed, building-physics-specific rule:
+> **one module per distinct `(treatment, boundary-signal)`**. The user never adds a module or
+> routes an element; they author elements (each declaring a boundary) and, for a heavy wall,
+> optionally pick its treatment.
+
+- **Grouping key = `(treatment, signal)`.** Two elements that share a treatment *and* couple
+  to the same boundary signal land in one module, which spends their **summed** channel
+  budgets into its prior (I4). Two south windows → one `SolarGain[G_sol_S]`; a south + a west
+  window → two modules. Two partitions to the kitchen → one `DirectLoss[T_kitchen]`; a
+  partition to the hallway → a separate `DirectLoss[T_hallway]`.
+- **The boundary signal is a first-class `Signal`** (role ∈ {exterior, ground, adjacent,
+  solar, prescribed}), mostly auto-created from element boundaries. The set of signals the
+  derived modules demand **is** the simulation input list.
+- **Treatment is the only authoring knob**, and is forced except for the heavy-vs-light wall
+  binary (the single choice the proposal sanctions, governed by I7). It lives on the
+  **element**, not on a module.
+- **Determinism, not search.** The rule is a pure function of (element type, fields,
+  treatment, pinned signals) — it never optimises or reduces. This is the v0.3 escape from
+  the ill-posed generic reduction (README → *Design history*) applied to authoring:
+  extensibility is by **adding a rule**, not by re-opening a generic routing matrix.
+- **Guarantees I2/I3 by construction.** A correct rule emits exactly-once, complete ownership;
+  any double-count/unclaimed channel is an engine bug, not user error.
+
+Full specification (Signal object, roles, per-element boundary fields, treatment menus, the
+grouping algorithm, migration from routing) in
+**[`15_signals_and_grouping.md`](15_signals_and_grouping.md)**.
+→ status: TARGET — the current assembler takes hand-routed modules
+(`add_module(..., elements=[...])`); the rule layer that derives them is not yet built.
 
 ---
 

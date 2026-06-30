@@ -24,13 +24,11 @@ only after the engine survives validation.
 
 We are **pulling the authoring/visualization half of Step 4 ahead of Steps 2–3**, deliberately.
 Rationale: the genuinely *novel* part of thnodes is not the fit (the Kalman/NUTS layer is
-standard inverse-problem machinery) — it is the **authoring vocabulary** (elements → channels →
-modules) and the **"make the mapping visible"** routing matrix. Those concepts can only be
-validated by *using* them, and Streamlit's widget model fights the routing-matrix + graph
-editing hard enough that prototyping there would push us toward the wrong architecture. Steps
-0–1 already produce everything this UI needs (assembled `System`, `ownership_map()`, the
-identifiability report, forward sim) — so the authoring UI is buildable now and does **not**
-depend on the fit.
+standard inverse-problem machinery) — it is the **authoring vocabulary** and the
+**element → RC-model mapping**. Those concepts can only be validated by *using* them. Steps
+0–1 already produce everything this UI needs (assembled `System`, forward sim, the
+identifiability report) — so the authoring UI is buildable now and does **not** depend on the
+fit.
 
 What this changes:
 - **Step 4 splits.** Step 4a = authoring + topology + identifiability UI (now). Step 4b = the
@@ -40,6 +38,32 @@ What this changes:
 - **The Golden Rule "no FastAPI/Svelte until Step 4" is honored in spirit** — this *is* Step 4
   work, reordered. The engine (Steps 0–1) stays pure NumPy; FastAPI/Svelte are a layer on top,
   never imported by the physics.
+
+### Sequencing amendment (2026-06b — **current focus: get the data model right first**)
+
+Building Step 4a surfaced that the original authoring vocabulary (**the generic
+element × channel routing matrix**) is *too general* — it re-imports the ill-posed generic
+reduction v0.3 exists to avoid (see [`../README.md`](../../README.md) → *Design history*). The
+fix is a direction change, now specified in
+[`specs/15_signals_and_grouping.md`](specs/15_signals_and_grouping.md): the **Signal (boundary
+source) is the grouping key**, modules are **derived** by a hardcoded rule from per-element
+boundaries, and channels demote to internal bookkeeping.
+
+> **Decision: the immediate priority is the data model and the element→RC mapping — not
+> computation.** We get the *concepts* right (Signals, boundaries, treatments, the grouping
+> rule, derived modules) by **prototyping the mapping end to end**, before investing further
+> in the fit engine (Steps 2–3) or polishing forward-sim. A wrong data model poisons every
+> layer above it; a right one makes the fit a contained add-on.
+
+What this changes:
+- **A new phase D (Data-model & mapping) is inserted as the current work**, ahead of Steps 2–3.
+  See [Phase D](#phase-d--data-model--elementrc-mapping-current-focus) below.
+- **Step 4a is re-scoped onto the signal-grouping model** — the routing-matrix authoring it
+  originally described is superseded. The matrix survives only as a diagnostic.
+- **Steps 0–1 gain a rule layer.** The assembler still does exactly-once bookkeeping and
+  prior derivation, but module *membership* now comes from the grouping rule, not hand-routing.
+- **Computation stays deferred.** Forward-sim is "good enough" for prototyping the mapping; the
+  fit (Steps 2–3) does not start until the data model is settled and exercised.
 
 ### Multi-model / multi-study (decided 2026-06 — adopt the address space, build no machinery)
 
@@ -114,6 +138,53 @@ on it.
 
 ---
 
+## Phase D — Data-model & element→RC mapping (CURRENT FOCUS)
+
+**This is the active work.** Goal: validate the *concepts* of
+[`specs/15_signals_and_grouping.md`](specs/15_signals_and_grouping.md) by building the
+mapping end to end and prototyping with it — **before** any further computation work. We are
+getting the data model right, not the numerics.
+
+The phase is broken into **separable workstreams** so they can be picked up independently (each
+maps to a sub-agent brief in [`TODO.md`](TODO.md)). The hard sequencing constraint is only:
+**D1 (the document/data model) before D2–D4** — everything else parallelizes once the shapes
+exist.
+
+- **D1 — Document & registry shapes.** Add the `Signal` resource; add per-element **boundary**
+  fields and the **treatment** field; extend the registry with boundary descriptors + treatment
+  menus. Drop `routes`/`element_ids` from the document. Pure data-shape work; no physics.
+- **D2 — Grouping rule (the heart).** The deterministic `(treatment, signal) → module` rule in
+  the assembler. Auto-create/garbage-collect Signals from element boundaries. This is where the
+  concept lives or dies; it gets the most prototyping and the most tests.
+- **D3 — Derived-module API + assembly projection.** Retire module CRUD/routing endpoints;
+  make `/document` return derived modules + signals; add `required_signals` to `/assembly`.
+- **D4 — Element-form authoring UI.** Per-element-type forms with boundary/treatment controls;
+  read-only derived topology; generated inputs panel; matrix demoted to diagnostic.
+
+**Validate (concept-level, headless first):** build the canonical rooms *through the rule* and
+assert the derived module set is what physics says it should be —
+
+| room                        | author                                          | derived modules (must equal)                                   |
+| --------------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
+| caravan (all-light)         | light walls + S window + IndoorMass             | `RoomMass`, `DirectLoss[T_ext]`, `SolarGain[G_sol_S]`          |
+| two adjacent rooms          | + 2 partitions→kitchen, 1 partition→hallway     | `+ DirectLoss[T_kitchen]`, `+ DirectLoss[T_hallway]`           |
+| two glazing orientations    | S window + W window                             | `SolarGain[G_sol_S]`, `SolarGain[G_sol_W]` (two, not one)      |
+| heavy wall + treatment flip | heavy S wall, toggle simple-loss                | `HeavyWall[T_ext]` flips to `DirectLoss[T_ext]`                |
+
+The prize for this phase: **the same room authored two ways (e.g. one kitchen partition vs.
+two) produces exactly the module set a building physicist would draw**, with no routing UI and
+no double-counts. When that feels natural to *use*, the data model is right and computation can
+resume.
+
+**Explicitly out of scope for Phase D** (deferred, named so they don't creep in):
+- The fit (Steps 2–3) — untouched.
+- Signal → real **data-source binding** (InfluxDB/CSV) — the Signal stays binding-agnostic
+  (see `15`); only ad-hoc `/simulate` series for now.
+- Solar POA accuracy / tilt / roofs — `G_sol_<orient>` carries orientation in `meta`; the
+  transposition stays today's simple cosine model.
+
+---
+
 ## Step 2 — Differentiable Kalman + NUTS posterior, validated by twin experiment
 
 The fit engine itself. **Full posterior, sampled** — not a point estimate.
@@ -172,22 +243,16 @@ Split into 4a (authoring/visualization — pulled ahead, see amendment above) an
 after Steps 2–3). FastAPI backend wrapping the engine; local, single-user, single-session;
 server-side physics. Svelte + DaisyUI frontend.
 
-### Step 4a — Authoring + topology + identifiability UI (build now)
+### Step 4a — Authoring + topology + identifiability UI
 
-Validates the novel UX (element/channel/module vocabulary + the routing matrix) against the
-Steps 0–1 engine. **Detailed, parallelizable spec lives in `docs/TODO.md` → "Step 4a".** Summary:
-
-- FastAPI backend: in-memory `dict[model_id, RoomDoc]`; CRUD on elements/modules/routing;
-  `GET /models/{id}/assembly` (the one projection feeding all views — ownership matrix,
-  parameter table + per-element contributions, graph, problems); `POST …/simulate`;
-  `GET …/identifiability`; `GET …/topology.svg`.
-- Engine additions (headless, pure NumPy): non-raising assembly (`problems[]` instead of
-  raise/warn), a type **registry** (element/module schemas for data-driven forms), and surfacing
-  per-parameter **contributions** (which element/channel budget fed each prior — already computed
-  inside `build()`, currently discarded).
-- Svelte + DaisyUI: element cards (add/delete/edit + computed channel budgets), module graph
-  (add/remove modules, wire module→elements, problems highlighted), parameter table (priors +
-  per-element contribution breakdown).
+**Re-scoped (2026-06b) onto the signal-grouping model.** The original routing-matrix authoring
+is superseded; the live spec is [Phase D](#phase-d--data-model--elementrc-mapping-current-focus)
++ [`specs/15_signals_and_grouping.md`](specs/15_signals_and_grouping.md). What carries over
+unchanged: the FastAPI/Svelte stack, local persistence, multi-model home, the `/assembly`
+projection feeding all views, `/simulate`, `/identifiability`, `/topology.svg`, non-raising
+assembly, the type registry, and per-parameter contributions. What changes: authoring is
+**element forms + boundaries + treatment**, not add-module/route; modules are **derived**.
+Detailed, parallelizable briefs live in [`TODO.md`](TODO.md) → Phase D.
 
 ### Step 4b — Fit view ③ (after Steps 2–3)
 

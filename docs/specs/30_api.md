@@ -1,10 +1,14 @@
 # 30 — API Contract (FastAPI ↔ Svelte)
 
-**Status: FROZEN.** Track B (FastAPI) and Track F (Svelte) code against this. Any change
-must be made **here first**; both sides then adapt together. This is the single source of
-truth for endpoint shapes — it sits *under* the specs umbrella (see
-[`00_overview.md`](00_overview.md)) but its freeze discipline is unchanged from when it
-lived at `docs/api_contract.md`.
+**Status: IN REVISION.** The model-management, element-CRUD, simulation, identifiability, and
+topology-SVG endpoints below are **frozen and built** — code against them. The **module-CRUD +
+routing** endpoints and the channel-routing shapes are **superseded** by the direction change
+in [`15_signals_and_grouping.md`](15_signals_and_grouping.md); see
+[§Direction change: signal-grouping deltas](#direction-change-signal-grouping-deltas) at the
+end for the target shapes (Signal resource, per-element boundary/treatment fields, derived
+modules). Until those land, the existing module/routing endpoints remain as-is so the current
+app keeps working. The freeze discipline still applies *within* each frozen block: change the
+contract here first.
 
 > **Note for the state spec.** Line item: *"After any mutation the frontend re-fetches to
 > refresh all derived views."* The *mechanism* for that (the store-owned `applyMutation`
@@ -238,6 +242,11 @@ Update an element's fields (partial update — only provided fields are changed)
 
 ## Module CRUD
 
+> **[SUPERSEDED by `15`.]** This whole block (module create/delete + routing) is retired under
+> the signal-grouping model — modules are *derived*, not authored. It stays documented here
+> only because the current app still uses it; new work should target the
+> [§Direction change](#direction-change-signal-grouping-deltas) shapes instead.
+
 ### `POST /api/models/{id}/modules`
 
 Add a module.
@@ -415,3 +424,66 @@ All errors return:
 ```json
 {"detail": "human-readable message"}
 ```
+
+---
+
+## Direction change: signal-grouping deltas
+
+**Status: TARGET** (not yet built). These are the contract changes
+[`15_signals_and_grouping.md`](15_signals_and_grouping.md) implies. Listed as deltas against
+the frozen shapes above; to be promoted into the body (and the old module/routing block
+deleted) once implemented.
+
+### Retired
+
+- `POST /modules`, `DELETE /modules/{mid}`, `PUT /modules/{mid}/routing` — modules are derived,
+  not authored. `doc.routes` and `Module.element_ids` disappear from the document.
+- `module_types[].owns` as a **routing-UI** input — `owns` stays as engine metadata but the
+  frontend no longer uses it to gate routing controls (there are none).
+
+### New / changed shapes
+
+**Registry** gains, per element type, a **boundary descriptor** and a **treatment menu**:
+```jsonc
+// element_types[] entry (additions)
+{
+  "type_name": "OuterWall",
+  "fields": [ … ],
+  "boundary": { "field": "orientation", "role": "solar+exterior" },   // how this element pins signals
+  "treatments": [                                                      // [] or forced => no UI knob
+    {"key": "thermal_mass", "label": "Thermal-mass wall", "default": true},
+    {"key": "simple_loss",  "label": "Simple loss"}
+  ]
+}
+```
+`Partition` gains `{"field": "adjacent", "role": "adjacent"}`; `Floor.boundary`'s `adjacent`
+option gains a room label. Treatments are `[]` (forced) for everything except heavy walls.
+
+**Signal** becomes a first-class document resource (see `15` for the full shape):
+```jsonc
+{ "id": "s_kitchen", "name": "T_kitchen", "kind": "temperature", "role": "adjacent", "meta": {} }
+```
+The Signal carries **no data binding** in this cut — it declares a required input, not its
+provenance. A future version adds a `binding` / `source` field (uploaded column, InfluxDB
+query, constant/schedule, derived) without changing identity or grouping; keep the shape
+binding-agnostic so that lands without a migration (see `15` §"A Signal is a declaration of a
+required input" + open questions).
+
+**`GET /document`** returns `signals: [<Signal>, …]` alongside `elements`; `modules` becomes a
+**derived** read-only list (no `element_ids` routing — membership is computed). Elements carry
+a `treatment` field and their boundary field(s).
+
+**`PATCH /elements/{eid}`** may **auto-create or garbage-collect Signals** as a side effect of
+a boundary edit (per the signal-liveness invariant in `15`). The mutation still returns the
+affected element; the re-pull invariant ([`10_state.md`](10_state.md)) refreshes the derived
+signal list and modules.
+
+**`GET /assembly`** gains a `required_signals` projection (the input list the right-column
+panel renders) — the set of `Signal`s the derived modules demand, each with role/kind/meta so
+the UI knows what series to ask for. `ownership`/`parameters`/`graph`/`problems` keep their
+shapes; `problems` now signals an **engine bug** in the grouping rule rather than a user
+routing mistake.
+
+**`POST /simulate`** `signals` keys become the model's `Signal.name`s (e.g. `T_kitchen`,
+`G_sol_S`), and the synthetic `_T_sol_air` hack is replaced by a real per-signal POA boundary
+(see `15` open questions; `solar.py` already computes POA per orientation).
