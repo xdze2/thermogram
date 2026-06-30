@@ -23,6 +23,67 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Derived: map from element_id -> [{ module_id, params: [{ name, pct }] }]
+  //
+  // For each parameter, computes each contributing ELEMENT's percentage share.
+  // An element may feed one parameter through several channels (e.g. a heavy
+  // wall feeds C_wall via CONDUCTION + STORAGE + SOLAR_OPAQUE); those are summed
+  // into a single per-element value FIRST, then the share is element's-sum /
+  // sum-over-elements × 100.  This keeps the % meaning "this element's share
+  // among elements" (a sole contributor reads 100%) and never normalises across
+  // an element's own channels (which are different units and would be nonsense).
+  // Rows are grouped by module_id so the card can render a quiet
+  // "DirectLoss[T_ext]" header with indented param+% pairs underneath.
+  //
+  // Returns {} when assembly is null or has no parameters.
+  // ---------------------------------------------------------------------------
+  $: contribByElement = buildContribByElement($assembly);
+
+  /**
+   * @param {object|null} asm - the assembly store value
+   * @returns {{ [element_id: string]: { module_id: string, params: { name: string, pct: number|null }[] }[] }}
+   */
+  function buildContribByElement(asm) {
+    if (!asm?.parameters?.length) return {};
+
+    // raw[element_id][module_id] = [ { name, pct }, ... ]
+    const raw = {};
+
+    for (const param of asm.parameters) {
+      const contribs = param.contributions ?? [];
+      if (!contribs.length) continue;
+
+      // Aggregate this param's contributions by element FIRST, so an element
+      // that feeds the param through multiple channels counts once.
+      const valueByElement = {};
+      for (const c of contribs) {
+        valueByElement[c.element_id] = (valueByElement[c.element_id] ?? 0) + (c.value ?? 0);
+      }
+
+      // Denominator: total over elements (== total over contributions).
+      const total = Object.values(valueByElement).reduce((acc, v) => acc + v, 0);
+      const mid = param.module_id ?? '';
+
+      for (const [eid, value] of Object.entries(valueByElement)) {
+        const pct = total > 0 ? value / total * 100 : null;
+        if (!raw[eid]) raw[eid] = {};
+        if (!raw[eid][mid]) raw[eid][mid] = [];
+        raw[eid][mid].push({ name: param.name, pct });
+      }
+    }
+
+    // Convert to stable array form.
+    const out = {};
+    for (const [eid, moduleMap] of Object.entries(raw)) {
+      out[eid] = Object.entries(moduleMap).map(([mid, params]) => ({
+        module_id: mid,
+        params,
+      }));
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
   // Modal state
   // ---------------------------------------------------------------------------
   let modalOpen = false;
@@ -34,37 +95,6 @@
   let formFields = {};
   let formError = '';
   let formLoading = false;
-
-  // ---------------------------------------------------------------------------
-  // Derived: map from element_id -> [{ module_id, params: [name, ...] }]
-  // Groups params by their owning module so the card can render
-  // "DirectLoss[T_ext]: H_ve" rather than bare param-name badges.
-  // ---------------------------------------------------------------------------
-  $: paramsByElement = buildParamsByElement($assembly);
-
-  function buildParamsByElement(asm) {
-    // map: element_id -> Map<module_id, Set<param_name>>
-    const raw = {};
-    if (!asm?.parameters) return {};
-    for (const param of asm.parameters) {
-      for (const contrib of param.contributions ?? []) {
-        const eid = contrib.element_id;
-        const mid = param.module_id ?? '';
-        if (!raw[eid]) raw[eid] = {};
-        if (!raw[eid][mid]) raw[eid][mid] = new Set();
-        raw[eid][mid].add(param.name);
-      }
-    }
-    // Convert to a stable array of { module_id, params } per element.
-    const out = {};
-    for (const [eid, moduleMap] of Object.entries(raw)) {
-      out[eid] = Object.entries(moduleMap).map(([mid, nameSet]) => ({
-        module_id: mid,
-        params: [...nameSet],
-      }));
-    }
-    return out;
-  }
 
   // ---------------------------------------------------------------------------
   // Open modal helpers
@@ -232,17 +262,6 @@
     return JSON.parse(JSON.stringify(obj));
   }
 
-  function formatBudget(budgets) {
-    if (!budgets) return [];
-    return Object.entries(budgets).map(([channel, bvals]) => {
-      const nonNull = Object.entries(bvals)
-        .filter(([, v]) => v !== null)
-        .map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toFixed(2) : v}`);
-      if (!nonNull.length) return null;
-      return { channel, values: nonNull.join(', ') };
-    }).filter(Boolean);
-  }
-
   /**
    * Returns a human-readable summary of an element's boundary for display on
    * the element card (e.g. "S", "adjacent: kitchen", "ground").
@@ -354,33 +373,29 @@
               {/if}
             </div>
 
-            <!-- Channel budgets -->
-            {#if elem.budgets}
-              <div class="divider my-1 text-xs">Channel budgets</div>
-              <div class="flex flex-col gap-0.5">
-                {#each formatBudget(elem.budgets) as row}
-                  <div class="text-xs flex gap-2">
-                    <span class="badge badge-ghost badge-xs">{row.channel}</span>
-                    <span class="text-base-content/70">{row.values}</span>
+            <!-- Contributes to: which derived modules this element feeds,
+                 with each parameter's percentage share of that module. -->
+            {#if contribByElement[elem.id]?.length}
+              <div class="divider my-1 text-xs">Contributes to</div>
+              <div class="flex flex-col gap-1.5">
+                {#each contribByElement[elem.id] as group}
+                  <div>
+                    <div class="font-mono text-xs text-base-content/70">{group.module_id}</div>
+                    <div class="flex flex-col gap-0.5 ml-2 mt-0.5">
+                      {#each group.params as p}
+                        <div class="flex items-center justify-between text-xs gap-2">
+                          <span class="font-mono">{p.name}</span>
+                          <span class="text-base-content/60 tabular-nums">
+                            {p.pct != null ? p.pct.toFixed(0) + '%' : '—'}
+                          </span>
+                        </div>
+                      {/each}
+                    </div>
                   </div>
                 {/each}
               </div>
             {/if}
 
-            <!-- Which parameters this element feeds, grouped by owning module -->
-            {#if paramsByElement[elem.id]?.length}
-              <div class="divider my-1 text-xs">Feeds parameters</div>
-              <div class="flex flex-col gap-1">
-                {#each paramsByElement[elem.id] as group}
-                  <div class="flex flex-wrap items-center gap-1">
-                    <span class="badge badge-ghost badge-xs font-mono">{group.module_id}</span>
-                    {#each group.params as pname}
-                      <span class="badge badge-primary badge-sm">{pname}</span>
-                    {/each}
-                  </div>
-                {/each}
-              </div>
-            {/if}
           </div>
         </div>
       {/each}
