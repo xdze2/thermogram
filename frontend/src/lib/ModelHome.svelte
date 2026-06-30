@@ -170,22 +170,17 @@
   }
 </script>
 
-<div class="min-h-screen bg-base-100">
-
-  <!-- Header -->
-  <header class="navbar bg-base-200 border-b border-base-300 px-4">
-    <div class="navbar-start">
-      <span class="text-xl font-bold tracking-tight">thnodes</span>
-      <span class="ml-2 badge badge-ghost badge-sm hidden sm:inline-flex">single-room thermal sim</span>
-    </div>
-    {#if listLoading}
-      <div class="navbar-end">
-        <span class="loading loading-spinner loading-sm text-primary"></span>
-      </div>
-    {/if}
-  </header>
+<div class="flex-1 overflow-auto bg-base-100">
 
   <main class="max-w-2xl mx-auto px-4 py-8 flex flex-col gap-8">
+
+    <!-- Page title — sidebar carries the app mark; this identifies the view -->
+    <div class="flex items-center gap-3">
+      <h1 class="text-xl font-bold tracking-tight">Models</h1>
+      {#if listLoading}
+        <span class="loading loading-spinner loading-sm text-primary"></span>
+      {/if}
+    </div>
 
     <!-- Global error -->
     {#if listError}
@@ -199,7 +194,7 @@
     <!-- Model list                                                          -->
     <!-- ------------------------------------------------------------------ -->
     <section aria-label="Your models">
-      <h2 class="text-lg font-semibold mb-3">Models</h2>
+      <h2 class="text-lg font-semibold mb-3">Your models</h2>
 
       {#if listLoading && models.length === 0}
         <div class="flex justify-center py-8">
