@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 from ...identifiability import identifiability_report
 from ..models import IdentOut, ParamStatusOut
-from ..store import get_doc, roomboc_to_assembler
+from ..store import get_doc, doc_to_group
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -36,7 +36,8 @@ def _synthetic_signals(n_hours: int) -> dict[str, np.ndarray]:
 def get_identifiability(model_id: str) -> IdentOut:
     doc = get_doc(model_id)
 
-    asm = roomboc_to_assembler(doc)
+    gr = doc_to_group(doc)
+    asm = gr.to_assembler()
     system, problems = asm.build(strict=False)
     if system is None:
         raise HTTPException(

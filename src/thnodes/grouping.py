@@ -41,10 +41,9 @@ Design notes
 - IndoorMass → RoomMass (auto-paired by Assembler; group() just passes it
   through add_element so the assembler can find it).
 
-- HeatSource → SourceFlux[Q_<label>] is noted in the spec but HeatSource
-  currently has no ``label`` field and no SourceFlux form.  This case is
-  registered here as a no-op (HeatSource contributes no channels; the
-  assembler ignores it).  It will be wired when HeatSource gains a signal field.
+- HeatSource → SourceFlux[Q_<label>]: a HeatSource with a non-empty ``signal``
+  field (e.g. ``signal="hvac"``) routes to ``SourceFlux[Q_hvac]`` and auto-creates
+  a ``prescribed`` signal.  A HeatSource with an empty ``signal`` is a no-op.
 
 - GroundLoss for Floor(boundary="ground") is not in the Step-0 catalogue.
   We route it to DirectLoss[T_ground] using the CONDUCTION budget; this is
@@ -67,7 +66,7 @@ from .elements import (
     Partition,
     Window,
 )
-from .modules import DirectLoss, HeavyWall, RoomMass, SolarGainModule, TopologyModule
+from .modules import DirectLoss, HeavyWall, RoomMass, SolarGainModule, SourceFluxModule, TopologyModule
 
 
 # ── Signal (lightweight; mirrors api.models.Signal but without the API dependency) ──
@@ -180,7 +179,7 @@ def derive_signals(elements: list[EnvelopeElement]) -> list[Signal]:
     Applies the liveness invariant (spec 15): only signals referenced by at
     least one element in ``elements`` are returned.  Order is stable:
     exterior first, then ground, then adjacent (sorted by room label), then
-    solar (sorted by orientation).
+    solar (sorted by orientation), then prescribed (sorted by signal name).
 
     Parameters
     ----------
@@ -196,10 +195,17 @@ def derive_signals(elements: list[EnvelopeElement]) -> list[Signal]:
     needs_ground = False
     adjacent_rooms: set[str] = set()
     solar_orientations: set[str] = set()
+    prescribed_labels: set[str] = set()  # HeatSource signal labels (the part after "Q_")
 
     for elem in elements:
-        if isinstance(elem, (IndoorMass, HeatSource)):
+        if isinstance(elem, IndoorMass):
             continue  # no boundary signal
+
+        if isinstance(elem, HeatSource):
+            label = elem.signal.strip()
+            if label:
+                prescribed_labels.add(label)
+            continue
 
         if isinstance(elem, OuterWall):
             needs_exterior = True
@@ -260,6 +266,16 @@ def derive_signals(elements: list[EnvelopeElement]) -> list[Signal]:
             kind="irradiance",
             role="solar",
             meta={"orientation": orient},
+        ))
+
+    # Prescribed signals: author-created via HeatSource.signal (e.g. "hvac" → "Q_hvac").
+    for label in sorted(prescribed_labels):
+        signals.append(Signal(
+            id=f"s_presc_{label}",
+            name=f"Q_{label}",
+            kind="flux",
+            role="prescribed",
+            meta={"label": label},
         ))
 
     return signals
@@ -330,10 +346,15 @@ def group(elements: list[EnvelopeElement]) -> GroupResult:
             grouped.setdefault(room_mass_key, [])
             continue
 
-        # ── HeatSource → SourceFlux (future; currently no-op) ─────────────────
+        # ── HeatSource → SourceFlux[Q_<label>] ────────────────────────────────
         if isinstance(elem, HeatSource):
-            # HeatSource has no channels() and no signal field yet.
-            # Skip; a future implementation will add SourceFlux[Q_<label>] here.
+            label = elem.signal.strip()
+            if label:
+                # A HeatSource with a non-empty signal routes to SourceFlux.
+                # HeatSource.channels() returns {} so no channels are claimed
+                # here; the exactly-once check remains satisfied trivially.
+                _add(("SourceFlux", f"Q_{label}"), elem, [])
+            # HeatSource with empty signal: no-op (no module produced).
             continue
 
         # ── OuterWall ─────────────────────────────────────────────────────────
@@ -445,4 +466,6 @@ def _make_module(type_name: str, signal_name: str | None) -> TopologyModule:
         return SolarGainModule(G_signal=signal_name or "G_sol")
     if type_name == "HeavyWall":
         return HeavyWall(T_bnd_signal=signal_name or "T_ext")
+    if type_name == "SourceFlux":
+        return SourceFluxModule(Q_signal=signal_name or "Q_prescribed")
     raise ValueError(f"Unknown module type name: {type_name!r}")

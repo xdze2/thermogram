@@ -5,27 +5,34 @@ Each example is stored as a JSON file under src/thnodes/examples/*.json and can
 be loaded by the persistence layer for "new from example" functionality without
 importing streamlit or any FastAPI runtime.
 
-JSON shape matches RoomDoc/ElementSpec/ModuleSpec from api/models.py:
+JSON shape (D3 signal-grouping model — modules and routes are OMITTED):
 
     {
         "name": "<human label>",
         "elements": {
             "e0": {"type": "<ElementType>", "fields": {...}},
             ...
-        },
-        "modules": {
-            "m0": {"type": "<ModuleType>", "fields": {...}},
-            ...
-        },
-        "routes": {
-            "m0": [],           # module_id -> [element_ids]
-            "m1": ["e0", "e1"],
-            ...
         }
+        // "modules" and "routes" keys are absent; they are derived at read-time
+        // by the grouping rule (doc_to_group).  Old JSON that still carries these
+        // keys loads gracefully — they are kept as vestigial fields on RoomDoc
+        // for load-compatibility but are no longer used for assembly.
     }
 
-Element and module IDs are assigned sequentially: "e0", "e1", ... / "m0", "m1", ...
+Element IDs are assigned sequentially: "e0", "e1", ...
 consistent with the counter-based scheme in RoomDoc.
+
+Per-element boundary / treatment fields (spec 15 / D1–D3):
+  - OuterWall / Window: ``orientation`` (S…N) pins T_ext + G_sol_<orient>.
+    Heavy OuterWall may carry ``treatment: "simple_loss"`` to override to
+    DirectLoss[T_ext].
+  - Floor: ``boundary`` ∈ {ground, adjacent, exposed}; when "adjacent",
+    ``adjacent_room`` names the neighbouring space.
+  - Partition: ``adjacent`` names the neighbouring room label.
+  - IndoorMass: no boundary (auto-paired to RoomMass).
+  - HeatSource: ``signal`` = prescribed-flux label (e.g. "hvac" → Q_hvac).
+
+Modules are DERIVED by the grouping rule — the user never specifies them.
 
 Room descriptions are ported from notebooks/case_rooms.py (the now-deleted
 streamlit prototype), which was the single prior source of canonical room
@@ -56,9 +63,10 @@ def _caravan() -> dict:
     """
     Caravan — all-light, single fast band.
 
-    IndoorMass (5×3×2.2 m, bare) + OuterWall (light insulation) + Window.
-    RoomMass + DirectLoss (wall + window) + SolarGainModule (window).
+    IndoorMass (5×3×2.2 m, bare) + OuterWall (light insulation, S) + Window (S).
+    Derived modules: RoomMass + DirectLoss[T_ext] + SolarGain[G_sol_S].
     No heavy mass → single T_room state.  Fast time constant.
+    Required signals: T_ext, G_sol_S.
     """
     return {
         "name": "Caravan",
@@ -79,6 +87,8 @@ def _caravan() -> dict:
                     "orientation": "S",
                     "layers": [{"material": "insulation_mineral_wool", "thickness": 0.05}],
                     "alpha": 0.6,
+                    # treatment="" → forced simple_loss for a light wall (no STORAGE budget).
+                    "treatment": "",
                 },
             },
             "e2": {
@@ -91,16 +101,6 @@ def _caravan() -> dict:
                 },
             },
         },
-        "modules": {
-            "m0": {"type": "RoomMass", "fields": {}},
-            "m1": {"type": "DirectLoss", "fields": {}},
-            "m2": {"type": "SolarGainModule", "fields": {}},
-        },
-        "routes": {
-            "m0": [],
-            "m1": ["e1", "e2"],
-            "m2": ["e2"],
-        },
     }
 
 
@@ -108,9 +108,10 @@ def _heavy_wall() -> dict:
     """
     Heavy-wall — two bands, good excitation.
 
-    IndoorMass (5×4×2.5 m, normal) + OuterWall (concrete/insulation) + Window.
-    RoomMass + DirectLoss (window) + HeavyWall (concrete wall) + SolarGainModule (window).
-    T_wall (slow) + T_room (fast).  Independent diurnal signals → both bands identifiable.
+    IndoorMass (5×4×2.5 m, normal) + OuterWall (concrete/insulation, S, heavy,
+    treatment="thermal_mass") + Window (S).
+    Derived modules: RoomMass + HeavyWall[T_ext] + DirectLoss[T_ext] + SolarGain[G_sol_S].
+    T_wall (slow) + T_room (fast).  Required signals: T_ext, G_sol_S.
     """
     return {
         "name": "Heavy-wall",
@@ -134,6 +135,8 @@ def _heavy_wall() -> dict:
                         {"material": "insulation_mineral_wool", "thickness": 0.1},
                     ],
                     "alpha": 0.6,
+                    # treatment="" → default for heavy wall = thermal_mass → HeavyWall[T_ext].
+                    "treatment": "",
                 },
             },
             "e2": {
@@ -146,18 +149,6 @@ def _heavy_wall() -> dict:
                 },
             },
         },
-        "modules": {
-            "m0": {"type": "RoomMass", "fields": {}},
-            "m1": {"type": "DirectLoss", "fields": {}},
-            "m2": {"type": "HeavyWall", "fields": {}},
-            "m3": {"type": "SolarGainModule", "fields": {}},
-        },
-        "routes": {
-            "m0": [],
-            "m1": ["e2"],
-            "m2": ["e1"],
-            "m3": ["e2"],
-        },
     }
 
 
@@ -168,20 +159,22 @@ def _collinear() -> dict:
     Same physical topology as Heavy-wall.  The 'collinear' label signals that
     passive diurnal data (T_ext ∝ G_sol) is expected: the identifiability lens
     will flag slow-band params as borderline or prior_dominated.
+    Derived modules: same as heavy_wall.
     """
     base = _heavy_wall()
     base["name"] = "Collinear"
-    return base
+    return base  # elements are identical; derived modules will match heavy_wall
 
 
 def _cellar() -> dict:
     """
     Cellar — ground-coupled, near-constant interior.
 
-    IndoorMass (5×5×2.2 m, heavy furniture/stored items) + small north Window.
-    RoomMass + DirectLoss (window).  No solar module — the window's
-    SOLAR_TRANSMISSION channel is intentionally unclaimed, which the assembler
-    will warn about.  HeavySlab deferred until a T_ground signal is available.
+    IndoorMass (5×5×2.2 m, heavy furniture/stored items) + small north Window (N).
+    Derived modules: RoomMass + DirectLoss[T_ext] + SolarGain[G_sol_N].
+    The window's SOLAR_TRANSMISSION channel is now claimed by SolarGain[G_sol_N]
+    (the grouping rule auto-derives a solar gain module for any window).
+    Required signals: T_ext, G_sol_N.
     """
     return {
         "name": "Cellar",
@@ -204,14 +197,6 @@ def _cellar() -> dict:
                     "shgc": 0.1,
                 },
             },
-        },
-        "modules": {
-            "m0": {"type": "RoomMass", "fields": {}},
-            "m1": {"type": "DirectLoss", "fields": {}},
-        },
-        "routes": {
-            "m0": [],
-            "m1": ["e1"],
         },
     }
 

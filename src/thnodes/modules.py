@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .channels import Budget, Channel
-from .forms import Conductance, DelayedConductance, SolarGain
+from .forms import Conductance, DelayedConductance, SolarGain, SourceFlux
 from .elements import Rse, Rsi
 
 Params = dict[str, float]
@@ -239,3 +239,42 @@ class HeavyWall(TopologyModule):
             "C_wall": (math.log(max(C_total, 1e3)), _SIGMA_LOG),
         }
         return priors
+
+
+class SourceFluxModule(TopologyModule):
+    """
+    Prescribed heat flux into T_room (HVAC, internal gains, occupancy).
+
+    Driven by a ``prescribed`` Signal (role="prescribed", kind="flux").  The
+    signal name is ``Q_<label>`` where ``label`` is the HeatSource element's
+    ``signal`` field (e.g. ``signal="hvac"`` → ``Q_hvac``).
+
+    No parameters: the flux is prescribed (supplied as input), not inferred.
+    ``derive_priors`` returns an empty dict for that reason.
+
+    Forms: ``SourceFlux`` (the fourth canonical flux form from forms.py).
+    The module carries no ``owns`` channels — HeatSource.channels() returns {}
+    so the exactly-once ownership check is satisfied trivially.
+    """
+
+    def __init__(self, Q_signal: str):
+        form = SourceFlux(Q_signal=Q_signal)
+        super().__init__(
+            name="SourceFlux",
+            params=[],
+            signals=[Q_signal],
+            private_states=[],
+            owns=[],
+            signal=Q_signal,
+            _form=form,
+        )
+
+    def derive_priors(self, cells: dict) -> dict[str, tuple[float, float]]:
+        # No parameters — flux is prescribed, not inferred.
+        return {}
+
+    def flux_room(self, params: Params, signals: Signals, states: States) -> float:
+        return self._form.flux_room(params, signals, states)
+
+    def state_ode(self, params: Params, signals: Signals, states: States) -> dict[str, float]:
+        return {}

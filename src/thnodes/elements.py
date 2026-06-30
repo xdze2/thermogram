@@ -183,6 +183,9 @@ class IndoorMass(EnvelopeElement):
 @dataclass
 class HeatSource(EnvelopeElement):
     area: float = field(default=0.0)
+    # D3 / spec 15: the prescribed flux signal label (e.g. "Q_hvac").
+    # A non-empty value routes this HeatSource to SourceFlux[Q_<signal>].
+    signal: str = field(default="")
 
     def channels(self) -> dict[Channel, Budget]:
         return {}

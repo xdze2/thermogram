@@ -19,21 +19,5 @@
         "shgc": 0.1
       }
     }
-  },
-  "modules": {
-    "m0": {
-      "type": "RoomMass",
-      "fields": {}
-    },
-    "m1": {
-      "type": "DirectLoss",
-      "fields": {}
-    }
-  },
-  "routes": {
-    "m0": [],
-    "m1": [
-      "e1"
-    ]
   }
 }

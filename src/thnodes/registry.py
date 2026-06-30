@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from .elements import Floor, HeatSource, IndoorMass, OuterWall, Partition, Window
 from .materials import materials_db
-from .modules import DirectLoss, HeavyWall, RoomMass, SolarGainModule
+from .modules import DirectLoss, HeavyWall, RoomMass, SolarGainModule, SourceFluxModule
 
 _ORIENTATIONS = ["S", "SE", "SW", "E", "W", "NE", "NW", "N"]
 _MATERIALS = list(materials_db.keys())
@@ -100,6 +100,9 @@ ELEMENT_TYPES: dict[str, dict] = {
         "ctor": HeatSource,
         "fields": [
             {"name": "area", "type": "float", "default": 0.0},
+            # D3: prescribed flux signal label (e.g. "hvac" → signal name "Q_hvac").
+            # A non-empty value wires this element to SourceFlux[Q_<signal>].
+            {"name": "signal", "type": "str", "default": ""},
         ],
         # HeatSource pins a prescribed flux signal (name chosen by the author).
         "boundary": {"field": "signal", "role": "prescribed"},
@@ -139,6 +142,12 @@ MODULE_TYPES: dict[str, dict] = {
         "ctor": HeavyWall,
         "owns": ["CONDUCTION", "STORAGE", "SOLAR_OPAQUE"],
         "params": ["H_out", "H_in", "C_wall"],
+        "fields": [],
+    },
+    "SourceFlux": {
+        "ctor": SourceFluxModule,
+        "owns": [],
+        "params": [],
         "fields": [],
     },
 }

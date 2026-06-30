@@ -13,6 +13,7 @@ from typing import Any
 from ..assembler import Assembler, System
 from ..channels import Budget, Channel
 from ..elements import EnvelopeElement, Layer
+from ..grouping import GroupResult, group
 from ..modules import TopologyModule
 from ..registry import ELEMENT_TYPES, MODULE_TYPES
 from .models import (
@@ -105,8 +106,14 @@ def module_to_out(mid: str, spec: ModuleSpec, doc: RoomDoc) -> ModuleOut:
     )
 
 
-def signal_to_out(signal: Signal) -> SignalOut:
-    """Serialise a Signal to its API response shape."""
+def signal_to_out(signal: "Signal | Any") -> SignalOut:
+    """
+    Serialise a Signal to its API response shape.
+
+    Accepts both ``api.models.Signal`` (from stored doc) and
+    ``grouping.Signal`` (from the grouping rule) — both share the same
+    fields (id, name, kind, role, meta) so duck typing applies.
+    """
     return SignalOut(
         id=signal.id,
         name=signal.name,
@@ -147,6 +154,75 @@ def roomboc_to_assembler(doc: RoomDoc) -> Assembler:
     return asm
 
 
+# ── grouping-rule assembler path (D3) ─────────────────────────────────────────
+
+def doc_to_group(doc: RoomDoc) -> GroupResult:
+    """
+    Build element objects from ``doc.elements`` and apply the deterministic
+    grouping rule (spec 15 / I8).
+
+    This is the D3 replacement for ``roomboc_to_assembler``.  It derives
+    modules from element boundaries + treatments rather than from the stored
+    ``doc.modules`` / ``doc.routes``.  The returned ``GroupResult`` can be
+    converted to a ready-to-build Assembler via ``result.to_assembler()``.
+
+    Parameters
+    ----------
+    doc:
+        The in-memory ``RoomDoc`` (elements only; modules/routes are ignored).
+
+    Returns
+    -------
+    GroupResult
+        Contains ``derived_modules``, ``signals`` (liveness-correct), and the
+        indoor mass element if present.  Call ``.to_assembler().build()`` to
+        get a System.
+    """
+    elements: list[EnvelopeElement] = []
+    for eid, spec in doc.elements.items():
+        try:
+            elements.append(_build_element(spec))
+        except Exception:
+            pass  # skip malformed elements; assembler will report problems
+    return group(elements)
+
+
+def doc_to_group_with_elem_map(
+    doc: RoomDoc,
+) -> tuple[GroupResult, dict[int, str]]:
+    """
+    Like ``doc_to_group``, but also returns a mapping from element object
+    identity (``id(elem_obj)``) to doc element ID (e.g. ``"e1"``).
+
+    The element objects in ``GroupResult.derived_modules[i].elements`` are the
+    SAME objects built here, so callers can use the returned map to translate
+    a ``DerivedModule.elements`` list into doc element IDs.
+
+    Parameters
+    ----------
+    doc:
+        The in-memory ``RoomDoc``.
+
+    Returns
+    -------
+    (GroupResult, elem_obj_id_to_eid)
+        The grouping result plus the identity→doc-eid mapping.
+    """
+    elements: list[EnvelopeElement] = []
+    eids: list[str] = []
+    for eid, spec in doc.elements.items():
+        try:
+            elem = _build_element(spec)
+            elements.append(elem)
+            eids.append(eid)
+        except Exception:
+            pass  # skip malformed elements
+
+    gr = group(elements)
+    elem_obj_to_eid: dict[int, str] = {id(e): eid for e, eid in zip(elements, eids)}
+    return gr, elem_obj_to_eid
+
+
 # ── assembly mapping helpers ───────────────────────────────────────────────────
 
 def _module_name_to_id(doc: RoomDoc) -> dict[str, str]:
@@ -156,6 +232,9 @@ def _module_name_to_id(doc: RoomDoc) -> dict[str, str]:
     Module names are not unique if the same type is added twice, so we build
     the reverse map by position: same iteration order as roomboc_to_assembler.
     We rely on the fact that modules are iterated in insertion order (dict).
+
+    DEPRECATED (routing era): used only by ``roomboc_to_assembler`` callers.
+    The grouping path uses ``_group_module_key_to_id`` instead.
     """
     # Build ordered list of (mid, mod_name) as they would be added to assembler.
     result: dict[str, str] = {}
@@ -171,6 +250,62 @@ def _module_name_to_id(doc: RoomDoc) -> dict[str, str]:
         key = mname if count == 0 else f"{mname}_{count}"
         name_seen[mname] = count + 1
         result[key] = mid
+    return result
+
+
+def _group_module_key_to_stable_id(gr: GroupResult) -> dict[tuple[str, str | None], str]:
+    """
+    Map each derived module's ``(type_name, signal_name)`` key to a stable
+    string ID suitable for API response ``module_id`` fields.
+
+    The ID is deterministic: ``"{type_name}[{signal_name}]"`` (or
+    ``"{type_name}"`` for RoomMass whose signal_name is None).  This lets the
+    frontend and tests refer to a specific module without relying on the old
+    counter-based ``m0`` / ``m1`` IDs from the routing era.
+
+    The Assembler still tracks modules by their internal name; this mapping
+    translates the internal Assembler key (module.name, which is a type-level
+    name like "DirectLoss") to the stable per-instance ID.  Because a single
+    Assembler may contain multiple DirectLoss instances, we match by iteration
+    order (same as ``GroupResult.derived_modules`` → ``to_assembler()``).
+    """
+    result: dict[tuple[str, str | None], str] = {}
+    for dm in gr.derived_modules:
+        key = dm.key
+        type_name, sig_name = key
+        stable_id = f"{type_name}[{sig_name}]" if sig_name is not None else type_name
+        result[key] = stable_id
+    return result
+
+
+def _group_assembler_module_name_to_id(gr: GroupResult) -> dict[str, str]:
+    """
+    Map the Assembler-internal module name (e.g. "DirectLoss", which is
+    ``module.name`` — shared by all DirectLoss instances) to the stable
+    derived-module ID (e.g. "DirectLoss[T_ext]").
+
+    Because multiple DirectLoss instances share the name "DirectLoss", we
+    use order-of-addition (matching ``to_assembler()`` iteration) to
+    disambiguate.  The Assembler tracks routes in insertion order, and
+    ``_module_name_to_id`` in the routing era used the same position-based
+    trick.  Here we build: for the i-th occurrence of "DirectLoss" in the
+    assembler's route list, map "DirectLoss" + offset to the corresponding
+    derived module's stable ID.
+
+    The return type is ``dict[str, str]``: maps Assembler-level name (possibly
+    a positional key like "DirectLoss_1") to the stable grouped ID.  Callers
+    must use the same positional scheme as the routing-era ``_module_name_to_id``.
+    """
+    result: dict[str, str] = {}
+    name_seen: dict[str, int] = {}
+    key_to_id = _group_module_key_to_stable_id(gr)
+    for dm in gr.derived_modules:
+        asmname = dm.module.name  # e.g. "DirectLoss", "RoomMass", "SolarGain"
+        count = name_seen.get(asmname, 0)
+        # Positional key matching the routing-era scheme:
+        asm_key = asmname if count == 0 else f"{asmname}_{count}"
+        name_seen[asmname] = count + 1
+        result[asm_key] = key_to_id[dm.key]
     return result
 
 

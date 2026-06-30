@@ -1,7 +1,8 @@
 """
 GET /api/models/{model_id}/assembly
 
-Rebuilds the system via Assembler.build(strict=False) on every call.
+Rebuilds the system via the deterministic grouping rule (D3) and
+Assembler.build(strict=False) on every call.
 Never returns HTTP 500 — partial data + problems[] is always returned.
 """
 
@@ -18,8 +19,15 @@ from ..models import (
     ParameterOut,
     PriorOut,
     ProblemOut,
+    SignalOut,
 )
-from ..store import get_doc, roomboc_to_assembler, _elem_label_to_id, _module_name_to_id
+from ..store import (
+    doc_to_group,
+    get_doc,
+    signal_to_out,
+    _elem_label_to_id,
+    _group_assembler_module_name_to_id,
+)
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -29,11 +37,11 @@ def get_assembly(model_id: str) -> AssemblyOut:
     doc = get_doc(model_id)
 
     try:
-        asm = roomboc_to_assembler(doc)
+        gr = doc_to_group(doc)
+        asm = gr.to_assembler()
         system, raw_problems = asm.build(strict=False)
     except Exception as exc:
-        # Assembler construction itself shouldn't raise (build strict=False catches all),
-        # but guard defensively so the endpoint never 500s.
+        # Guard defensively so the endpoint never 500s.
         return AssemblyOut(
             ownership=[],
             parameters=[],
@@ -41,6 +49,7 @@ def get_assembly(model_id: str) -> AssemblyOut:
             signals=[],
             graph=GraphOut(nodes=[], edges=[]),
             problems=[ProblemOut(kind="internal_error", message=str(exc))],
+            required_signals=[],
         )
 
     problems = [
@@ -52,6 +61,12 @@ def get_assembly(model_id: str) -> AssemblyOut:
         for p in raw_problems
     ]
 
+    # required_signals: the set of Signals the derived modules demand.
+    # Always derived from the grouping result, even when system is None.
+    required_signals: list[SignalOut] = [
+        signal_to_out(sig) for sig in gr.signals
+    ]
+
     if system is None:
         return AssemblyOut(
             ownership=[],
@@ -60,17 +75,19 @@ def get_assembly(model_id: str) -> AssemblyOut:
             signals=[],
             graph=GraphOut(nodes=[], edges=[]),
             problems=problems,
+            required_signals=required_signals,
         )
 
-    # Maps for translating internal labels back to session IDs
+    # Maps for translating internal labels back to derived-module stable IDs
     label_to_eid = _elem_label_to_id(doc)
-    mod_name_to_mid = _module_name_to_id(doc)
+    # Mapping from Assembler-internal positional name to derived module stable ID
+    mod_asmname_to_id = _group_assembler_module_name_to_id(gr)
 
     # Ownership table: (element_label, Channel) -> module_name
     ownership_list: list[OwnershipEntry] = []
     for (elem_label, ch), mod_name in system.ownership_map().items():
         eid = label_to_eid.get(elem_label, "")
-        mid = mod_name_to_mid.get(mod_name, "")
+        mid = mod_asmname_to_id.get(mod_name, mod_name)
         ownership_list.append(OwnershipEntry(
             element_id=eid,
             element_label=elem_label,
@@ -80,17 +97,22 @@ def get_assembly(model_id: str) -> AssemblyOut:
 
     # Parameters with contributions
     contribs_by_param = system.parameter_contributions()
+
+    # Build param→module_id mapping from derived modules.
+    # Each derived module knows its params; find the stable ID for each.
+    key_to_id = {dm.key: (
+        f"{dm.key[0]}[{dm.key[1]}]" if dm.key[1] is not None else dm.key[0]
+    ) for dm in gr.derived_modules}
+    param_to_module_id: dict[str, str] = {}
+    for dm in gr.derived_modules:
+        stable_id = key_to_id[dm.key]
+        for pname in dm.module.params:
+            param_to_module_id[pname] = stable_id
+
     parameters: list[ParameterOut] = []
     for pname in system.param_names:
         mu_log, sigma_log = system.priors[pname]
-
-        # Find which module owns this param
-        param_mid = ""
-        for mid, spec in doc.modules.items():
-            from ...registry import MODULE_TYPES
-            if pname in MODULE_TYPES.get(spec.type, {}).get("params", []):
-                param_mid = mid
-                break
+        param_mid = param_to_module_id.get(pname, "")
 
         raw_contribs = contribs_by_param.get(pname, [])
         contrib_out = [
@@ -120,23 +142,19 @@ def get_assembly(model_id: str) -> AssemblyOut:
 
     edges: list[dict] = []
     for (elem_label, ch), mod_name in system.ownership_map().items():
-        mid = mod_name_to_mid.get(mod_name, "")
-        # Determine the "from" node: private-state modules connect state→room;
-        # boundary-signal modules connect signal→room.
+        mid = mod_asmname_to_id.get(mod_name, mod_name)
+        # Find the module instance to check private_states and signals.
         from_node = None
-        # Find the module object to check private_states and signals
-        for m in asm._routes:
-            if m[0].name == mod_name:
-                mod_obj = m[0]
+        for route_entry in asm._routes:
+            mod_obj = route_entry[0]
+            if mod_obj.name == mod_name:
                 if mod_obj.private_states:
                     from_node = mod_obj.private_states[0]
                 elif mod_obj.signals:
-                    # Use the first boundary signal as the "from" node
                     from_node = mod_obj.signals[0]
                 break
         if from_node is None:
             from_node = "T_room"
-        # Deduplicate edges per (from_node, module_id)
         edge = {"from": from_node, "to": "T_room", "module_id": mid}
         if edge not in edges:
             edges.append(edge)
@@ -150,4 +168,5 @@ def get_assembly(model_id: str) -> AssemblyOut:
         signals=system.signal_names,
         graph=graph,
         problems=problems,
+        required_signals=required_signals,
     )

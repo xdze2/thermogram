@@ -1,8 +1,21 @@
 from fastapi import APIRouter, HTTPException, status
 
-from ..models import ElementIn, ElementOut, ElementPatch, ModuleIn, ModuleOut, RoutingIn
-from ..models import ElementSpec, ModuleSpec
-from ..store import element_to_out, get_doc, module_to_out, save_model, signal_to_out
+from ..models import (
+    DerivedModuleOut,
+    ElementIn,
+    ElementOut,
+    ElementPatch,
+    ElementSpec,
+    SignalOut,
+)
+from ..store import (
+    _build_element,
+    doc_to_group_with_elem_map,
+    element_to_out,
+    get_doc,
+    save_model,
+    signal_to_out,
+)
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -13,10 +26,39 @@ router = APIRouter(prefix="/models/{model_id}")
 def get_document(model_id: str) -> dict:
     doc = get_doc(model_id)
     elements = [element_to_out(eid, spec) for eid, spec in doc.elements.items()]
-    modules = [module_to_out(mid, spec, doc) for mid, spec in doc.modules.items()]
-    # signals: read-only in D1; auto-creation/GC is D2.
-    signals = [signal_to_out(sig) for sig in doc.signals.values()]
-    return {"model_id": model_id, "elements": elements, "modules": modules, "signals": signals}
+
+    # D3: modules and signals are DERIVED from the grouping rule, not from
+    # doc.modules / doc.routes (which are vestigial load-compatibility fields).
+    # doc_to_group_with_elem_map returns the same element objects used inside
+    # the GroupResult, so we can translate dm.elements → doc element IDs.
+    gr, elem_obj_to_eid = doc_to_group_with_elem_map(doc)
+
+    # Derived modules: one per (type, signal) key.
+    modules: list[DerivedModuleOut] = []
+    for dm in gr.derived_modules:
+        type_name, sig_name = dm.key
+        stable_id = f"{type_name}[{sig_name}]" if sig_name is not None else type_name
+        claimed_eids = [
+            elem_obj_to_eid[id(e)]
+            for e in dm.elements
+            if id(e) in elem_obj_to_eid
+        ]
+        modules.append(DerivedModuleOut(
+            id=stable_id,
+            type=type_name,
+            signal=sig_name,
+            element_ids=claimed_eids,
+        ))
+
+    # Derived signals (liveness-correct from grouping rule).
+    signals: list[SignalOut] = [signal_to_out(sig) for sig in gr.signals]
+
+    return {
+        "model_id": model_id,
+        "elements": elements,
+        "modules": modules,
+        "signals": signals,
+    }
 
 
 # ── elements ───────────────────────────────────────────────────────────────────
@@ -51,46 +93,12 @@ def delete_element(model_id: str, eid: str) -> None:
     if eid not in doc.elements:
         raise HTTPException(status_code=404, detail=f"Element '{eid}' not found.")
     del doc.elements[eid]
-    # Remove from any module routing
-    for mid in doc.routes:
-        doc.routes[mid] = [e for e in doc.routes[mid] if e != eid]
+    # No routing cleanup needed — modules are derived, not stored.
+    # Signal GC is handled at read time by the grouping rule (liveness invariant).
     save_model(model_id)
 
 
-# ── modules ────────────────────────────────────────────────────────────────────
-
-@router.post("/modules", status_code=status.HTTP_201_CREATED, response_model=ModuleOut)
-def add_module(model_id: str, body: ModuleIn) -> ModuleOut:
-    from ...registry import MODULE_TYPES
-    if body.type not in MODULE_TYPES:
-        raise HTTPException(status_code=400, detail=f"Unknown module type '{body.type}'.")
-    doc = get_doc(model_id)
-    mid = doc.next_module_id()
-    spec = ModuleSpec(type=body.type, fields=dict(body.fields))
-    doc.modules[mid] = spec
-    doc.routes[mid] = []
-    save_model(model_id)
-    return module_to_out(mid, spec, doc)
-
-
-@router.delete("/modules/{mid}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_module(model_id: str, mid: str) -> None:
-    doc = get_doc(model_id)
-    if mid not in doc.modules:
-        raise HTTPException(status_code=404, detail=f"Module '{mid}' not found.")
-    del doc.modules[mid]
-    doc.routes.pop(mid, None)
-    save_model(model_id)
-
-
-@router.put("/modules/{mid}/routing", response_model=ModuleOut)
-def put_routing(model_id: str, mid: str, body: RoutingIn) -> ModuleOut:
-    doc = get_doc(model_id)
-    if mid not in doc.modules:
-        raise HTTPException(status_code=404, detail=f"Module '{mid}' not found.")
-    for eid in body.element_ids:
-        if eid not in doc.elements:
-            raise HTTPException(status_code=404, detail=f"Element '{eid}' not found.")
-    doc.routes[mid] = list(body.element_ids)
-    save_model(model_id)
-    return module_to_out(mid, doc.modules[mid], doc)
+# NOTE: POST /modules, DELETE /modules/{mid}, and PUT /modules/{mid}/routing
+# have been RETIRED in D3.  Modules are derived from element boundaries by the
+# grouping rule and are no longer authored.  Clients that call these endpoints
+# will receive 404 (no matching route).

@@ -398,13 +398,20 @@ def test_document_mutation_autosave_delete_element(client, tmp_data):
     assert eid not in d["elements"]
 
 
-def test_document_mutation_autosave_routing(client, tmp_data):
-    """PUT /routing also triggers auto-save."""
-    uid = _create_model(client, "RoutingTest")
+def test_document_mutation_autosave_patch_then_delete(client, tmp_data):
+    """
+    D3: routing endpoints are retired.  Verify that element CRUD (patch + delete)
+    still triggers auto-save and that the persisted file stays consistent.
+    """
+    uid = _create_model(client, "PatchDeleteTest")
     eid = _add_element(client, uid, "Window", WINDOW_FIELDS)
-    r = client.post(f"/api/models/{uid}/modules", json={"type": "DirectLoss", "fields": {}})
-    mid = r.json()["id"]
-    client.put(f"/api/models/{uid}/modules/{mid}/routing", json={"element_ids": [eid]})
+
+    # Patch the element.
+    client.patch(f"/api/models/{uid}/elements/{eid}", json={"fields": {"area": 7.5}})
     d = json.loads((tmp_data / f"{uid}.json").read_text())
-    assert mid in d["routes"]
-    assert eid in d["routes"][mid]
+    assert d["elements"][eid]["fields"]["area"] == pytest.approx(7.5)
+
+    # Delete it; file must no longer contain it.
+    client.delete(f"/api/models/{uid}/elements/{eid}")
+    d = json.loads((tmp_data / f"{uid}.json").read_text())
+    assert eid not in d["elements"]

@@ -431,20 +431,14 @@ def test_document_empty_returns_signals_key(client):
 
 
 def test_document_includes_elements_and_modules(client):
-    """GET /document still returns elements and modules (routing intact)."""
-    # Add an element.
+    """GET /document returns elements and DERIVED modules (D3: modules are read-only)."""
+    # Add a Window — the grouping rule will derive DirectLoss[T_ext] + SolarGain[G_sol_S].
     r = client.post(
         f"{BASE}/elements",
         json={"type": "Window", "fields": {"area": 4.0, "orientation": "S", "U": 1.2, "shgc": 0.6}},
     )
     assert r.status_code == 201
     eid = r.json()["id"]
-
-    # Add a module and route it.
-    r = client.post(f"{BASE}/modules", json={"type": "DirectLoss", "fields": {}})
-    assert r.status_code == 201
-    mid = r.json()["id"]
-    client.put(f"{BASE}/modules/{mid}/routing", json={"element_ids": [eid]})
 
     r = client.get(f"{BASE}/document")
     assert r.status_code == 200
@@ -455,16 +449,23 @@ def test_document_includes_elements_and_modules(client):
     assert "modules" in data
     assert "signals" in data
 
-    # Content correct.
+    # Element present.
     assert any(e["id"] == eid for e in data["elements"])
-    assert any(m["id"] == mid for m in data["modules"])
-    assert any(m["element_ids"] == [eid] for m in data["modules"])
+
+    # Derived modules: DirectLoss[T_ext] and SolarGain[G_sol_S] from the window.
+    module_ids = {m["id"] for m in data["modules"]}
+    assert "DirectLoss[T_ext]" in module_ids
+    assert "SolarGain[G_sol_S]" in module_ids
+
+    # The window element is claimed by both derived modules.
+    dl_module = next(m for m in data["modules"] if m["id"] == "DirectLoss[T_ext]")
+    assert eid in dl_module["element_ids"]
 
 
 def test_examples_still_load_via_roundtrip():
     """
     Each canonical example loads through roomdoc_from_dict / roomdoc_to_dict
-    without error; the result has elements + modules (signals starts empty).
+    without error.  D3: examples no longer carry modules/routes — only elements.
     """
     from thnodes.examples import list_examples, load_example
 
@@ -473,46 +474,52 @@ def test_examples_still_load_via_roundtrip():
         raw = load_example(key)
         doc = roomdoc_from_dict(raw)
 
-        # Must have elements and modules.
+        # Must have elements.
         assert doc.elements, f"[{key}] no elements"
-        assert doc.modules, f"[{key}] no modules"
 
-        # signals starts empty (examples predate D1).
-        assert doc.signals == {}, f"[{key}] expected no signals in example"
+        # D3 examples carry no modules/routes (derived at read time).
+        # doc.modules and doc.routes are empty (vestigial fields, default empty).
+        assert doc.modules == {}, f"[{key}] expected no stored modules in D3 example"
+
+        # doc.signals is empty (signals are derived, not stored).
+        assert doc.signals == {}, f"[{key}] expected no stored signals in D3 example"
 
         # Full round-trip must also succeed.
         serialised = roomdoc_to_dict(doc)
         restored = roomdoc_from_dict(serialised)
         assert set(restored.elements.keys()) == set(doc.elements.keys())
-        assert set(restored.modules.keys()) == set(doc.modules.keys())
         # signals key present in serialised form.
         assert "signals" in serialised
         assert serialised["signals"] == {}
 
 
-def test_document_with_signal_in_store(client):
+def test_document_with_signal_derived_from_element(client):
     """
-    When the in-memory doc has a signal, GET /document includes it with the
-    correct shape.
+    D3: signals are DERIVED from element boundaries by the grouping rule.
+    Adding a Window with orientation "S" auto-creates T_ext and G_sol_S signals
+    in the /document response (via derive_signals).
     """
-    # Directly seed a signal in the default doc (D1 has no signal-creation endpoint).
-    doc = _store["default"]
-    doc.signals["s0"] = Signal(
-        id="s0",
-        name="T_ext",
-        kind="temperature",
-        role="exterior",
-        meta={},
+    # Add a Window — this pins T_ext (conduction) and G_sol_S (solar).
+    r = client.post(
+        f"{BASE}/elements",
+        json={"type": "Window", "fields": {"area": 2.0, "orientation": "S", "U": 1.0, "shgc": 0.5}},
     )
+    assert r.status_code == 201
 
     r = client.get(f"{BASE}/document")
     assert r.status_code == 200
     signals = r.json()["signals"]
 
-    assert len(signals) == 1
-    s = signals[0]
-    assert s["id"] == "s0"
-    assert s["name"] == "T_ext"
-    assert s["kind"] == "temperature"
-    assert s["role"] == "exterior"
-    assert s["meta"] == {}
+    signal_names = {s["name"] for s in signals}
+    assert "T_ext" in signal_names
+    assert "G_sol_S" in signal_names
+
+    t_ext = next(s for s in signals if s["name"] == "T_ext")
+    assert t_ext["kind"] == "temperature"
+    assert t_ext["role"] == "exterior"
+    assert t_ext["meta"] == {}
+
+    g_sol = next(s for s in signals if s["name"] == "G_sol_S")
+    assert g_sol["kind"] == "irradiance"
+    assert g_sol["role"] == "solar"
+    assert g_sol["meta"] == {"orientation": "S"}

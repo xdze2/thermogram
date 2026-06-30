@@ -151,6 +151,21 @@ class RoutingIn(BaseModel):
     element_ids: list[str]
 
 
+class DerivedModuleOut(BaseModel):
+    """
+    Read-only derived module produced by the grouping rule (D3 / spec 15).
+
+    ``id`` is stable within the response: ``"{type}[{signal}]"`` for boundary
+    modules, or just ``"{type}"`` for RoomMass (which has no boundary signal).
+    ``element_ids`` lists the element IDs whose budgets are claimed by this
+    module; this is a computed membership — the user did not route them.
+    """
+    id: str            # e.g. "DirectLoss[T_ext]", "SolarGain[G_sol_S]", "RoomMass"
+    type: str          # ModuleType name, e.g. "DirectLoss"
+    signal: str | None  # boundary signal name, e.g. "T_ext"; None for RoomMass
+    element_ids: list[str]   # element IDs claimed by this module
+
+
 # ── assembly schemas ───────────────────────────────────────────────────────────
 
 class OwnershipEntry(BaseModel):
@@ -218,6 +233,10 @@ class AssemblyOut(BaseModel):
     signals: list[str]
     graph: GraphOut
     problems: list[ProblemOut]
+    # D3: required_signals — the set of Signals the derived modules demand.
+    # Each entry has name/role/kind/meta so the UI can render the inputs panel
+    # without a separate /document fetch.  Derived from the grouping result.
+    required_signals: list[SignalOut] = []
 
 
 # ── simulate schemas ───────────────────────────────────────────────────────────

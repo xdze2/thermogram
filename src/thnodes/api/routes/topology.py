@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from ...draw import topology_svg
-from ..store import get_doc, roomboc_to_assembler
+from ..store import get_doc, doc_to_group
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -11,7 +11,8 @@ router = APIRouter(prefix="/models/{model_id}")
 def get_topology_svg(model_id: str) -> Response:
     doc = get_doc(model_id)
 
-    asm = roomboc_to_assembler(doc)
+    gr = doc_to_group(doc)
+    asm = gr.to_assembler()
     system, problems = asm.build(strict=False)
     if system is None:
         raise HTTPException(

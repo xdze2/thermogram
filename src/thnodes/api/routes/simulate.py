@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 from ...simulate import forward_sim
 from ..models import SimulateIn, SimulateOut
-from ..store import get_doc, roomboc_to_assembler
+from ..store import get_doc, doc_to_group
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -16,7 +16,8 @@ router = APIRouter(prefix="/models/{model_id}")
 def post_simulate(model_id: str, body: SimulateIn) -> SimulateOut:
     doc = get_doc(model_id)
 
-    asm = roomboc_to_assembler(doc)
+    gr = doc_to_group(doc)
+    asm = gr.to_assembler()
     result = asm.build(strict=False)
     system, problems = result
     if system is None:
