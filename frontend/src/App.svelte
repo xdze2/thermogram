@@ -1,7 +1,7 @@
 <script>
   import ElementList    from './lib/ElementList.svelte';
   import ModuleGraph    from './lib/ModuleGraph.svelte';
-  import ParameterTable from './lib/ParameterTable.svelte';
+  import SimulationPanel from './lib/SimulationPanel.svelte';
   import ModelHome      from './lib/ModelHome.svelte';
   import { loading, error, refreshAll } from './stores/model.js';
   import { route, navigate } from './stores/route.js';
@@ -96,12 +96,12 @@
       <!-- RIGHT COLUMN: how the room BEHAVES (results) -->
       <div class="flex flex-col divide-y divide-base-300">
 
-        <!-- Right (unified): simulation controls + graphs + parameters -->
-        <!-- ParameterTable already contains the scenario sliders (time range &
-             signals) at the top and the graphs/parameter table below — both are
-             shown in the right column as specified. -->
+        <!-- Right column: simulation + identifiability report. Per-parameter
+             priors now live inline on the module cards (left column); this panel
+             holds the scenario sliders, trajectory graph, and the detailed
+             identifiability verdict (τ / correlation). -->
         <section aria-label="Simulation and results" class="flex-1">
-          <ParameterTable />
+          <SimulationPanel />
         </section>
 
       </div>

@@ -32,15 +32,6 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Collapsible contribution rows
-  // ---------------------------------------------------------------------------
-  let expanded = {};  // { paramName: boolean }
-
-  function toggleExpand(name) {
-    expanded = { ...expanded, [name]: !expanded[name] };
-  }
-
-  // ---------------------------------------------------------------------------
   // Simulation
   // ---------------------------------------------------------------------------
   let simResult = null;
@@ -146,112 +137,9 @@
 <div class="p-4 space-y-6">
 
   <!-- =========================================================
-       Parameter table
-  ========================================================= -->
-  <section>
-    <h2 class="text-xl font-semibold mb-1">Thermal parameters</h2>
-    <p class="text-sm text-base-content/60 mb-3">
-      One row per module parameter. Prior is log-normal; mu_log and sigma_log are in natural log space.
-      Expand a row to see which element budgets feed the prior.
-    </p>
-
-    {#if $loading && !$assembly}
-      <div class="flex justify-center py-8">
-        <span class="loading loading-spinner loading-lg"></span>
-      </div>
-    {:else if $error}
-      <div role="alert" class="alert alert-error mb-3">
-        <span>{$error}</span>
-      </div>
-    {:else if !$assembly?.parameters?.length}
-      <p class="text-base-content/60">No parameters — add modules to see them here.</p>
-    {:else}
-      <div class="overflow-x-auto">
-        <table class="table table-sm w-full">
-          <thead>
-            <tr>
-              <th>Parameter</th>
-              <th>Module</th>
-              <th class="text-right">Prior &mu;<sub>log</sub></th>
-              <th class="text-right">Prior &sigma;<sub>log</sub></th>
-              <th>Identifiability</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each $assembly.parameters as param}
-              {@const ident = identStatus?.param_status?.[param.name]}
-              <tr class="hover">
-                <td class="font-mono font-medium">{param.name}</td>
-                <td class="text-sm text-base-content/60">{param.module_id}</td>
-                <td class="text-right font-mono">{param.prior.mu_log.toFixed(2)}</td>
-                <td class="text-right font-mono">{param.prior.sigma_log.toFixed(2)}</td>
-                <td>
-                  {#if ident}
-                    <span class="badge {statusBadge(ident.status)} badge-sm">
-                      {ident.status.replace('_', ' ')}
-                    </span>
-                  {:else}
-                    <span class="text-base-content/30 text-xs">—</span>
-                  {/if}
-                </td>
-                <td>
-                  {#if param.contributions?.length}
-                    <button
-                      class="btn btn-ghost btn-xs"
-                      onclick={() => toggleExpand(param.name)}
-                      aria-expanded={!!expanded[param.name]}
-                      aria-controls="contrib-{param.name}"
-                    >
-                      {expanded[param.name] ? 'Hide' : 'Show'} contributions
-                    </button>
-                  {/if}
-                </td>
-              </tr>
-
-              <!-- Contribution breakdown (collapsible) -->
-              {#if expanded[param.name] && param.contributions?.length}
-                <tr id="contrib-{param.name}">
-                  <td colspan="6" class="bg-base-200 pb-3 pt-1">
-                    <div class="pl-4">
-                      <div class="text-xs font-semibold mb-1 text-base-content/60">
-                        Budget contributions to prior:
-                      </div>
-                      <div class="overflow-x-auto">
-                        <table class="table table-xs">
-                          <thead>
-                            <tr>
-                              <th>Element</th>
-                              <th>Channel</th>
-                              <th>Budget field</th>
-                              <th class="text-right">Value</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {#each param.contributions as c}
-                              <tr>
-                                <td>{c.element_label}</td>
-                                <td class="font-mono text-xs">{c.channel}</td>
-                                <td class="font-mono text-xs">{c.budget_field}</td>
-                                <td class="text-right font-mono">{c.value.toFixed(3)}</td>
-                              </tr>
-                            {/each}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              {/if}
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-  </section>
-
-  <!-- =========================================================
        Identifiability report
+       (Per-parameter priors now live inline on the module cards;
+        this section is the detailed pre-fit verdict with τ/correlation.)
   ========================================================= -->
   <section>
     <h2 class="text-xl font-semibold mb-1">

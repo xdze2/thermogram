@@ -14,7 +14,7 @@
  *   - Model-management stubs (GET /api/models, POST /api/models, etc.) return
  *     a static list. Creates and deletes succeed but do NOT change the list on
  *     the next GET — same stateless limitation as element/module stubs above.
- *   - /simulate is served from a fixture too, so the ParameterTable scenario
+ *   - /simulate is served from a fixture too, so the SimulationPanel scenario
  *     toy runs through the SAME runSimulate() path in mock and live modes.
  *     /identifiability and /topology.svg fall through to the real fetch.
  *   - Model-scoped GET handlers match on the URL SUFFIX (/document, /assembly,

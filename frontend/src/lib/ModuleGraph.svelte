@@ -1,7 +1,7 @@
 <script>
   import { assembly, roomDoc, registry, loading, error,
            addModule, removeModule, routeModule } from '../stores/model.js';
-  import { topologySvgUrl } from '../lib/api.js';
+  import { topologySvgUrl, fetchIdentifiability } from '../lib/api.js';
 
   // ---------------------------------------------------------------------------
   // Channels (fixed set per contract)
@@ -105,6 +105,65 @@
     const offered = offeredChannels(elem);
     return owns.some(ch => offered.has(ch));
   }
+
+  /**
+   * The channels a module would actually consume from an element: the
+   * intersection of the module's owns set with the element's offered channels.
+   * This is what the assembler routes — it can be a strict subset of the
+   * element's channels (e.g. DirectLoss takes only CONDUCTION from a Window
+   * that also offers SOLAR_TRANSMISSION). Surfaced as the per-element caption.
+   */
+  function consumedChannels(mod, elem) {
+    const owns = moduleOwns[mod.type] ?? [];
+    const offered = offeredChannels(elem);
+    return owns.filter(ch => offered.has(ch));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Per-module parameters (merged from the former standalone ParameterTable)
+  // ---------------------------------------------------------------------------
+
+  /** Group assembly.parameters by module_id for inline display on cards. */
+  $: paramsByModule = buildParamsByModule($assembly?.parameters ?? []);
+
+  function buildParamsByModule(params) {
+    const map = {};
+    for (const p of params) {
+      (map[p.module_id] ??= []).push(p);
+    }
+    return map;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Identifiability (per-parameter verdict; lazy-loaded on demand)
+  // ---------------------------------------------------------------------------
+  let identStatus = null;   // { param_status: { name: {status, reason, tau_h, correlation} } }
+  let identLoading = false;
+  let identError   = '';
+
+  async function loadIdentifiability() {
+    identLoading = true;
+    identError   = '';
+    try {
+      identStatus = await fetchIdentifiability();
+    } catch (err) {
+      identError = err.message ?? String(err);
+    } finally {
+      identLoading = false;
+    }
+  }
+
+  const STATUS_BADGE = {
+    resolvable:      'badge-success',
+    borderline:      'badge-warning',
+    prior_dominated: 'badge-error',
+  };
+  const statusBadge = (s) => STATUS_BADGE[s] ?? 'badge-ghost';
+
+  // Per-parameter "show contributions" toggle (keyed by param name).
+  let expandedParam = {};
+  const toggleParam = (name) =>
+    (expandedParam = { ...expandedParam, [name]: !expandedParam[name] });
 
   // ---------------------------------------------------------------------------
   // Add module
@@ -256,7 +315,25 @@
          Module list + routing controls
     ===================================================================== -->
     <section>
-      <h2 class="text-xl font-semibold mb-3">Modules</h2>
+      <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <h2 class="text-xl font-semibold">Modules</h2>
+        <button
+          class="btn btn-outline btn-xs"
+          onclick={loadIdentifiability}
+          disabled={identLoading || !$assembly?.parameters?.length}
+          title="Pre-fit verdict: which parameters the signals can resolve"
+        >
+          {#if identLoading}
+            <span class="loading loading-spinner loading-xs"></span>
+          {/if}
+          Check identifiability
+        </button>
+      </div>
+      {#if identError}
+        <div role="alert" class="alert alert-error mb-3 text-sm">
+          <span>{identError}</span>
+        </div>
+      {/if}
 
       {#if mods.length === 0}
         <p class="text-base-content/60 mb-3">No modules yet.</p>
@@ -283,25 +360,38 @@
                 </div>
 
                 {#if isRoomMass}
-                  <!-- RoomMass owns nothing — show its fields, no element checkboxes -->
+                  <!-- RoomMass owns nothing — show its fields, no element checkboxes.
+                       Its C_room prior is auto-derived from the IndoorMass STORAGE
+                       budget by the assembler, so no routing is exposed here. -->
                   <div class="mt-2 text-xs text-base-content/60">
-                    Owns no channels — no element routing.
+                    Owns no channels — C_room is auto-derived from IndoorMass.
                   </div>
                 {:else if routableElements.length > 0}
-                  <!-- Element routing checkboxes — only for elements whose offered
-                       channels overlap with this module's owns set -->
+                  <!-- Element routing checkboxes. One checkbox per element whose
+                       offered channels overlap this module's owns set; the caption
+                       under each names the channel(s) this module actually consumes
+                       (the owns ∩ offered intersection), which may be a subset. -->
                   <div class="mt-3">
-                    <div class="text-xs font-medium mb-1">Routed elements</div>
-                    <div class="flex flex-col gap-1">
+                    <div class="text-xs font-medium mb-1">
+                      Routed elements
+                      <span class="font-normal text-base-content/40">— owns {owns.join(', ')}</span>
+                    </div>
+                    <div class="flex flex-col gap-1.5">
                       {#each routableElements as elem}
-                        <label class="flex items-center gap-2 cursor-pointer">
+                        {@const consumed = consumedChannels(mod, elem)}
+                        <label class="flex items-start gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            class="checkbox checkbox-sm"
+                            class="checkbox checkbox-sm mt-0.5"
                             checked={mod.element_ids?.includes(elem.id)}
                             onchange={(e) => handleRoutingChange(mod, elem.id, e.target.checked)}
                           />
-                          <span class="text-sm">{elem.label}</span>
+                          <span class="text-sm leading-tight">
+                            {elem.label}
+                            <span class="block text-xs text-base-content/40 font-mono">
+                              → {consumed.join(', ')}
+                            </span>
+                          </span>
                         </label>
                       {/each}
                     </div>
@@ -309,6 +399,63 @@
                 {:else}
                   <div class="mt-2 text-xs text-base-content/40">
                     No compatible elements (needs channels: {owns.join(', ')}).
+                  </div>
+                {/if}
+
+                <!-- Parameters owned by this module: prior + identifiability +
+                     collapsible budget contributions. Merged here from the former
+                     standalone Thermal-parameters table. -->
+                {#if paramsByModule[mod.id]?.length}
+                  <div class="mt-3 pt-3 border-t border-base-200">
+                    <div class="text-xs font-medium mb-1">Parameters</div>
+                    <div class="flex flex-col gap-1">
+                      {#each (paramsByModule[mod.id] ?? []) as param}
+                        {@const ident = identStatus?.param_status?.[param.name]}
+                        <div class="text-xs">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-mono font-medium">{param.name}</span>
+                            <span class="text-base-content/50 font-mono">
+                              μ<sub>log</sub>={param.prior.mu_log.toFixed(2)}
+                              σ<sub>log</sub>={param.prior.sigma_log.toFixed(2)}
+                            </span>
+                            {#if ident}
+                              <span class="badge {statusBadge(ident.status)} badge-xs">
+                                {ident.status.replace('_', ' ')}
+                              </span>
+                            {/if}
+                            {#if param.contributions?.length}
+                              <button
+                                class="btn btn-ghost btn-xs h-auto min-h-0 py-0 px-1 text-base-content/50"
+                                onclick={() => toggleParam(param.name)}
+                                aria-expanded={!!expandedParam[param.name]}
+                              >
+                                {expandedParam[param.name] ? 'hide' : 'budgets'}
+                              </button>
+                            {/if}
+                          </div>
+                          {#if expandedParam[param.name] && param.contributions?.length}
+                            <table class="table table-xs mt-1 mb-1">
+                              <thead>
+                                <tr class="text-base-content/50">
+                                  <th>Element</th><th>Channel</th><th>Field</th>
+                                  <th class="text-right">Value</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {#each param.contributions as c}
+                                  <tr>
+                                    <td>{c.element_label}</td>
+                                    <td class="font-mono">{c.channel}</td>
+                                    <td class="font-mono">{c.budget_field}</td>
+                                    <td class="text-right font-mono">{c.value.toFixed(3)}</td>
+                                  </tr>
+                                {/each}
+                              </tbody>
+                            </table>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
                   </div>
                 {/if}
               </div>
