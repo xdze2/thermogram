@@ -234,133 +234,105 @@
   }
 
   // ---------------------------------------------------------------------------
-  // SVG line chart — hand-rolled (see chart-library note in docs/roadmap before extending)
+  // uPlot-based charts — data transformation for main + residuals charts
   // ---------------------------------------------------------------------------
 
-  const CHART_W = 560;
-  const CHART_H = 200;
-  const PAD = { top: 16, right: 16, bottom: 36, left: 44 };
-  const INNER_W = CHART_W - PAD.left - PAD.right;
-  const INNER_H = CHART_H - PAD.top  - PAD.bottom;
+  import LineChart from './LineChart.svelte';
 
-  const LINE_COLORS = ['oklch(55% 0.18 250)', 'oklch(60% 0.18 40)'];
+  const LINE_COLORS   = ['oklch(55% 0.18 250)', 'oklch(60% 0.18 40)'];
   const SENSOR_COLORS = ['oklch(50% 0.18 145)', 'oklch(55% 0.18 310)'];
 
-  $: chartData = computeChartData($activeStudy?.results?.simulate ?? null);
+  /**
+   * Coerce a value to a uPlot-safe number: null/undefined/non-finite → null
+   * (uPlot treats null as a gap, which is what we want).
+   * @param {*} v
+   * @returns {number | null}
+   */
+  function toUplotVal(v) {
+    return (v == null || !Number.isFinite(v)) ? null : v;
+  }
 
-  function computeChartData(result) {
-    if (!result?.t?.length) return null;
+  // ---------------------------------------------------------------------------
+  // Main chart — states (solid) + sensor observations (dashed)
+  // ---------------------------------------------------------------------------
 
-    const t          = result.t;
-    const names      = Object.keys(result.states);
-    const obsEntries = Object.entries(result.observations ?? {});
+  /** @type {{ data: (number|null)[][], series: object[] } | null} */
+  let mainChart = null;
 
-    const stateValues = names.flatMap(n => result.states[n]);
-    const obsValues   = obsEntries.flatMap(([, vals]) => vals);
-    const allValues   = [...stateValues, ...obsValues];
+  /** @type {{ data: (number|null)[][], series: object[] } | null} */
+  let residualsChart = null;
 
-    const tMin = t[0];
-    const tMax = t[t.length - 1];
-    const finite = allValues.filter(v => Number.isFinite(v));
-    const vMin = Math.min(...finite);
-    const vMax = Math.max(...finite);
-    const vPad = (vMax - vMin) * 0.05 || 1;
+  $: {
+    const result = $activeStudy?.results?.simulate ?? null;
+    if (!result?.t?.length) {
+      mainChart      = null;
+      residualsChart = null;
+    } else {
+      const t          = result.t;
+      const stateNames = Object.keys(result.states);
+      const obsEntries = Object.entries(result.observations ?? {});
 
-    const scaleX = v => PAD.left + ((v - tMin) / (tMax - tMin || 1)) * INNER_W;
-    const scaleY = v => PAD.top + INNER_H - ((v - (vMin - vPad)) / ((vMax + vPad) - (vMin - vPad))) * INNER_H;
+      // ---- Main chart data ------------------------------------------------
+      const mainData = [
+        t,                                                    // x: seconds since epoch
+        ...stateNames.map(n => result.states[n].map(toUplotVal)),
+        ...obsEntries.map(([, vals]) => vals.map(toUplotVal)),
+      ];
 
-    const series = names.map((name, ci) => {
-      const pts = t.map((tv, i) => [scaleX(tv), scaleY(result.states[name][i])]);
-      return {
-        name,
-        color: LINE_COLORS[ci % LINE_COLORS.length],
-        path: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
-      };
-    });
+      const mainSeries = [
+        ...stateNames.map((name, ci) => ({
+          label:  name,
+          stroke: LINE_COLORS[ci % LINE_COLORS.length],
+          width:  2,
+        })),
+        ...obsEntries.map(([sensorName, ], ci) => ({
+          label:  sensorName,
+          stroke: SENSOR_COLORS[ci % SENSOR_COLORS.length],
+          width:  1.5,
+          dash:   [4, 3],
+        })),
+      ];
 
-    const sensorSeries = obsEntries.map(([sensorName, vals], ci) => {
-      let prevFinite = false;
-      const cmds = t.map((tv, i) => {
-        const v = vals[i];
-        if (!Number.isFinite(v)) { prevFinite = false; return null; }
-        const cmd = prevFinite ? 'L' : 'M';
-        prevFinite = true;
-        return `${cmd}${scaleX(tv).toFixed(1)},${scaleY(v).toFixed(1)}`;
-      }).filter(Boolean);
-      return {
-        name: sensorName,
-        color: SENSOR_COLORS[ci % SENSOR_COLORS.length],
-        path: cmds.join(' '),
-      };
-    });
+      mainChart = { data: mainData, series: mainSeries };
 
-    // Y-axis ticks
-    const nTicks = 4;
-    const yTicks = Array.from({ length: nTicks + 1 }, (_, i) => {
-      const v = (vMin - vPad) + i * ((vMax + vPad) - (vMin - vPad)) / nTicks;
-      return { v: v.toFixed(1), y: scaleY(v) };
-    });
+      // ---- Residuals chart data -------------------------------------------
+      // For each sensor: residual = observed − matched simulated state.
+      // null observations stay null (gap in uPlot — not coerced to 0).
+      const stateKeys = stateNames;
+      const residualEntries = obsEntries.map(([sensorName, obsVals], ci) => {
+        const stateName = result.observation_states?.[sensorName];
+        const matchedState =
+          (stateName != null ? result.states[stateName] : undefined) ??
+          result.states[sensorName] ??
+          result.states['T_room'] ??
+          result.states[stateKeys[0]];
+        if (!matchedState) return null;
 
-    // X-axis ticks: t is seconds from epoch for study (bound) results
-    const nXTicks = 6;
-    const xTicks = Array.from({ length: nXTicks + 1 }, (_, i) => {
-      const tv = tMin + i * (tMax - tMin) / nXTicks;
-      const d = new Date(tv * 1000);
-      const label = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth() + 1).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}h`;
-      return { label, x: scaleX(tv) };
-    });
-
-    // Residuals: for each sensor series, find the matching simulated state.
-    const stateKeys = Object.keys(result.states);
-    const residualSeries = obsEntries.map(([sensorName, obsVals], ci) => {
-      const stateName = result.observation_states?.[sensorName];
-      const matchedState =
-        (stateName != null ? result.states[stateName] : undefined) ??
-        result.states[sensorName] ??
-        result.states['T_room'] ??
-        result.states[stateKeys[0]];
-      if (!matchedState) return null;
-      const residuals = obsVals.map((o, i) => (o == null ? NaN : o - matchedState[i]));
-      return { name: sensorName, color: SENSOR_COLORS[ci % SENSOR_COLORS.length], residuals };
-    }).filter(Boolean);
-
-    let residualsChart = null;
-    if (residualSeries.length > 0) {
-      const allRes = residualSeries.flatMap(s => s.residuals).filter(v => Number.isFinite(v));
-      const rMin = Math.min(...allRes);
-      const rMax = Math.max(...allRes);
-      const rPad = (rMax - rMin) * 0.1 || 0.5;
-      const rLo  = rMin - rPad;
-      const rHi  = rMax + rPad;
-
-      const scaleRY = v => PAD.top + INNER_H - ((v - rLo) / (rHi - rLo)) * INNER_H;
-      const zeroY   = scaleRY(0);
-
-      const rYTicks = Array.from({ length: 5 }, (_, i) => {
-        const v = rLo + i * (rHi - rLo) / 4;
-        return { v: v.toFixed(2), y: scaleRY(v) };
-      });
-
-      const rLines = residualSeries.map(s => {
-        let prevFinite = false;
-        const cmds = t.map((tv, i) => {
-          const v = s.residuals[i];
-          if (!Number.isFinite(v)) { prevFinite = false; return null; }
-          const cmd = prevFinite ? 'L' : 'M';
-          prevFinite = true;
-          return `${cmd}${scaleX(tv).toFixed(1)},${scaleRY(v).toFixed(1)}`;
-        }).filter(Boolean);
+        const resVals = obsVals.map((o, i) =>
+          (o == null || !Number.isFinite(o)) ? null : o - matchedState[i]
+        );
         return {
-          name: s.name,
-          color: s.color,
-          path: cmds.join(' '),
+          name:   sensorName,
+          color:  SENSOR_COLORS[ci % SENSOR_COLORS.length],
+          values: resVals,
         };
-      });
+      }).filter(Boolean);
 
-      residualsChart = { rLines, rYTicks, xTicks, zeroY };
+      if (residualEntries.length > 0) {
+        const resData = [
+          t,
+          ...residualEntries.map(e => e.values),
+        ];
+        const resSeries = residualEntries.map((e) => ({
+          label:  e.name,
+          stroke: e.color,
+          width:  1.5,
+        }));
+        residualsChart = { data: resData, series: resSeries };
+      } else {
+        residualsChart = null;
+      }
     }
-
-    return { series, sensorSeries, yTicks, xTicks, residualsChart };
   }
 </script>
 
@@ -684,233 +656,32 @@
               </span>
             </div>
 
-            {#if chartData}
-              <div class="border border-base-300 rounded-lg p-2 overflow-x-auto">
-                <svg
-                  viewBox="0 0 {CHART_W} {CHART_H}"
-                  width="100%"
-                  style="max-width: {CHART_W}px;"
-                  role="img"
-                  aria-label="Simulated temperature trajectories over the study time range"
-                >
-                  <!-- Y grid lines + labels -->
-                  {#each chartData.yTicks as tick}
-                    <line
-                      x1={PAD.left} y1={tick.y}
-                      x2={PAD.left + INNER_W} y2={tick.y}
-                      stroke="oklch(80% 0 0)" stroke-width="0.5"
-                    />
-                    <text
-                      x={PAD.left - 4} y={tick.y + 4}
-                      text-anchor="end"
-                      font-size="9"
-                      fill="oklch(50% 0 0)"
-                    >{tick.v}</text>
-                  {/each}
-
-                  <!-- X axis ticks + labels -->
-                  {#each chartData.xTicks as tick}
-                    <line
-                      x1={tick.x} y1={PAD.top + INNER_H}
-                      x2={tick.x} y2={PAD.top + INNER_H + 4}
-                      stroke="oklch(60% 0 0)" stroke-width="1"
-                    />
-                    <text
-                      x={tick.x} y={PAD.top + INNER_H + 14}
-                      text-anchor="middle"
-                      font-size="9"
-                      fill="oklch(50% 0 0)"
-                    >{tick.label}</text>
-                  {/each}
-
-                  <!-- Axis labels -->
-                  <text
-                    x={PAD.left + INNER_W / 2}
-                    y={CHART_H - 2}
-                    text-anchor="middle"
-                    font-size="10"
-                    fill="oklch(40% 0 0)"
-                  >Date/time</text>
-                  <text
-                    x={10}
-                    y={PAD.top + INNER_H / 2}
-                    text-anchor="middle"
-                    font-size="10"
-                    fill="oklch(40% 0 0)"
-                    transform="rotate(-90, 10, {PAD.top + INNER_H / 2})"
-                  >Temperature (°C)</text>
-
-                  <!-- Clip path for lines -->
-                  <defs>
-                    <clipPath id="study-chart-clip">
-                      <rect x={PAD.left} y={PAD.top} width={INNER_W} height={INNER_H} />
-                    </clipPath>
-                  </defs>
-
-                  <!-- Series lines -->
-                  <g clip-path="url(#study-chart-clip)">
-                    {#each chartData.series as s}
-                      <path
-                        d={s.path}
-                        fill="none"
-                        stroke={s.color}
-                        stroke-width="2"
-                        stroke-linejoin="round"
-                      />
-                    {/each}
-                    {#each chartData.sensorSeries as s}
-                      <path
-                        d={s.path}
-                        fill="none"
-                        stroke={s.color}
-                        stroke-width="1.5"
-                        stroke-dasharray="4 3"
-                        stroke-linejoin="round"
-                      />
-                    {/each}
-                  </g>
-
-                  <!-- Axes -->
-                  <line
-                    x1={PAD.left} y1={PAD.top}
-                    x2={PAD.left} y2={PAD.top + INNER_H}
-                    stroke="oklch(40% 0 0)" stroke-width="1"
-                  />
-                  <line
-                    x1={PAD.left} y1={PAD.top + INNER_H}
-                    x2={PAD.left + INNER_W} y2={PAD.top + INNER_H}
-                    stroke="oklch(40% 0 0)" stroke-width="1"
-                  />
-
-                  <!-- Legend -->
-                  {#each chartData.series as s, i}
-                    <g transform="translate({PAD.left + i * 100}, 6)">
-                      <line x1="0" y1="6" x2="18" y2="6" stroke={s.color} stroke-width="2"/>
-                      <text x="22" y="10" font-size="10" fill="oklch(40% 0 0)" font-family="ui-monospace, monospace">
-                        {s.name}
-                      </text>
-                    </g>
-                  {/each}
-                  {#each chartData.sensorSeries as s, i}
-                    <g transform="translate({PAD.left + (chartData.series.length + i) * 100}, 6)">
-                      <line x1="0" y1="6" x2="18" y2="6" stroke={s.color} stroke-width="1.5" stroke-dasharray="4 3"/>
-                      <text x="22" y="10" font-size="10" fill="oklch(40% 0 0)" font-family="ui-monospace, monospace">
-                        {s.name}
-                      </text>
-                    </g>
-                  {/each}
-                </svg>
+            {#if mainChart}
+              <div class="border border-base-300 rounded-lg p-2">
+                <LineChart
+                  data={mainChart.data}
+                  series={mainChart.series}
+                  xLabel="Date/time"
+                  yLabel="Temperature (°C)"
+                  height={200}
+                  ariaLabel="Simulated temperature trajectories over the study time range"
+                />
               </div>
 
-              {#if chartData.residualsChart}
-                {@const rc = chartData.residualsChart}
-                <div class="border border-base-300 rounded-lg p-2 overflow-x-auto mt-3">
+              {#if residualsChart}
+                <div class="border border-base-300 rounded-lg p-2 mt-3">
                   <div class="flex items-center gap-2 mb-1 px-1">
                     <span class="badge badge-outline badge-xs">Residuals (observed − simulated)</span>
                   </div>
-                  <svg
-                    viewBox="0 0 {CHART_W} {CHART_H}"
-                    width="100%"
-                    style="max-width: {CHART_W}px;"
-                    role="img"
-                    aria-label="Residuals: observed minus simulated temperature"
-                  >
-                    <!-- Y grid lines + labels -->
-                    {#each rc.rYTicks as tick}
-                      <line
-                        x1={PAD.left} y1={tick.y}
-                        x2={PAD.left + INNER_W} y2={tick.y}
-                        stroke="oklch(80% 0 0)" stroke-width="0.5"
-                      />
-                      <text
-                        x={PAD.left - 4} y={tick.y + 4}
-                        text-anchor="end"
-                        font-size="9"
-                        fill="oklch(50% 0 0)"
-                      >{tick.v}</text>
-                    {/each}
-
-                    <!-- Zero reference line -->
-                    <line
-                      x1={PAD.left} y1={rc.zeroY}
-                      x2={PAD.left + INNER_W} y2={rc.zeroY}
-                      stroke="oklch(50% 0 0)" stroke-width="1" stroke-dasharray="4 3"
-                    />
-
-                    <!-- X axis ticks + labels -->
-                    {#each rc.xTicks as tick}
-                      <line
-                        x1={tick.x} y1={PAD.top + INNER_H}
-                        x2={tick.x} y2={PAD.top + INNER_H + 4}
-                        stroke="oklch(60% 0 0)" stroke-width="1"
-                      />
-                      <text
-                        x={tick.x} y={PAD.top + INNER_H + 14}
-                        text-anchor="middle"
-                        font-size="9"
-                        fill="oklch(50% 0 0)"
-                      >{tick.label}</text>
-                    {/each}
-
-                    <!-- Axis labels -->
-                    <text
-                      x={PAD.left + INNER_W / 2}
-                      y={CHART_H - 2}
-                      text-anchor="middle"
-                      font-size="10"
-                      fill="oklch(40% 0 0)"
-                    >Date/time</text>
-                    <text
-                      x={10}
-                      y={PAD.top + INNER_H / 2}
-                      text-anchor="middle"
-                      font-size="10"
-                      fill="oklch(40% 0 0)"
-                      transform="rotate(-90, 10, {PAD.top + INNER_H / 2})"
-                    >Residual (°C)</text>
-
-                    <!-- Clip path for residual lines -->
-                    <defs>
-                      <clipPath id="study-residuals-clip">
-                        <rect x={PAD.left} y={PAD.top} width={INNER_W} height={INNER_H} />
-                      </clipPath>
-                    </defs>
-
-                    <!-- Residual lines -->
-                    <g clip-path="url(#study-residuals-clip)">
-                      {#each rc.rLines as s}
-                        <path
-                          d={s.path}
-                          fill="none"
-                          stroke={s.color}
-                          stroke-width="1.5"
-                          stroke-linejoin="round"
-                        />
-                      {/each}
-                    </g>
-
-                    <!-- Axes -->
-                    <line
-                      x1={PAD.left} y1={PAD.top}
-                      x2={PAD.left} y2={PAD.top + INNER_H}
-                      stroke="oklch(40% 0 0)" stroke-width="1"
-                    />
-                    <line
-                      x1={PAD.left} y1={PAD.top + INNER_H}
-                      x2={PAD.left + INNER_W} y2={PAD.top + INNER_H}
-                      stroke="oklch(40% 0 0)" stroke-width="1"
-                    />
-
-                    <!-- Legend -->
-                    {#each rc.rLines as s, i}
-                      <g transform="translate({PAD.left + i * 100}, 6)">
-                        <line x1="0" y1="6" x2="18" y2="6" stroke={s.color} stroke-width="1.5"/>
-                        <text x="22" y="10" font-size="10" fill="oklch(40% 0 0)" font-family="ui-monospace, monospace">
-                          {s.name}
-                        </text>
-                      </g>
-                    {/each}
-                  </svg>
+                  <LineChart
+                    data={residualsChart.data}
+                    series={residualsChart.series}
+                    xLabel="Date/time"
+                    yLabel="Residual (°C)"
+                    height={200}
+                    refLine={0}
+                    ariaLabel="Residuals: observed minus simulated temperature"
+                  />
                 </div>
               {/if}
             {:else}
