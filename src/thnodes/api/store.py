@@ -22,6 +22,8 @@ from .models import (
     ModuleOut,
     ModuleSpec,
     RoomDoc,
+    Signal,
+    SignalOut,
 )
 
 # ── persistence directory (can be monkeypatched in tests) ─────────────────────
@@ -100,6 +102,17 @@ def module_to_out(mid: str, spec: ModuleSpec, doc: RoomDoc) -> ModuleOut:
         id=mid,
         type=spec.type,
         element_ids=doc.routes.get(mid, []),
+    )
+
+
+def signal_to_out(signal: Signal) -> SignalOut:
+    """Serialise a Signal to its API response shape."""
+    return SignalOut(
+        id=signal.id,
+        name=signal.name,
+        kind=signal.kind,
+        role=signal.role,
+        meta=signal.meta,
     )
 
 
@@ -210,8 +223,18 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
             for mid, spec in doc.modules.items()
         },
         "routes": dict(doc.routes),
+        "signals": {
+            sid: {
+                "name": sig.name,
+                "kind": sig.kind,
+                "role": sig.role,
+                "meta": dict(sig.meta),
+            }
+            for sid, sig in doc.signals.items()
+        },
         "_elem_counter": doc._elem_counter,
         "_mod_counter": doc._mod_counter,
+        "_signal_counter": doc._signal_counter,
     }
 
 
@@ -234,6 +257,17 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
     }
     routes = {mid: list(eids) for mid, eids in d.get("routes", {}).items()}
 
+    signals = {
+        sid: Signal(
+            id=sid,
+            name=v["name"],
+            kind=v["kind"],
+            role=v["role"],
+            meta=dict(v.get("meta", {})),
+        )
+        for sid, v in d.get("signals", {}).items()
+    }
+
     # Recover counters, falling back to max-existing + 1 to avoid ID collisions.
     if "_elem_counter" in d:
         elem_counter = int(d["_elem_counter"])
@@ -251,14 +285,25 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
         ]
         mod_counter = (max(nums) + 1) if nums else 0
 
+    if "_signal_counter" in d:
+        signal_counter = int(d["_signal_counter"])
+    else:
+        # Fall back to max numeric suffix of s… ids + 1 to avoid ID collisions.
+        nums = [
+            int(sid[1:]) for sid in signals if sid.startswith("s") and sid[1:].isdigit()
+        ]
+        signal_counter = (max(nums) + 1) if nums else 0
+
     doc = RoomDoc(
         uid=d.get("uid", ""),
         name=d.get("name", "Untitled"),
         elements=elements,
         modules=modules,
         routes=routes,
+        signals=signals,
         _elem_counter=elem_counter,
         _mod_counter=mod_counter,
+        _signal_counter=signal_counter,
     )
     return doc
 

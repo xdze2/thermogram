@@ -12,6 +12,31 @@ from pydantic import BaseModel
 
 # ── in-memory session store ────────────────────────────────────────────────────
 
+# Valid Signal roles and kinds (per spec 15).
+# role  ∈ {exterior, ground, adjacent, solar, prescribed}
+# kind  ∈ {temperature, irradiance, flux}
+SIGNAL_ROLES = frozenset({"exterior", "ground", "adjacent", "solar", "prescribed"})
+SIGNAL_KINDS = frozenset({"temperature", "irradiance", "flux"})
+
+
+@dataclass
+class Signal:
+    """
+    A named boundary input the model couples to (spec 15 §"Signal as a
+    first-class object").
+
+    Kept deliberately binding-agnostic: no ``source``/``data``/``binding``
+    field — that is a separate future layer.  Grouping depends only on
+    Signal *identity* (id, name, kind, role, meta).
+    """
+
+    id: str
+    name: str
+    kind: str   # "temperature" | "irradiance" | "flux"
+    role: str   # "exterior" | "ground" | "adjacent" | "solar" | "prescribed"
+    meta: dict = field(default_factory=dict)
+
+
 @dataclass
 class ElementSpec:
     type: str
@@ -30,9 +55,14 @@ class RoomDoc:
     name: str = field(default="Untitled")     # mutable human-readable label
     elements: dict[str, ElementSpec] = field(default_factory=dict)   # id -> spec
     modules: dict[str, ModuleSpec] = field(default_factory=dict)     # id -> spec
+    # routes: DEPRECATED — slated for removal in D3 once derived-module API lands.
+    # Kept here so that /assembly, /simulate, /topology.svg, examples, and tests
+    # continue to work until the D3 cutover.
     routes: dict[str, list[str]] = field(default_factory=dict)       # module_id -> [element_ids]
+    signals: dict[str, Signal] = field(default_factory=dict)         # id -> Signal
     _elem_counter: int = field(default=0, repr=False)
     _mod_counter: int = field(default=0, repr=False)
+    _signal_counter: int = field(default=0, repr=False)
 
     def next_element_id(self) -> str:
         eid = f"e{self._elem_counter}"
@@ -43,6 +73,11 @@ class RoomDoc:
         mid = f"m{self._mod_counter}"
         self._mod_counter += 1
         return mid
+
+    def next_signal_id(self) -> str:
+        sid = f"s{self._signal_counter}"
+        self._signal_counter += 1
+        return sid
 
 
 # ── model-list schemas ────────────────────────────────────────────────────────
@@ -212,6 +247,17 @@ class IdentOut(BaseModel):
     param_status: dict[str, ParamStatusOut]
 
 
+# ── signal schemas ─────────────────────────────────────────────────────────────
+
+class SignalOut(BaseModel):
+    """Read-only view of a Signal document resource (spec 15)."""
+    id: str
+    name: str
+    kind: str
+    role: str
+    meta: dict = {}
+
+
 # ── registry schemas ───────────────────────────────────────────────────────────
 
 class FieldSchemaOut(BaseModel):
@@ -228,6 +274,8 @@ class LayerSchemaOut(BaseModel):
 class ElementTypeOut(BaseModel):
     type_name: str
     fields: list[FieldSchemaOut]
+    boundary: dict | None = None
+    treatments: list[dict] = []
 
 
 class ModuleTypeOut(BaseModel):

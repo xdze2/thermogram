@@ -38,6 +38,10 @@ class OuterWall(EnvelopeElement):
     orientation: str
     layers: list[Layer]
     alpha: float = 0.6  # solar absorptance of outer surface
+    # D1 boundary/treatment fields (spec 15).
+    # treatment: "" = forced default (heavy→thermal_mass, light→simple_loss);
+    # "simple_loss" overrides a heavy wall to route via DirectLoss instead of HeavyWall.
+    treatment: str = ""
 
     def channels(self) -> dict[Channel, Budget]:
         R_layers = sum(_layer_resistance(l.material, l.thickness) for l in self.layers)
@@ -76,6 +80,8 @@ class Window(EnvelopeElement):
 class Floor(EnvelopeElement):
     boundary: Literal["ground", "adjacent", "exposed"]
     layers: list[Layer]
+    # D1 boundary field (spec 15): room label used when boundary == "adjacent".
+    adjacent_room: str = ""
 
     def channels(self) -> dict[Channel, Budget]:
         R_layers = sum(_layer_resistance(l.material, l.thickness) for l in self.layers)
@@ -96,6 +102,8 @@ class Floor(EnvelopeElement):
 @dataclass
 class Partition(EnvelopeElement):
     layers: list[Layer]
+    # D1 boundary field (spec 15): label of the adjacent room this partition faces.
+    adjacent: str = ""
 
     def channels(self) -> dict[Channel, Budget]:
         R_layers = sum(_layer_resistance(l.material, l.thickness) for l in self.layers)

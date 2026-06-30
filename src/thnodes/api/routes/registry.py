@@ -21,6 +21,8 @@ def get_registry() -> RegistryOut:
         ElementTypeOut(
             type_name=tname,
             fields=[_field_schema(f) for f in info["fields"]],
+            boundary=info.get("boundary"),
+            treatments=info.get("treatments", []),
         )
         for tname, info in ELEMENT_TYPES.items()
     ]

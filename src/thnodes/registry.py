@@ -26,6 +26,16 @@ ELEMENT_TYPES: dict[str, dict] = {
             {"name": "orientation", "type": "enum", "options": _ORIENTATIONS},
             {"name": "layers", "type": "list[layer]"},
             {"name": "alpha", "type": "float", "default": 0.6},
+            # D1 treatment field: "" = forced default; heavy walls may carry "simple_loss".
+            {"name": "treatment", "type": "str", "default": ""},
+        ],
+        # orientation pins T_ext (conduction) + G_sol_<orient> (opaque solar for heavy walls).
+        "boundary": {"field": "orientation", "role": "exterior"},
+        # Heavy walls may be modelled as simple loss (the one genuine authoring knob).
+        # Light walls always get simple_loss (forced — no menu entry rendered for them).
+        "treatments": [
+            {"key": "thermal_mass", "label": "Thermal-mass wall", "default": True},
+            {"key": "simple_loss", "label": "Simple loss", "default": False},
         ],
     },
     "Window": {
@@ -36,6 +46,10 @@ ELEMENT_TYPES: dict[str, dict] = {
             {"name": "U", "type": "float"},
             {"name": "shgc", "type": "float"},
         ],
+        # orientation pins T_ext + G_sol_<orient> (transmitted solar).
+        "boundary": {"field": "orientation", "role": "exterior"},
+        # Glazing treatment is forced — no user menu.
+        "treatments": [],
     },
     "Floor": {
         "ctor": Floor,
@@ -43,14 +57,26 @@ ELEMENT_TYPES: dict[str, dict] = {
             {"name": "area", "type": "float"},
             {"name": "boundary", "type": "enum", "options": _FLOOR_BOUNDARIES},
             {"name": "layers", "type": "list[layer]"},
+            # D1 field: room label used when boundary == "adjacent".
+            {"name": "adjacent_room", "type": "str", "default": ""},
         ],
+        # Role depends on the chosen boundary value ("ground", "adjacent", "exposed").
+        "boundary": {"field": "boundary", "role": "by_value"},
+        # Floor treatment is forced by the boundary value — no user menu.
+        "treatments": [],
     },
     "Partition": {
         "ctor": Partition,
         "fields": [
             {"name": "area", "type": "float"},
             {"name": "layers", "type": "list[layer]"},
+            # D1 field: label of the adjacent room this partition faces.
+            {"name": "adjacent", "type": "str", "default": ""},
         ],
+        # adjacent field pins T_<room> signal.
+        "boundary": {"field": "adjacent", "role": "adjacent"},
+        # Partition treatment is forced (interior loss) — no user menu.
+        "treatments": [],
     },
     "IndoorMass": {
         "ctor": IndoorMass,
@@ -65,12 +91,20 @@ ELEMENT_TYPES: dict[str, dict] = {
                 "default": "normal",
             },
         ],
+        # Interior element — no boundary signal; auto-paired to RoomMass.
+        "boundary": None,
+        # Room-mass treatment is forced and auto-assigned — no user menu.
+        "treatments": [],
     },
     "HeatSource": {
         "ctor": HeatSource,
         "fields": [
             {"name": "area", "type": "float", "default": 0.0},
         ],
+        # HeatSource pins a prescribed flux signal (name chosen by the author).
+        "boundary": {"field": "signal", "role": "prescribed"},
+        # Prescribed-flux treatment is forced — no user menu.
+        "treatments": [],
     },
 }
 

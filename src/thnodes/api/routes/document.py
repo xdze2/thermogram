@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from ..models import ElementIn, ElementOut, ElementPatch, ModuleIn, ModuleOut, RoutingIn
 from ..models import ElementSpec, ModuleSpec
-from ..store import element_to_out, get_doc, module_to_out, save_model
+from ..store import element_to_out, get_doc, module_to_out, save_model, signal_to_out
 
 router = APIRouter(prefix="/models/{model_id}")
 
@@ -14,7 +14,9 @@ def get_document(model_id: str) -> dict:
     doc = get_doc(model_id)
     elements = [element_to_out(eid, spec) for eid, spec in doc.elements.items()]
     modules = [module_to_out(mid, spec, doc) for mid, spec in doc.modules.items()]
-    return {"model_id": model_id, "elements": elements, "modules": modules}
+    # signals: read-only in D1; auto-creation/GC is D2.
+    signals = [signal_to_out(sig) for sig in doc.signals.values()]
+    return {"model_id": model_id, "elements": elements, "modules": modules, "signals": signals}
 
 
 # ── elements ───────────────────────────────────────────────────────────────────
