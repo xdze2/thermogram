@@ -19,6 +19,8 @@ from .models import (
     ElementOut,
     ElementSpec,
     RoomDoc,
+    Sensor,
+    SensorOut,
     Signal,
     SignalOut,
 )
@@ -174,6 +176,19 @@ def set_signal_binding(doc: "RoomDoc", signal_name: str, binding: str | None) ->
         meta={},
         binding=binding,
     )
+
+
+# ── sensor helpers ────────────────────────────────────────────────────────────
+
+def sensor_to_out(sensor: "Sensor") -> SensorOut:
+    return SensorOut(id=sensor.id, state=sensor.state, name=sensor.name, binding=sensor.binding)
+
+
+def set_sensor_binding(doc: "RoomDoc", sensor_id: str, binding: str | None) -> None:
+    """Set or clear the InfluxDB binding for the Sensor with the given id."""
+    if sensor_id not in doc.sensors:
+        raise KeyError(sensor_id)
+    doc.sensors[sensor_id].binding = binding
 
 
 # ── grouping-rule assembler path (D3) ─────────────────────────────────────────
@@ -338,7 +353,7 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
     This is also the shape that ``examples.load_example`` returns (minus the
     private counters, which are handled in ``roomdoc_from_dict``).
     """
-    return {
+    d: dict = {
         "uid": doc.uid,
         "name": doc.name,
         "elements": {
@@ -351,14 +366,24 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
                 "kind": sig.kind,
                 "role": sig.role,
                 "meta": dict(sig.meta),
-                # Omit binding key when None to keep old JSON compact.
                 **( {"binding": sig.binding} if sig.binding is not None else {} ),
             }
             for sid, sig in doc.signals.items()
         },
         "_elem_counter": doc._elem_counter,
         "_signal_counter": doc._signal_counter,
+        "_sensor_counter": doc._sensor_counter,
     }
+    if doc.sensors:
+        d["sensors"] = {
+            sid: {
+                "state": s.state,
+                "name": s.name,
+                **( {"binding": s.binding} if s.binding is not None else {} ),
+            }
+            for sid, s in doc.sensors.items()
+        }
+    return d
 
 
 def roomdoc_from_dict(d: dict) -> RoomDoc:
@@ -385,37 +410,49 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
             kind=v["kind"],
             role=v["role"],
             meta=dict(v.get("meta", {})),
-            # Tolerate absence in old JSON — defaults to None.
             binding=v.get("binding"),
         )
         for sid, v in d.get("signals", {}).items()
+    }
+
+    sensors = {
+        sid: Sensor(
+            id=sid,
+            state=v["state"],
+            name=v.get("name", v["state"]),
+            binding=v.get("binding"),
+        )
+        for sid, v in d.get("sensors", {}).items()
     }
 
     # Recover counters, falling back to max-existing + 1 to avoid ID collisions.
     if "_elem_counter" in d:
         elem_counter = int(d["_elem_counter"])
     else:
-        nums = [
-            int(eid[1:]) for eid in elements if eid.startswith("e") and eid[1:].isdigit()
-        ]
+        nums = [int(eid[1:]) for eid in elements if eid.startswith("e") and eid[1:].isdigit()]
         elem_counter = (max(nums) + 1) if nums else 0
 
     if "_signal_counter" in d:
         signal_counter = int(d["_signal_counter"])
     else:
-        # Fall back to max numeric suffix of s… ids + 1 to avoid ID collisions.
-        nums = [
-            int(sid[1:]) for sid in signals if sid.startswith("s") and sid[1:].isdigit()
-        ]
+        nums = [int(sid[1:]) for sid in signals if sid.startswith("s") and sid[1:].isdigit()]
         signal_counter = (max(nums) + 1) if nums else 0
+
+    if "_sensor_counter" in d:
+        sensor_counter = int(d["_sensor_counter"])
+    else:
+        nums = [int(sid[3:]) for sid in sensors if sid.startswith("sen") and sid[3:].isdigit()]
+        sensor_counter = (max(nums) + 1) if nums else 0
 
     doc = RoomDoc(
         uid=d.get("uid", ""),
         name=d.get("name", "Untitled"),
         elements=elements,
         signals=signals,
+        sensors=sensors,
         _elem_counter=elem_counter,
         _signal_counter=signal_counter,
+        _sensor_counter=sensor_counter,
     )
     return doc
 

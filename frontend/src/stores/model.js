@@ -26,6 +26,9 @@ import {
   updateElement,
   deleteElement,
   putSignalBinding,
+  createSensor,
+  deleteSensor,
+  putSensorBinding,
 } from '../lib/api.js';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +48,7 @@ export const loading  = writable(false);
 export const elements        = derived(roomDoc, ($doc) => $doc?.elements ?? []);
 export const modules         = derived(roomDoc, ($doc) => $doc?.modules ?? []);
 export const signals         = derived(roomDoc, ($doc) => $doc?.signals ?? []);
+export const sensors         = derived(roomDoc, ($doc) => $doc?.sensors ?? []);
 export const problems        = derived(assembly, ($asm) => $asm?.problems ?? []);
 export const requiredSignals = derived(assembly, ($asm) => $asm?.required_signals ?? []);
 
@@ -93,6 +97,10 @@ async function applyMutation(apiCall) {
 export const addElement    = (type, fields) => applyMutation(() => createElement(type, fields));
 export const editElement   = (eid, fields)  => applyMutation(() => updateElement(eid, fields));
 export const removeElement = (eid)          => applyMutation(() => deleteElement(eid));
+
+export const addSensor        = (state, name)         => applyMutation(() => createSensor(state, name));
+export const removeSensor     = (sensorId)            => applyMutation(() => deleteSensor(sensorId));
+export const setSensorBinding = (sensorId, binding)   => applyMutation(() => putSensorBinding(sensorId, binding));
 
 /**
  * Set (string) or clear (null) the InfluxDB binding for a required signal.

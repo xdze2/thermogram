@@ -18,6 +18,10 @@ from pydantic import BaseModel
 SIGNAL_ROLES = frozenset({"exterior", "ground", "adjacent", "solar", "prescribed"})
 SIGNAL_KINDS = frozenset({"temperature", "irradiance", "flux"})
 
+# Valid Sensor states (the ODE states a sensor can observe).
+# Extensible: future private states (e.g. T_wall) could be observed too.
+SENSOR_STATES = frozenset({"T_room"})
+
 
 @dataclass
 class Signal:
@@ -42,6 +46,22 @@ class Signal:
 
 
 @dataclass
+class Sensor:
+    """
+    An observation channel: a real-world measurement the fit compares against
+    a simulated ODE state.
+
+    ``state``   — which ODE state this sensor observes (e.g. "T_room").
+    ``name``    — display name (e.g. "T_indoor", default equals state).
+    ``binding`` — optional InfluxDB query string (same format as Signal.binding).
+    """
+    id: str
+    state: str           # ODE state observed, e.g. "T_room"
+    name: str            # display label
+    binding: str | None = None
+
+
+@dataclass
 class ElementSpec:
     type: str
     fields: dict[str, Any]
@@ -52,9 +72,11 @@ class RoomDoc:
     uid: str = field(default="")              # stable server-assigned opaque UID
     name: str = field(default="Untitled")     # mutable human-readable label
     elements: dict[str, ElementSpec] = field(default_factory=dict)   # id -> spec
-    signals: dict[str, Signal] = field(default_factory=dict)         # id -> Signal
+    signals: dict[str, Signal] = field(default_factory=dict)         # id -> Signal (bindings only)
+    sensors: dict[str, Sensor] = field(default_factory=dict)         # id -> Sensor
     _elem_counter: int = field(default=0, repr=False)
     _signal_counter: int = field(default=0, repr=False)
+    _sensor_counter: int = field(default=0, repr=False)
 
     def next_element_id(self) -> str:
         eid = f"e{self._elem_counter}"
@@ -64,6 +86,11 @@ class RoomDoc:
     def next_signal_id(self) -> str:
         sid = f"s{self._signal_counter}"
         self._signal_counter += 1
+        return sid
+
+    def next_sensor_id(self) -> str:
+        sid = f"sen{self._sensor_counter}"
+        self._sensor_counter += 1
         return sid
 
 
@@ -245,6 +272,22 @@ class ParamStatusOut(BaseModel):
 
 class IdentOut(BaseModel):
     param_status: dict[str, ParamStatusOut]
+
+
+# ── sensor schemas ─────────────────────────────────────────────────────────────
+
+class SensorIn(BaseModel):
+    """Request body for POST /sensors."""
+    state: str           # ODE state to observe, e.g. "T_room"
+    name: str | None = None   # display name; defaults to state
+
+
+class SensorOut(BaseModel):
+    """Read/write view of a Sensor document resource."""
+    id: str
+    state: str
+    name: str
+    binding: str | None = None
 
 
 # ── signal schemas ─────────────────────────────────────────────────────────────

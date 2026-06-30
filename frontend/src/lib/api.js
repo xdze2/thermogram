@@ -143,6 +143,38 @@ export function putSignalBinding(signalName, binding) {
 }
 
 // ---------------------------------------------------------------------------
+// Sensors (output observations)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/models/{uid}/sensors {state, name?} → SensorOut
+ */
+export function createSensor(state, name) {
+  const body = name ? { state, name } : { state };
+  return apiFetch(`${BASE()}/sensors`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * DELETE /api/models/{uid}/sensors/{sensor_id} → 204
+ */
+export function deleteSensor(sensorId) {
+  return apiFetch(`${BASE()}/sensors/${encodeURIComponent(sensorId)}`, { method: 'DELETE' });
+}
+
+/**
+ * PUT /api/models/{uid}/sensors/{sensor_id}/binding {binding: string|null} → SensorOut
+ */
+export function putSensorBinding(sensorId, binding) {
+  return apiFetch(`${BASE()}/sensors/${encodeURIComponent(sensorId)}/binding`, {
+    method: 'PUT',
+    body: JSON.stringify({ binding }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Bound simulation (real InfluxDB data)
 // ---------------------------------------------------------------------------
 

@@ -204,6 +204,16 @@ class Assembler:
                     elem_labels[eid] = base if n == 0 else f"{base}_{n}"
                     elem_counter[base] = n + 1
 
+        # IndoorMass is registered standalone (add_element), not via add_module,
+        # so it must be added to elem_labels separately for contribution tracking.
+        assert indoor_mass_elem is not None
+        im_eid = id(indoor_mass_elem)
+        if im_eid not in elem_labels:
+            base = type(indoor_mass_elem).__name__
+            n = elem_counter.get(base, 0)
+            elem_labels[im_eid] = base if n == 0 else f"{base}_{n}"
+            elem_counter[base] = n + 1
+
         # Step 2: assign elements to modules; enforce exactly-once per (element_id, channel) cell.
         # Key module_cells by id(mod) so that two modules with the same .name
         # (e.g. DirectLoss[T_ext] and DirectLoss[T_kitchen]) stay separate.
@@ -317,12 +327,25 @@ class Assembler:
                 indoor_mass_channels[Channel.STORAGE]
             )
         priors.update(self._room_mass.derive_priors(room_storage_cells))
+        _budget_fields = ("UA", "shgcA", "alphaA", "C")
+        for param in self._room_mass.params:
+            entries: list[dict] = []
+            for (eid, ch), budget in room_storage_cells.items():
+                for bf in _budget_fields:
+                    val = getattr(budget, bf)
+                    if val is not None:
+                        entries.append({
+                            "element_label": elem_labels[eid],
+                            "channel": ch.name,
+                            "budget_field": bf,
+                            "value": val,
+                        })
+            if entries:
+                contributions.setdefault(param, []).extend(entries)
 
         for mod, _ in self._module_entries:
             cells = module_cells[id(mod)]
             priors.update(mod.derive_priors(cells))
-            # Surface which (element, channel) budget fields fed each param's prior.
-            _budget_fields = ("UA", "shgcA", "alphaA", "C")
             for param in mod.params:
                 entries: list[dict] = []
                 for (eid, ch), budget in cells.items():
