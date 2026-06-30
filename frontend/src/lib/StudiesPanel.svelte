@@ -76,8 +76,13 @@
     editName     = study.name;
     editStart    = study.time_range?.start ? isoToDateStr(study.time_range.start) : '';
     editEnd      = study.time_range?.end   ? isoToDateStr(study.time_range.end)   : '';
-    editNDays    = defaultNDays;
-    dateMode     = 'start+days';
+    if (study.time_range?.start && study.time_range?.end) {
+      dateMode  = 'start+end';
+      editNDays = defaultNDays;
+    } else {
+      dateMode  = 'start+days';
+      editNDays = defaultNDays;
+    }
     confirmDelete = false;
   }
 
@@ -177,7 +182,7 @@
     const time_range = {
       start:    dateToUTCIso(start),
       end:      dateToUTCIso(end),
-      resample: '15min',
+      resample: $activeStudy.time_range?.resample ?? '15min',
     };
     await withPanelLoading(() => updateStudy(modelId, $activeStudy.uid, { time_range }));
   }
@@ -229,7 +234,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // SVG line chart — identical constants and logic as SimulationPanel.svelte
+  // SVG line chart — hand-rolled (see chart-library note in docs/roadmap before extending)
   // ---------------------------------------------------------------------------
 
   const CHART_W = 560;
@@ -256,8 +261,9 @@
 
     const tMin = t[0];
     const tMax = t[t.length - 1];
-    const vMin = Math.min(...allValues);
-    const vMax = Math.max(...allValues);
+    const finite = allValues.filter(v => Number.isFinite(v));
+    const vMin = Math.min(...finite);
+    const vMax = Math.max(...finite);
     const vPad = (vMax - vMin) * 0.05 || 1;
 
     const scaleX = v => PAD.left + ((v - tMin) / (tMax - tMin || 1)) * INNER_W;
@@ -273,11 +279,18 @@
     });
 
     const sensorSeries = obsEntries.map(([sensorName, vals], ci) => {
-      const pts = t.map((tv, i) => [scaleX(tv), scaleY(vals[i])]);
+      let prevFinite = false;
+      const cmds = t.map((tv, i) => {
+        const v = vals[i];
+        if (!Number.isFinite(v)) { prevFinite = false; return null; }
+        const cmd = prevFinite ? 'L' : 'M';
+        prevFinite = true;
+        return `${cmd}${scaleX(tv).toFixed(1)},${scaleY(v).toFixed(1)}`;
+      }).filter(Boolean);
       return {
         name: sensorName,
         color: SENSOR_COLORS[ci % SENSOR_COLORS.length],
-        path: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
+        path: cmds.join(' '),
       };
     });
 
@@ -300,18 +313,20 @@
     // Residuals: for each sensor series, find the matching simulated state.
     const stateKeys = Object.keys(result.states);
     const residualSeries = obsEntries.map(([sensorName, obsVals], ci) => {
+      const stateName = result.observation_states?.[sensorName];
       const matchedState =
+        (stateName != null ? result.states[stateName] : undefined) ??
         result.states[sensorName] ??
         result.states['T_room'] ??
         result.states[stateKeys[0]];
       if (!matchedState) return null;
-      const residuals = obsVals.map((o, i) => o - matchedState[i]);
+      const residuals = obsVals.map((o, i) => (o == null ? NaN : o - matchedState[i]));
       return { name: sensorName, color: SENSOR_COLORS[ci % SENSOR_COLORS.length], residuals };
     }).filter(Boolean);
 
     let residualsChart = null;
     if (residualSeries.length > 0) {
-      const allRes = residualSeries.flatMap(s => s.residuals);
+      const allRes = residualSeries.flatMap(s => s.residuals).filter(v => Number.isFinite(v));
       const rMin = Math.min(...allRes);
       const rMax = Math.max(...allRes);
       const rPad = (rMax - rMin) * 0.1 || 0.5;
@@ -327,11 +342,18 @@
       });
 
       const rLines = residualSeries.map(s => {
-        const pts = t.map((tv, i) => [scaleX(tv), scaleRY(s.residuals[i])]);
+        let prevFinite = false;
+        const cmds = t.map((tv, i) => {
+          const v = s.residuals[i];
+          if (!Number.isFinite(v)) { prevFinite = false; return null; }
+          const cmd = prevFinite ? 'L' : 'M';
+          prevFinite = true;
+          return `${cmd}${scaleX(tv).toFixed(1)},${scaleRY(v).toFixed(1)}`;
+        }).filter(Boolean);
         return {
           name: s.name,
           color: s.color,
-          path: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
+          path: cmds.join(' '),
         };
       });
 

@@ -15,6 +15,7 @@ Spec: docs/specs/50_studies.md
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -42,6 +43,8 @@ from ..store import (
     get_doc,
     save_model,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models/{model_id}/studies")
 
@@ -363,6 +366,7 @@ def run_simulate(model_id: str, study_id: str, body: StudyRunSimulateIn) -> Stud
 
     # Fetch sensor observations and align them to aligned.index.
     observations: dict[str, list] = {}
+    observation_states: dict[str, str] = {}
     for sensor in doc.sensors.values():
         if not sensor.binding:
             continue
@@ -371,8 +375,13 @@ def run_simulate(model_id: str, study_id: str, body: StudyRunSimulateIn) -> Stud
             if s.empty:
                 continue
             s = s.reindex(aligned.index).interpolate(method="time", limit=4).ffill(limit=4).bfill(limit=4)
-            observations[sensor.name] = s.to_numpy(dtype=float).tolist()
-        except Exception:
+            # NaN→None: bare NaN is not valid JSON and causes res.json() to fail on
+            # the frontend.  `v != v` is the IEEE-754 NaN identity test.
+            vals = s.to_numpy(dtype=float)
+            observations[sensor.name] = [None if (v != v) else float(v) for v in vals]
+            observation_states[sensor.name] = sensor.state
+        except Exception as exc:
+            logger.warning("Failed to fetch observations for sensor %s: %s", sensor.name, exc)
             continue
 
     # Write results into the study.
@@ -386,6 +395,7 @@ def run_simulate(model_id: str, study_id: str, body: StudyRunSimulateIn) -> Stud
                 for i, name in enumerate(system.state_names)
             },
             "observations": observations,
+            "observation_states": observation_states,
         },
         fit=None,
     )

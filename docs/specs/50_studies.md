@@ -61,6 +61,17 @@ snapshot and override them for a specific run, but the model's defaults persist 
       "states": {
         "T_room": [20.0, 20.1, "…"],
         "T_wall": [19.8, 19.9, "…"]
+      },
+      // observed sensor series, aligned to the same index as `t`/`states`.
+      // keyed by Sensor.name; gaps wider than the fill limit appear as null.
+      "observations": {
+        "T_indoor": [20.2, 20.3, null, "…"]
+      },
+      // maps each observation key (Sensor.name) to the ODE state it observes
+      // (Sensor.state), so the UI can pair an observation with the right state
+      // for residuals. Only present for sensors included in `observations`.
+      "observation_states": {
+        "T_indoor": "T_room"
       }
     },
     "fit": null                          // reserved for Step 2–3; shape TBD
@@ -243,6 +254,46 @@ prior means for any unspecified parameter).
 - InfluxDB returned empty or NaN series
 
 **Response `503`:** InfluxDB unreachable.
+
+**Observations.** Alongside the simulated `states`, the run fetches each bound **sensor**
+series (`Sensor.binding`) for the same `time_range`, reindexes it onto the simulation index,
+and writes it under `results.simulate.observations` (keyed by `Sensor.name`), with a parallel
+`observation_states` map (`Sensor.name → Sensor.state`) so the UI can compute residuals
+(observed − simulated) against the correct ODE state. Gaps wider than the fill limit are
+emitted as `null` (never `NaN` — that is not valid JSON). A failure to fetch one sensor is
+logged and that sensor is omitted; it does **not** fail the run (sensors are for comparison,
+not inputs).
+
+---
+
+## Data-quality verification (future, not yet implemented)
+
+The current run path masks short gaps by `interpolate(method="time", limit=4)` (≈ 4 ×
+resample) and rejects required-signal series only when residual NaNs remain after filling.
+This hides coverage problems rather than surfacing them. A future **verification layer** should
+make data quality explicit and report it back to the UI.
+
+Planned shape (subject to change when implemented):
+
+- **Coverage check.** For each fetched series (required signals *and* observation sensors),
+  compute coverage statistics over the requested `time_range`: number of raw points, longest
+  gap, fraction missing after alignment, and effective sample rate. A baseline rule of thumb:
+  **at least one raw data point per hour** across the whole window.
+- **Severity differs by role.** A failing coverage check on a **required input signal** is
+  *fatal* (block the run with `400`, as today), because the simulation cannot proceed on
+  fabricated inputs. The same failure on an **observation sensor** is *advisory* — the run
+  proceeds, but the sensor is flagged so the residual chart can warn instead of silently
+  plotting interpolated data as if it were measured.
+- **Report surface.** Return a structured `results.simulate.coverage` (or a sibling
+  `data_quality`) block — per series: `{ n_points, max_gap_s, missing_frac, points_per_hour,
+  status }` — so the frontend can show a per-signal/per-sensor badge rather than the user
+  discovering gaps only as a broken-looking chart.
+- **Make the fill limit honest.** The fixed `limit=4` gap-fill is resolution-dependent
+  (4 min at `1min`, 1 h at `15min`). The verification layer should either derive the limit
+  from a real time bound or report how much data was synthesised so the masking is visible.
+
+This section is a placeholder for sequencing; the concrete endpoint/field contract will be
+specified when the layer is built.
 
 ---
 

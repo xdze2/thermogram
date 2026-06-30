@@ -216,6 +216,7 @@
                         <th>Status</th>
                         <th class="text-right">&tau; (h)</th>
                         <th class="text-right">Max corr.</th>
+                        <th>Reason</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -233,6 +234,7 @@
                           <td class="text-right font-mono text-xs">
                             {info.correlation != null ? info.correlation.toFixed(2) : '—'}
                           </td>
+                          <td class="text-xs text-base-content/70">{info.reason ?? ''}</td>
                         </tr>
                       {/each}
                     </tbody>
