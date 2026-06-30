@@ -2,6 +2,7 @@ from .assembler import Assembler, Problem, System
 from .channels import Budget, Channel
 from .draw import topology_svg
 from .elements import Floor, HeatSource, IndoorMass, Layer, OuterWall, Partition, Window
+from .grouping import DerivedModule, GroupResult, Signal, derive_signals, group
 from .identifiability import (
     BandExcitation,
     ExcitationReport,
@@ -32,6 +33,11 @@ __all__ = [
     "OuterWall",
     "Partition",
     "Window",
+    "DerivedModule",
+    "GroupResult",
+    "Signal",
+    "derive_signals",
+    "group",
     "BandExcitation",
     "ExcitationReport",
     "IdentReport",

@@ -186,13 +186,23 @@ class Assembler:
                     elem_labels[eid] = base if n == 0 else f"{base}_{n}"
                     elem_counter[base] = n + 1
 
-        # Step 2: route; enforce exactly-once per (element_id, channel) cell
+        # Step 2: route; enforce exactly-once per (element_id, channel) cell.
+        # Key module_cells by id(mod) so that two modules with the same .name
+        # (e.g. DirectLoss[T_ext] and DirectLoss[T_kitchen]) stay separate.
         ownership: dict[tuple[int, Channel], str] = {}
-        module_cells: dict[str, dict[tuple[int, Channel], Budget]] = {
-            mod.name: {} for mod, _ in self._routes
+        # Map id(mod) → cells dict; also keep an id→module map for label lookup.
+        module_cells: dict[int, dict[tuple[int, Channel], Budget]] = {
+            id(mod): {} for mod, _ in self._routes
         }
+        # id(mod) → human-readable label for ownership map and problem messages.
+        mod_labels: dict[int, str] = {}
+        for mod, _ in self._routes:
+            sig = getattr(mod, "signal", None)
+            mod_labels[id(mod)] = f"{mod.name}[{sig}]" if sig is not None else mod.name
 
         for mod, elems in self._routes:
+            mod_id = id(mod)
+            mod_label = mod_labels[mod_id]
             for elem in elems:
                 eid = id(elem)
                 label = elem_labels[eid]
@@ -205,13 +215,13 @@ class Assembler:
                             "double_count",
                             f"Double-count: (element {type(elem).__name__}, {ch}) "
                             f"already owned by '{ownership[cell_key]}', "
-                            f"cannot also be owned by '{mod.name}'.",
+                            f"cannot also be owned by '{mod_label}'.",
                             cell=(label, ch.name),
                         )
                         # In non-strict mode keep first owner; skip re-registering.
                         continue
-                    ownership[cell_key] = mod.name
-                    module_cells[mod.name][cell_key] = budget
+                    ownership[cell_key] = mod_label
+                    module_cells[mod_id][cell_key] = budget
 
         # Unclaimed channels
         for eid, ch_map in all_element_cells.items():
@@ -224,10 +234,10 @@ class Assembler:
                         cell=(label, ch.name),
                     )
 
-        # Build human-readable ownership map: (element_label, channel) → module_name
+        # Build human-readable ownership map: (element_label, channel) → module_label
         readable_ownership: dict[tuple[str, Channel], str] = {
-            (elem_labels[eid], ch): mod_name
-            for (eid, ch), mod_name in ownership.items()
+            (elem_labels[eid], ch): mod_label
+            for (eid, ch), mod_label in ownership.items()
         }
 
         # Step 3: collect state names (private states first, T_room last)
@@ -272,7 +282,7 @@ class Assembler:
         priors.update(self._room_mass.derive_priors(room_storage_cells))
 
         for mod, _ in self._routes:
-            cells = module_cells[mod.name]
+            cells = module_cells[id(mod)]
             priors.update(mod.derive_priors(cells))
             # Surface which (element, channel) budget fields fed each param's prior.
             _budget_fields = ("UA", "shgcA", "alphaA", "C")
