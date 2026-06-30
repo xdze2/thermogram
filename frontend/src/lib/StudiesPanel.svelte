@@ -239,15 +239,20 @@
   const INNER_H = CHART_H - PAD.top  - PAD.bottom;
 
   const LINE_COLORS = ['oklch(55% 0.18 250)', 'oklch(60% 0.18 40)'];
+  const SENSOR_COLORS = ['oklch(50% 0.18 145)', 'oklch(55% 0.18 310)'];
 
   $: chartData = computeChartData($activeStudy?.results?.simulate ?? null);
 
   function computeChartData(result) {
     if (!result?.t?.length) return null;
 
-    const t     = result.t;
-    const names = Object.keys(result.states);
-    const allValues = names.flatMap(n => result.states[n]);
+    const t          = result.t;
+    const names      = Object.keys(result.states);
+    const obsEntries = Object.entries(result.observations ?? {});
+
+    const stateValues = names.flatMap(n => result.states[n]);
+    const obsValues   = obsEntries.flatMap(([, vals]) => vals);
+    const allValues   = [...stateValues, ...obsValues];
 
     const tMin = t[0];
     const tMax = t[t.length - 1];
@@ -263,6 +268,15 @@
       return {
         name,
         color: LINE_COLORS[ci % LINE_COLORS.length],
+        path: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
+      };
+    });
+
+    const sensorSeries = obsEntries.map(([sensorName, vals], ci) => {
+      const pts = t.map((tv, i) => [scaleX(tv), scaleY(vals[i])]);
+      return {
+        name: sensorName,
+        color: SENSOR_COLORS[ci % SENSOR_COLORS.length],
         path: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
       };
     });
@@ -283,7 +297,48 @@
       return { label, x: scaleX(tv) };
     });
 
-    return { series, yTicks, xTicks };
+    // Residuals: for each sensor series, find the matching simulated state.
+    const stateKeys = Object.keys(result.states);
+    const residualSeries = obsEntries.map(([sensorName, obsVals], ci) => {
+      const matchedState =
+        result.states[sensorName] ??
+        result.states['T_room'] ??
+        result.states[stateKeys[0]];
+      if (!matchedState) return null;
+      const residuals = obsVals.map((o, i) => o - matchedState[i]);
+      return { name: sensorName, color: SENSOR_COLORS[ci % SENSOR_COLORS.length], residuals };
+    }).filter(Boolean);
+
+    let residualsChart = null;
+    if (residualSeries.length > 0) {
+      const allRes = residualSeries.flatMap(s => s.residuals);
+      const rMin = Math.min(...allRes);
+      const rMax = Math.max(...allRes);
+      const rPad = (rMax - rMin) * 0.1 || 0.5;
+      const rLo  = rMin - rPad;
+      const rHi  = rMax + rPad;
+
+      const scaleRY = v => PAD.top + INNER_H - ((v - rLo) / (rHi - rLo)) * INNER_H;
+      const zeroY   = scaleRY(0);
+
+      const rYTicks = Array.from({ length: 5 }, (_, i) => {
+        const v = rLo + i * (rHi - rLo) / 4;
+        return { v: v.toFixed(2), y: scaleRY(v) };
+      });
+
+      const rLines = residualSeries.map(s => {
+        const pts = t.map((tv, i) => [scaleX(tv), scaleRY(s.residuals[i])]);
+        return {
+          name: s.name,
+          color: s.color,
+          path: pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
+        };
+      });
+
+      residualsChart = { rLines, rYTicks, xTicks, zeroY };
+    }
+
+    return { series, sensorSeries, yTicks, xTicks, residualsChart };
   }
 </script>
 
@@ -681,6 +736,16 @@
                         stroke-linejoin="round"
                       />
                     {/each}
+                    {#each chartData.sensorSeries as s}
+                      <path
+                        d={s.path}
+                        fill="none"
+                        stroke={s.color}
+                        stroke-width="1.5"
+                        stroke-dasharray="4 3"
+                        stroke-linejoin="round"
+                      />
+                    {/each}
                   </g>
 
                   <!-- Axes -->
@@ -704,8 +769,128 @@
                       </text>
                     </g>
                   {/each}
+                  {#each chartData.sensorSeries as s, i}
+                    <g transform="translate({PAD.left + (chartData.series.length + i) * 100}, 6)">
+                      <line x1="0" y1="6" x2="18" y2="6" stroke={s.color} stroke-width="1.5" stroke-dasharray="4 3"/>
+                      <text x="22" y="10" font-size="10" fill="oklch(40% 0 0)" font-family="ui-monospace, monospace">
+                        {s.name}
+                      </text>
+                    </g>
+                  {/each}
                 </svg>
               </div>
+
+              {#if chartData.residualsChart}
+                {@const rc = chartData.residualsChart}
+                <div class="border border-base-300 rounded-lg p-2 overflow-x-auto mt-3">
+                  <div class="flex items-center gap-2 mb-1 px-1">
+                    <span class="badge badge-outline badge-xs">Residuals (observed − simulated)</span>
+                  </div>
+                  <svg
+                    viewBox="0 0 {CHART_W} {CHART_H}"
+                    width="100%"
+                    style="max-width: {CHART_W}px;"
+                    role="img"
+                    aria-label="Residuals: observed minus simulated temperature"
+                  >
+                    <!-- Y grid lines + labels -->
+                    {#each rc.rYTicks as tick}
+                      <line
+                        x1={PAD.left} y1={tick.y}
+                        x2={PAD.left + INNER_W} y2={tick.y}
+                        stroke="oklch(80% 0 0)" stroke-width="0.5"
+                      />
+                      <text
+                        x={PAD.left - 4} y={tick.y + 4}
+                        text-anchor="end"
+                        font-size="9"
+                        fill="oklch(50% 0 0)"
+                      >{tick.v}</text>
+                    {/each}
+
+                    <!-- Zero reference line -->
+                    <line
+                      x1={PAD.left} y1={rc.zeroY}
+                      x2={PAD.left + INNER_W} y2={rc.zeroY}
+                      stroke="oklch(50% 0 0)" stroke-width="1" stroke-dasharray="4 3"
+                    />
+
+                    <!-- X axis ticks + labels -->
+                    {#each rc.xTicks as tick}
+                      <line
+                        x1={tick.x} y1={PAD.top + INNER_H}
+                        x2={tick.x} y2={PAD.top + INNER_H + 4}
+                        stroke="oklch(60% 0 0)" stroke-width="1"
+                      />
+                      <text
+                        x={tick.x} y={PAD.top + INNER_H + 14}
+                        text-anchor="middle"
+                        font-size="9"
+                        fill="oklch(50% 0 0)"
+                      >{tick.label}</text>
+                    {/each}
+
+                    <!-- Axis labels -->
+                    <text
+                      x={PAD.left + INNER_W / 2}
+                      y={CHART_H - 2}
+                      text-anchor="middle"
+                      font-size="10"
+                      fill="oklch(40% 0 0)"
+                    >Date/time</text>
+                    <text
+                      x={10}
+                      y={PAD.top + INNER_H / 2}
+                      text-anchor="middle"
+                      font-size="10"
+                      fill="oklch(40% 0 0)"
+                      transform="rotate(-90, 10, {PAD.top + INNER_H / 2})"
+                    >Residual (°C)</text>
+
+                    <!-- Clip path for residual lines -->
+                    <defs>
+                      <clipPath id="study-residuals-clip">
+                        <rect x={PAD.left} y={PAD.top} width={INNER_W} height={INNER_H} />
+                      </clipPath>
+                    </defs>
+
+                    <!-- Residual lines -->
+                    <g clip-path="url(#study-residuals-clip)">
+                      {#each rc.rLines as s}
+                        <path
+                          d={s.path}
+                          fill="none"
+                          stroke={s.color}
+                          stroke-width="1.5"
+                          stroke-linejoin="round"
+                        />
+                      {/each}
+                    </g>
+
+                    <!-- Axes -->
+                    <line
+                      x1={PAD.left} y1={PAD.top}
+                      x2={PAD.left} y2={PAD.top + INNER_H}
+                      stroke="oklch(40% 0 0)" stroke-width="1"
+                    />
+                    <line
+                      x1={PAD.left} y1={PAD.top + INNER_H}
+                      x2={PAD.left + INNER_W} y2={PAD.top + INNER_H}
+                      stroke="oklch(40% 0 0)" stroke-width="1"
+                    />
+
+                    <!-- Legend -->
+                    {#each rc.rLines as s, i}
+                      <g transform="translate({PAD.left + i * 100}, 6)">
+                        <line x1="0" y1="6" x2="18" y2="6" stroke={s.color} stroke-width="1.5"/>
+                        <text x="22" y="10" font-size="10" fill="oklch(40% 0 0)" font-family="ui-monospace, monospace">
+                          {s.name}
+                        </text>
+                      </g>
+                    {/each}
+                  </svg>
+                </div>
+              {/if}
             {:else}
               <div class="border border-base-300 rounded-lg p-4 text-center text-base-content/40 text-sm">
                 Result data is present but could not be charted (empty time series).

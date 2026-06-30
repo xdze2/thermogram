@@ -361,6 +361,20 @@ def run_simulate(model_id: str, study_id: str, body: StudyRunSimulateIn) -> Stud
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Fetch sensor observations and align them to aligned.index.
+    observations: dict[str, list] = {}
+    for sensor in doc.sensors.values():
+        if not sensor.binding:
+            continue
+        try:
+            s = _influx.fetch_series(sensor.binding, tr.start, tr.end, tr.resample)
+            if s.empty:
+                continue
+            s = s.reindex(aligned.index).interpolate(method="time", limit=4).ffill(limit=4).bfill(limit=4)
+            observations[sensor.name] = s.to_numpy(dtype=float).tolist()
+        except Exception:
+            continue
+
     # Write results into the study.
     ran_at = _utcnow()
     study.results = StudyResults(
@@ -371,6 +385,7 @@ def run_simulate(model_id: str, study_id: str, body: StudyRunSimulateIn) -> Stud
                 name: x_out[i].tolist()
                 for i, name in enumerate(system.state_names)
             },
+            "observations": observations,
         },
         fit=None,
     )
