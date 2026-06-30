@@ -103,17 +103,39 @@ def _parse_series_tags(series_key: str, tag_keys: list[str]) -> str:
 
 def _to_rfc3339(ts: str) -> str:
     """
-    Ensure an ISO-8601 timestamp string carries a timezone offset that
-    InfluxDB v1 accepts.
+    Normalise an ISO-8601 string to the RFC 3339 form that InfluxDB v1 accepts
+    (``YYYY-MM-DDTHH:MM:SSZ``).  Naive inputs are treated as UTC.
 
-    InfluxDB v1 rejects naive datetime strings (no ``Z`` / no offset).
-    If the string already ends with ``Z`` or a ``+HH:MM`` offset it is
-    returned unchanged; otherwise ``Z`` (UTC) is appended.
+    Examples
+    --------
+    ``2024-01-01``              → ``2024-01-01T00:00:00Z``
+    ``2024-01-01T12:00``        → ``2024-01-01T12:00:00Z``
+    ``2024-01-01T12:00:00``     → ``2024-01-01T12:00:00Z``
+    ``2024-01-01T12:00:00Z``    → ``2024-01-01T12:00:00Z``
+    ``2024-01-01T12:00:00+02:00`` → returned unchanged (already RFC 3339)
     """
     ts = ts.strip()
-    if ts.endswith("Z") or "+" in ts[10:] or ts.endswith("UTC"):
+
+    # Already has a non-Z explicit offset — InfluxDB accepts +HH:MM, return as-is.
+    if "+" in ts[10:] or (ts[10:].count("-") > 0 and "T" in ts):
         return ts
-    return ts + "Z"
+
+    # Strip trailing Z or "UTC" to normalise the core datetime string.
+    if ts.endswith("Z"):
+        core = ts[:-1]
+    elif ts.endswith("UTC"):
+        core = ts[:-3].strip()
+    else:
+        core = ts
+
+    # Expand date-only → midnight UTC.
+    if len(core) == 10:
+        core += "T00:00:00"
+    # Expand HH:MM (no seconds) → HH:MM:00.
+    elif len(core) == 16 and "T" in core:
+        core += ":00"
+
+    return core + "Z"
 
 
 def fetch_series(

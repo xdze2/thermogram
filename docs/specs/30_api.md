@@ -27,6 +27,26 @@ treatment fields are present on all registry and document shapes; `GET /assembly
 - Mutations return the affected resource. After any mutation the frontend re-fetches `/document` **and** `/assembly` to refresh all derived views (see [`10_state.md`](10_state.md)).
 - `GET /assembly` **never** returns HTTP 500 on a structurally incomplete room — it always returns partial data + `problems[]`.
 
+### Datetime convention
+
+All timestamps in the API are **UTC, ISO 8601, with explicit `Z` suffix** — e.g.
+`"2026-05-25T00:00:00Z"`. The backend normalises any accepted shorthand to this form before
+passing it to InfluxDB:
+
+| Input form | Accepted? | Normalised to |
+|---|---|---|
+| `"2026-05-25"` (date only) | yes | `"2026-05-25T00:00:00Z"` |
+| `"2026-05-25T12:00"` (no seconds) | yes | `"2026-05-25T12:00:00Z"` |
+| `"2026-05-25T12:00:00"` (no `Z`) | yes (treated as UTC) | `"2026-05-25T12:00:00Z"` |
+| `"2026-05-25T12:00:00Z"` | canonical | unchanged |
+| `"2026-05-25T12:00:00+02:00"` | yes | unchanged |
+
+**Frontend rules:**
+- Date pickers expose **day granularity only** (no hour/minute selection); the time portion
+  is always midnight UTC (`T00:00:00Z`).
+- All date arithmetic and chart axis labels use UTC (`getUTC*()` methods).
+- Chart x-axis labels use **European format: `DD/MM HHh`** (e.g. `23/06 00h`).
+
 ---
 
 ## Model management
@@ -363,9 +383,10 @@ All required signals must be bound; unbound signals are rejected with a descript
 }
 ```
 
-`start` / `end` are ISO-8601 strings (timezone-naive strings are treated as UTC).  `resample`
-is a pandas offset string (default `"15min"`).  `x0` and `params` follow the same conventions
-as `POST /simulate`; both are optional.  The time step `dt` is inferred from `resample`.
+`start` / `end` are UTC ISO-8601 strings (see [datetime convention](#datetime-convention);
+shorthand forms are normalised server-side).  `resample` is a pandas offset string (default
+`"15min"`).  `x0` and `params` follow the same conventions as `POST /simulate`; both are
+optional.  The time step `dt` is inferred from `resample`.
 
 **Response `200`:** same shape as `POST /simulate`:
 ```json

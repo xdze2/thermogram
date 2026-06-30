@@ -93,25 +93,25 @@
   // Path B: Bound simulation (real InfluxDB data)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Default to the last 7 days. We build ISO-8601 local strings (no Z suffix)
-   * since the backend accepts ISO-8601 and the user's intent is local time.
-   */
-  function todayLocal() {
-    const d = new Date();
-    d.setSeconds(0, 0);
-    return d.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+  /** Return today as "YYYY-MM-DD" (UTC). */
+  function todayUTCDate() {
+    return new Date().toISOString().slice(0, 10);
   }
 
-  function sevenDaysAgo() {
+  /** Return the date N days ago as "YYYY-MM-DD" (UTC). */
+  function daysAgoUTCDate(n) {
     const d = new Date();
-    d.setDate(d.getDate() - 7);
-    d.setSeconds(0, 0);
-    return d.toISOString().slice(0, 16);
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
   }
 
-  let boundStart  = sevenDaysAgo();
-  let boundEnd    = todayLocal();
+  /** Convert a "YYYY-MM-DD" date string to a UTC midnight ISO-8601 string. */
+  function dateToUTCIso(dateStr) {
+    return `${dateStr}T00:00:00Z`;
+  }
+
+  let boundStartDate = daysAgoUTCDate(7);
+  let boundEndDate   = todayUTCDate();
   let boundResample = '15min';
 
   /** All required signals have a non-null binding. */
@@ -123,7 +123,11 @@
     simResult  = null;
     simSource  = null;
     try {
-      simResult = await runSimulateBound(boundStart, boundEnd, boundResample);
+      simResult = await runSimulateBound(
+        dateToUTCIso(boundStartDate),
+        dateToUTCIso(boundEndDate),
+        boundResample,
+      );
       simSource = 'bound';
     } catch (err) {
       simError = err.message ?? String(err);
@@ -186,7 +190,7 @@
       xTicks = Array.from({ length: nXTicks + 1 }, (_, i) => {
         const tv = tMin + i * (tMax - tMin) / nXTicks;
         const d = new Date(tv * 1000);
-        const label = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}h`;
+        const label = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth() + 1).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}h`;
         return { label, x: scaleX(tv) };
       });
     } else {
@@ -385,25 +389,25 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
       <div class="form-control">
         <label class="label" for="bound-start">
-          <span class="label-text">Start</span>
+          <span class="label-text">Start (UTC)</span>
         </label>
         <input
           id="bound-start"
-          type="datetime-local"
+          type="date"
           class="input input-bordered input-sm"
-          bind:value={boundStart}
+          bind:value={boundStartDate}
         />
       </div>
 
       <div class="form-control">
         <label class="label" for="bound-end">
-          <span class="label-text">End</span>
+          <span class="label-text">End (UTC)</span>
         </label>
         <input
           id="bound-end"
-          type="datetime-local"
+          type="date"
           class="input input-bordered input-sm"
-          bind:value={boundEnd}
+          bind:value={boundEndDate}
         />
       </div>
     </div>
@@ -457,7 +461,7 @@
         {#if simSource === 'bound'}
           <span class="badge badge-accent badge-sm">Real data — InfluxDB</span>
           <span class="text-xs text-base-content/60">
-            {boundStart} → {boundEnd} ({boundResample})
+            {boundStartDate} → {boundEndDate} ({boundResample})
           </span>
         {:else}
           <span class="badge badge-ghost badge-sm">Synthetic scenario</span>
