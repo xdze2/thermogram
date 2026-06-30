@@ -125,18 +125,6 @@ export async function installMockServer() {
     if (method === 'DELETE' && url.includes('/elements/')) {
       return emptyResponse(204);
     }
-    // POST modules
-    if (method === 'POST' && url.includes('/modules') && !url.includes('/routing')) {
-      return jsonResponse(fixtures.document.modules[0] ?? {}, 201);
-    }
-    // DELETE modules/{mid}
-    if (method === 'DELETE' && url.includes('/modules/')) {
-      return emptyResponse(204);
-    }
-    // PUT modules/{mid}/routing
-    if (method === 'PUT' && url.includes('/routing')) {
-      return jsonResponse(fixtures.document.modules[0] ?? {}, 200);
-    }
     // POST simulate → serve fixture simulation result
     if (method === 'POST' && url.includes('/simulate')) {
       return jsonResponse(fixtures.simulate, 200);

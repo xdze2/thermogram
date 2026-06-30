@@ -1,5 +1,5 @@
 <script>
-  import { assembly, loading, error } from '../stores/model.js';
+  import { assembly, requiredSignals, loading, error } from '../stores/model.js';
   import { runSimulate, fetchIdentifiability } from '../lib/api.js';
 
   // ---------------------------------------------------------------------------
@@ -209,6 +209,35 @@
   </section>
 
   <!-- =========================================================
+       Required signals — generated from assembly.required_signals
+  ========================================================= -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Required signals</h2>
+    <p class="text-sm text-base-content/60 mb-3">
+      Inputs the derived model needs to simulate. One entry per boundary signal
+      demanded by the module set. Supply a series or scenario for each below.
+    </p>
+
+    {#if $requiredSignals.length === 0}
+      <div class="text-sm text-base-content/40 mb-3">
+        No signals required yet — add elements with boundaries set.
+      </div>
+    {:else}
+      <div class="flex flex-wrap gap-2 mb-3">
+        {#each $requiredSignals as sig}
+          <div class="badge badge-outline gap-1 font-mono">
+            <span>{sig.name}</span>
+            <span class="text-base-content/40 text-xs">{sig.kind}</span>
+            {#if sig.meta?.orientation}
+              <span class="text-base-content/40 text-xs">{sig.meta.orientation}</span>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </section>
+
+  <!-- =========================================================
        Forward simulation
   ========================================================= -->
   <section>
@@ -218,11 +247,11 @@
       state trajectories. Adjust the sliders to explore different conditions.
     </p>
 
-    <!-- Scenario sliders -->
+    <!-- Scenario sliders (ad-hoc; cover the common T_ext + G_sol case) -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
       <div class="form-control">
         <label class="label" for="t-ext-offset">
-          <span class="label-text">T_ext offset</span>
+          <span class="label-text">T_ext offset [°C]</span>
           <span class="label-text-alt font-mono">{tExtOffset >= 0 ? '+' : ''}{tExtOffset} °C</span>
         </label>
         <input
@@ -241,7 +270,7 @@
 
       <div class="form-control">
         <label class="label" for="solar-intensity">
-          <span class="label-text">Peak solar G_sol</span>
+          <span class="label-text">Peak solar G_sol [W/m²]</span>
           <span class="label-text-alt font-mono">{solarIntensity} W/m²</span>
         </label>
         <input

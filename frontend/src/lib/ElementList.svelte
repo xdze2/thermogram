@@ -5,6 +5,24 @@
   } from '../stores/model.js';
 
   // ---------------------------------------------------------------------------
+  // SI unit map: quantity key -> unit string
+  // ---------------------------------------------------------------------------
+  const UNITS = {
+    area:      'm²',
+    U:         'W/(m²·K)',
+    alpha:     '–',
+    shgc:      '–',
+    a:         'm',
+    b:         'm',
+    c:         'm',
+    thickness: 'm',
+  };
+
+  function unitFor(name) {
+    return UNITS[name] ?? null;
+  }
+
+  // ---------------------------------------------------------------------------
   // Modal state
   // ---------------------------------------------------------------------------
   let modalOpen = false;
@@ -67,6 +85,16 @@
   // ---------------------------------------------------------------------------
   $: currentTypeDef = $registry?.element_types?.find(t => t.type_name === selectedType);
 
+  /** True when this type has a non-empty treatments array (only heavy OuterWall). */
+  $: hasTreatmentMenu = (currentTypeDef?.treatments?.length ?? 0) > 0;
+
+  /**
+   * True when Floor.boundary == "adjacent" — shows the adjacent_room text field.
+   * Reactively re-evaluated whenever formFields changes.
+   */
+  $: showAdjacentRoom =
+    selectedType === 'Floor' && formFields['boundary'] === 'adjacent';
+
   function buildDefaultFields(typeName) {
     const typeDef = $registry?.element_types?.find(t => t.type_name === typeName);
     if (!typeDef) return {};
@@ -109,6 +137,14 @@
     const updated = [...(formFields[fieldName] ?? [])];
     updated[idx] = { ...updated[idx], [key]: value };
     formFields = { ...formFields, [fieldName]: updated };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Treatment toggle handler
+  // Sets formFields.treatment to the selected key.
+  // ---------------------------------------------------------------------------
+  function onTreatmentChange(key) {
+    formFields = { ...formFields, treatment: key };
   }
 
   // ---------------------------------------------------------------------------
@@ -157,6 +193,7 @@
           return parsedLayer;
         });
       } else {
+        // str / enum: keep as string; treatment key is also a string
         out[field.name] = val;
       }
     }
@@ -192,6 +229,24 @@
       if (!nonNull.length) return null;
       return { channel, values: nonNull.join(', ') };
     }).filter(Boolean);
+  }
+
+  /**
+   * Returns a human-readable summary of an element's boundary for display on
+   * the element card (e.g. "S", "adjacent: kitchen", "ground").
+   */
+  function boundaryLabel(elem, typeDef) {
+    if (!typeDef?.boundary) return null;
+    const { field } = typeDef.boundary;
+    const val = elem.fields?.[field];
+    if (!val && val !== 0) return null;
+    if (field === 'adjacent') return `adjacent: ${val}`;
+    if (field === 'signal') return `signal: ${val || '(none)'}`;
+    if (field === 'boundary' && val === 'adjacent') {
+      const room = elem.fields?.adjacent_room;
+      return room ? `adjacent: ${room}` : 'adjacent (no room set)';
+    }
+    return val;
   }
 </script>
 
@@ -250,15 +305,38 @@
             <!-- Key fields -->
             <div class="text-sm text-base-content/70 mt-1">
               {#each Object.entries(elem.fields) as [k, v]}
-                {#if k !== 'layers'}
-                  <div><span class="font-medium">{k}:</span> {v}</div>
+                {#if k !== 'layers' && k !== 'treatment'}
+                  {@const unit = unitFor(k)}
+                  <div>
+                    <span class="font-medium">{k}:</span>
+                    {v}{unit ? ` [${unit}]` : ''}
+                  </div>
+                {/if}
+              {/each}
+              <!-- Boundary summary badge -->
+              {#each [$registry?.element_types?.find(t => t.type_name === elem.type)] as typeDef}
+                {#if typeDef?.boundary}
+                  {@const blabel = boundaryLabel(elem, typeDef)}
+                  {#if blabel}
+                    <div class="mt-1">
+                      <span class="badge badge-info badge-xs mr-1">boundary</span>
+                      <span class="font-mono text-xs">{blabel}</span>
+                    </div>
+                  {/if}
+                {/if}
+                <!-- Treatment badge (only when non-default) -->
+                {#if typeDef?.treatments?.length && elem.fields?.treatment && elem.fields.treatment !== ''}
+                  <div class="mt-0.5">
+                    <span class="badge badge-secondary badge-xs mr-1">treatment</span>
+                    <span class="text-xs">{elem.fields.treatment}</span>
+                  </div>
                 {/if}
               {/each}
               {#if elem.fields?.layers?.length}
                 <div class="font-medium mt-1">Layers:</div>
                 {#each elem.fields.layers as layer, i}
                   <div class="ml-2 text-xs">
-                    {i+1}. {layer.material} {layer.thickness}m
+                    {i+1}. {layer.material} {layer.thickness} m
                   </div>
                 {/each}
               {/if}
@@ -325,86 +403,204 @@
         <!-- Dynamic fields from registry -->
         {#if currentTypeDef}
           {#each currentTypeDef.fields as field}
-            <div class="form-control mb-3">
-              <label class="label" for="field-{field.name}">
-                <span class="label-text font-medium">{field.name}</span>
-              </label>
+            <!--
+              Skip fields handled specially below:
+              - "treatment"      → rendered as a treatment toggle (only for OuterWall)
+              - "adjacent_room"  → rendered conditionally under Floor.boundary
+              - "adjacent"       → rendered as a labelled text input below (Partition)
+              - "signal"         → rendered as a labelled text input below (HeatSource)
+            -->
+            {#if field.name !== 'treatment' && field.name !== 'adjacent_room'
+                 && field.name !== 'adjacent' && field.name !== 'signal'}
+              <div class="form-control mb-3">
+                <label class="label" for="field-{field.name}">
+                  <span class="label-text font-medium">{field.name}</span>
+                  {#if unitFor(field.name)}
+                    <span class="label-text-alt text-base-content/50">[{unitFor(field.name)}]</span>
+                  {/if}
+                </label>
 
-              {#if field.type === 'enum'}
-                <select
-                  id="field-{field.name}"
-                  class="select select-bordered w-full"
-                  bind:value={formFields[field.name]}
-                >
-                  {#each field.options ?? [] as opt}
-                    <option value={opt}>{opt}</option>
-                  {/each}
-                </select>
-
-              {:else if field.type === 'list[layer]'}
-                <!-- Repeatable layer sub-form -->
-                <div class="border border-base-300 rounded-lg p-3">
-                  {#each formFields[field.name] ?? [] as layer, idx}
-                    <div class="flex gap-2 items-end mb-2 flex-wrap">
-                      {#each $registry?.layer_schema?.fields ?? [] as lf}
-                        <div class="form-control flex-1 min-w-24">
-                          <label class="label py-0" for="layer-{idx}-{lf.name}">
-                            <span class="label-text text-xs">{lf.name}</span>
-                          </label>
-                          {#if lf.type === 'enum'}
-                            <select
-                              id="layer-{idx}-{lf.name}"
-                              class="select select-bordered select-sm w-full"
-                              value={layer[lf.name]}
-                              onchange={(e) => updateLayerField(field.name, idx, lf.name, e.target.value)}
-                            >
-                              {#each lf.options ?? [] as opt}
-                                <option value={opt}>{opt}</option>
-                              {/each}
-                            </select>
-                          {:else}
-                            <input
-                              id="layer-{idx}-{lf.name}"
-                              type="number"
-                              step="any"
-                              class="input input-bordered input-sm w-full"
-                              value={layer[lf.name]}
-                              oninput={(e) => updateLayerField(field.name, idx, lf.name, e.target.value)}
-                            />
-                          {/if}
-                        </div>
-                      {/each}
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-sm text-error"
-                        onclick={() => removeLayer(field.name, idx)}
-                        aria-label="Remove layer {idx+1}"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  {/each}
-                  <button
-                    type="button"
-                    class="btn btn-outline btn-xs mt-1"
-                    onclick={() => addLayer(field.name)}
+                {#if field.type === 'enum'}
+                  <select
+                    id="field-{field.name}"
+                    class="select select-bordered w-full"
+                    bind:value={formFields[field.name]}
                   >
-                    + Add layer
-                  </button>
-                </div>
+                    {#each field.options ?? [] as opt}
+                      <option value={opt}>{opt}</option>
+                    {/each}
+                  </select>
 
-              {:else}
-                <input
-                  id="field-{field.name}"
-                  type="number"
-                  step="any"
-                  class="input input-bordered w-full"
-                  bind:value={formFields[field.name]}
-                  placeholder={field.default !== undefined ? String(field.default) : ''}
-                />
-              {/if}
-            </div>
+                {:else if field.type === 'list[layer]'}
+                  <!-- Repeatable layer sub-form -->
+                  <div class="border border-base-300 rounded-lg p-3">
+                    {#each formFields[field.name] ?? [] as layer, idx}
+                      <div class="flex gap-2 items-end mb-2 flex-wrap">
+                        {#each $registry?.layer_schema?.fields ?? [] as lf}
+                          <div class="form-control flex-1 min-w-24">
+                            <label class="label py-0" for="layer-{idx}-{lf.name}">
+                              <span class="label-text text-xs">
+                                {lf.name}{lf.name === 'thickness' ? ' [m]' : ''}
+                              </span>
+                            </label>
+                            {#if lf.type === 'enum'}
+                              <select
+                                id="layer-{idx}-{lf.name}"
+                                class="select select-bordered select-sm w-full"
+                                value={layer[lf.name]}
+                                onchange={(e) => updateLayerField(field.name, idx, lf.name, e.target.value)}
+                              >
+                                {#each lf.options ?? [] as opt}
+                                  <option value={opt}>{opt}</option>
+                                {/each}
+                              </select>
+                            {:else}
+                              <input
+                                id="layer-{idx}-{lf.name}"
+                                type="number"
+                                step="any"
+                                class="input input-bordered input-sm w-full"
+                                value={layer[lf.name]}
+                                oninput={(e) => updateLayerField(field.name, idx, lf.name, e.target.value)}
+                              />
+                            {/if}
+                          </div>
+                        {/each}
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm text-error"
+                          onclick={() => removeLayer(field.name, idx)}
+                          aria-label="Remove layer {idx+1}"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    {/each}
+                    <button
+                      type="button"
+                      class="btn btn-outline btn-xs mt-1"
+                      onclick={() => addLayer(field.name)}
+                    >
+                      + Add layer
+                    </button>
+                  </div>
+
+                {:else}
+                  <input
+                    id="field-{field.name}"
+                    type="number"
+                    step="any"
+                    class="input input-bordered w-full"
+                    bind:value={formFields[field.name]}
+                    placeholder={field.default !== undefined ? String(field.default) : ''}
+                  />
+                {/if}
+              </div>
+            {/if}
           {/each}
+
+          <!-- ─────────────────────────────────────────────────────────────
+               Boundary-specific fields (per element type)
+          ───────────────────────────────────────────────────────────────── -->
+
+          <!-- Floor: adjacent_room text input (only when boundary == "adjacent") -->
+          {#if selectedType === 'Floor' && showAdjacentRoom}
+            <div class="form-control mb-3">
+              <label class="label" for="field-adjacent_room">
+                <span class="label-text font-medium">adjacent_room</span>
+                <span class="label-text-alt text-base-content/50">room label</span>
+              </label>
+              <input
+                id="field-adjacent_room"
+                type="text"
+                class="input input-bordered w-full"
+                bind:value={formFields['adjacent_room']}
+                placeholder="e.g. kitchen"
+              />
+              <div class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Sets the boundary signal to T_&lt;room&gt;
+                </span>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Partition: adjacent room-label text input -->
+          {#if selectedType === 'Partition'}
+            <div class="form-control mb-3">
+              <label class="label" for="field-adjacent">
+                <span class="label-text font-medium">adjacent</span>
+                <span class="label-text-alt text-base-content/50">room label</span>
+              </label>
+              <input
+                id="field-adjacent"
+                type="text"
+                class="input input-bordered w-full"
+                bind:value={formFields['adjacent']}
+                placeholder="e.g. kitchen"
+              />
+              <div class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Sets the boundary signal to T_&lt;room&gt;
+                </span>
+              </div>
+            </div>
+          {/if}
+
+          <!-- HeatSource: signal name text input -->
+          {#if selectedType === 'HeatSource'}
+            <div class="form-control mb-3">
+              <label class="label" for="field-signal">
+                <span class="label-text font-medium">signal</span>
+                <span class="label-text-alt text-base-content/50">prescribed flux label</span>
+              </label>
+              <input
+                id="field-signal"
+                type="text"
+                class="input input-bordered w-full"
+                bind:value={formFields['signal']}
+                placeholder="e.g. hvac"
+              />
+              <div class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Creates a boundary signal Q_&lt;label&gt;
+                </span>
+              </div>
+            </div>
+          {/if}
+
+          <!-- ─────────────────────────────────────────────────────────────
+               Treatment toggle — only for element types whose registry entry
+               has a non-empty treatments array (currently only heavy OuterWall).
+          ───────────────────────────────────────────────────────────────── -->
+          {#if hasTreatmentMenu}
+            <div class="form-control mb-3">
+              <span class="label-text font-medium mb-2 block">Treatment</span>
+              <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Wall treatment">
+                {#each currentTypeDef.treatments as t}
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      class="radio radio-sm"
+                      name="treatment-{selectedType}"
+                      value={t.key}
+                      checked={
+                        formFields['treatment'] === t.key ||
+                        (formFields['treatment'] === '' && t.default)
+                      }
+                      onchange={() => onTreatmentChange(t.key)}
+                    />
+                    <span class="text-sm">{t.label}</span>
+                  </label>
+                {/each}
+              </div>
+              <div class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Overrides automatic heavy/light detection. Light walls ignore this.
+                </span>
+              </div>
+            </div>
+          {/if}
         {/if}
 
         <!-- Form-level error -->

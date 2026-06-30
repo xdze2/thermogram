@@ -92,28 +92,6 @@ export function deleteElement(eid) {
 }
 
 // ---------------------------------------------------------------------------
-// Module CRUD
-// ---------------------------------------------------------------------------
-
-export function createModule(type, fields = {}) {
-  return apiFetch(`${BASE()}/modules`, {
-    method: 'POST',
-    body: JSON.stringify({ type, fields }),
-  });
-}
-
-export function deleteModule(mid) {
-  return apiFetch(`${BASE()}/modules/${mid}`, { method: 'DELETE' });
-}
-
-export function setModuleRouting(mid, element_ids) {
-  return apiFetch(`${BASE()}/modules/${mid}/routing`, {
-    method: 'PUT',
-    body: JSON.stringify({ element_ids }),
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Physics views
 // ---------------------------------------------------------------------------
 

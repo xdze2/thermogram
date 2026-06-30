@@ -6,7 +6,13 @@
         {"name": "area",        "type": "float"},
         {"name": "orientation", "type": "enum", "options": ["S","SE","SW","E","W","NE","NW","N"]},
         {"name": "layers",      "type": "list[layer]"},
-        {"name": "alpha",       "type": "float", "default": 0.6}
+        {"name": "alpha",       "type": "float", "default": 0.6},
+        {"name": "treatment",   "type": "str",   "default": ""}
+      ],
+      "boundary": {"field": "orientation", "role": "exterior"},
+      "treatments": [
+        {"key": "thermal_mass", "label": "Thermal-mass wall", "default": true},
+        {"key": "simple_loss",  "label": "Simple loss",       "default": false}
       ]
     },
     {
@@ -16,22 +22,30 @@
         {"name": "orientation", "type": "enum", "options": ["S","SE","SW","E","W","NE","NW","N"]},
         {"name": "U",           "type": "float"},
         {"name": "shgc",        "type": "float"}
-      ]
+      ],
+      "boundary": {"field": "orientation", "role": "exterior"},
+      "treatments": []
     },
     {
       "type_name": "Floor",
       "fields": [
-        {"name": "area",     "type": "float"},
-        {"name": "boundary", "type": "enum", "options": ["ground","adjacent","exposed"]},
-        {"name": "layers",   "type": "list[layer]"}
-      ]
+        {"name": "area",         "type": "float"},
+        {"name": "boundary",     "type": "enum", "options": ["ground","adjacent","exposed"]},
+        {"name": "layers",       "type": "list[layer]"},
+        {"name": "adjacent_room","type": "str",  "default": ""}
+      ],
+      "boundary": {"field": "boundary", "role": "by_value"},
+      "treatments": []
     },
     {
       "type_name": "Partition",
       "fields": [
-        {"name": "area",   "type": "float"},
-        {"name": "layers", "type": "list[layer]"}
-      ]
+        {"name": "area",     "type": "float"},
+        {"name": "layers",   "type": "list[layer]"},
+        {"name": "adjacent", "type": "str", "default": ""}
+      ],
+      "boundary": {"field": "adjacent", "role": "adjacent"},
+      "treatments": []
     },
     {
       "type_name": "IndoorMass",
@@ -40,13 +54,18 @@
         {"name": "b",         "type": "float"},
         {"name": "c",         "type": "float"},
         {"name": "furniture", "type": "enum", "options": ["bare","normal","heavy"], "default": "normal"}
-      ]
+      ],
+      "boundary": null,
+      "treatments": []
     },
     {
       "type_name": "HeatSource",
       "fields": [
-        {"name": "area", "type": "float", "default": 0.0}
-      ]
+        {"name": "area",   "type": "float", "default": 0.0},
+        {"name": "signal", "type": "str",   "default": ""}
+      ],
+      "boundary": {"field": "signal", "role": "prescribed"},
+      "treatments": []
     }
   ],
   "module_types": [
@@ -72,6 +91,12 @@
       "type_name": "HeavyWall",
       "owns": ["CONDUCTION","STORAGE","SOLAR_OPAQUE"],
       "params": ["H_out","H_in","C_wall"],
+      "fields": []
+    },
+    {
+      "type_name": "SourceFluxModule",
+      "owns": [],
+      "params": ["Q_flux"],
       "fields": []
     }
   ],

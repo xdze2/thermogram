@@ -25,9 +25,6 @@ import {
   createElement,
   updateElement,
   deleteElement,
-  createModule,
-  deleteModule,
-  setModuleRouting,
 } from '../lib/api.js';
 
 // ---------------------------------------------------------------------------
@@ -44,9 +41,11 @@ export const loading  = writable(false);
 // Derived: flat element / module lists and problem list
 // ---------------------------------------------------------------------------
 
-export const elements = derived(roomDoc, ($doc) => $doc?.elements ?? []);
-export const modules  = derived(roomDoc, ($doc) => $doc?.modules ?? []);
-export const problems = derived(assembly, ($asm) => $asm?.problems ?? []);
+export const elements        = derived(roomDoc, ($doc) => $doc?.elements ?? []);
+export const modules         = derived(roomDoc, ($doc) => $doc?.modules ?? []);
+export const signals         = derived(roomDoc, ($doc) => $doc?.signals ?? []);
+export const problems        = derived(assembly, ($asm) => $asm?.problems ?? []);
+export const requiredSignals = derived(assembly, ($asm) => $asm?.required_signals ?? []);
 
 // ---------------------------------------------------------------------------
 // Internal helper: wrap async call with loading + error state
@@ -93,9 +92,6 @@ async function applyMutation(apiCall) {
 export const addElement    = (type, fields) => applyMutation(() => createElement(type, fields));
 export const editElement   = (eid, fields)  => applyMutation(() => updateElement(eid, fields));
 export const removeElement = (eid)          => applyMutation(() => deleteElement(eid));
-export const addModule     = (type, fields) => applyMutation(() => createModule(type, fields));
-export const removeModule  = (mid)          => applyMutation(() => deleteModule(mid));
-export const routeModule   = (mid, eids)    => applyMutation(() => setModuleRouting(mid, eids));
 
 // ---------------------------------------------------------------------------
 // Read actions (non-mutating)
