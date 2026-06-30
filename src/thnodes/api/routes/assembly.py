@@ -22,6 +22,7 @@ from ..models import (
     SignalOut,
 )
 from ..store import (
+    binding_map_from_doc,
     doc_to_group,
     get_doc,
     signal_to_out,
@@ -63,8 +64,11 @@ def get_assembly(model_id: str) -> AssemblyOut:
 
     # required_signals: the set of Signals the derived modules demand.
     # Always derived from the grouping result, even when system is None.
+    # Bindings from doc.signals are injected by name so the UI can show which
+    # signals are already bound to an InfluxDB source.
+    bmap = binding_map_from_doc(doc)
     required_signals: list[SignalOut] = [
-        signal_to_out(sig) for sig in gr.signals
+        signal_to_out(sig, bmap) for sig in gr.signals
     ]
 
     if system is None:

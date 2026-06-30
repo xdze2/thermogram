@@ -25,6 +25,7 @@ import {
   createElement,
   updateElement,
   deleteElement,
+  putSignalBinding,
 } from '../lib/api.js';
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,17 @@ async function applyMutation(apiCall) {
 export const addElement    = (type, fields) => applyMutation(() => createElement(type, fields));
 export const editElement   = (eid, fields)  => applyMutation(() => updateElement(eid, fields));
 export const removeElement = (eid)          => applyMutation(() => deleteElement(eid));
+
+/**
+ * Set (string) or clear (null) the InfluxDB binding for a required signal.
+ * Follows the mutation invariant: re-pulls both roomDoc and assembly so
+ * required_signals[] in the assembly store reflects the new binding state.
+ *
+ * @param {string} signalName  - The signal's name field (e.g. "T_ext")
+ * @param {string|null} binding - InfluxDB query string or null to clear
+ */
+export const setSignalBinding = (signalName, binding) =>
+  applyMutation(() => putSignalBinding(signalName, binding));
 
 // ---------------------------------------------------------------------------
 // Read actions (non-mutating)

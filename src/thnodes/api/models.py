@@ -25,9 +25,12 @@ class Signal:
     A named boundary input the model couples to (spec 15 §"Signal as a
     first-class object").
 
-    Kept deliberately binding-agnostic: no ``source``/``data``/``binding``
-    field — that is a separate future layer.  Grouping depends only on
-    Signal *identity* (id, name, kind, role, meta).
+    ``binding`` is the optional InfluxDB query string in the form
+    ``measurement/field?tag=val[&tag2=val2]`` (e.g.
+    ``daikin_aircon/inside_temperature?name=Salon``).  It attaches to
+    a Signal's stored representation WITHOUT touching its identity fields
+    (id, name, kind, role, meta).  Grouping depends only on Signal *identity*
+    and MUST NEVER read ``binding``.
     """
 
     id: str
@@ -35,6 +38,7 @@ class Signal:
     kind: str   # "temperature" | "irradiance" | "flux"
     role: str   # "exterior" | "ground" | "adjacent" | "solar" | "prescribed"
     meta: dict = field(default_factory=dict)
+    binding: str | None = None
 
 
 @dataclass
@@ -246,12 +250,18 @@ class IdentOut(BaseModel):
 # ── signal schemas ─────────────────────────────────────────────────────────────
 
 class SignalOut(BaseModel):
-    """Read-only view of a Signal document resource (spec 15)."""
+    """Read-only view of a Signal document resource (spec 15).
+
+    ``binding`` carries the optional InfluxDB query string for this signal
+    (``measurement/field?tag=val``).  Identity fields (id, name, kind, role,
+    meta) are kept separate — grouping never reads ``binding``.
+    """
     id: str
     name: str
     kind: str
     role: str
     meta: dict = {}
+    binding: str | None = None
 
 
 # ── registry schemas ───────────────────────────────────────────────────────────

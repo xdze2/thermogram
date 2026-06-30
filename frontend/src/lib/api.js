@@ -114,6 +114,55 @@ export function topologySvgUrl() {
 }
 
 // ---------------------------------------------------------------------------
+// InfluxDB signal catalogue
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/influx/signals → string[]
+ * Returns 503 {detail} if InfluxDB is unreachable — the caller must handle.
+ */
+export function fetchInfluxSignals() {
+  return apiFetch('/api/influx/signals');
+}
+
+// ---------------------------------------------------------------------------
+// Signal binding (set / clear)
+// ---------------------------------------------------------------------------
+
+/**
+ * PUT /api/models/{uid}/signals/{signal_name}/binding
+ * body: { binding: string | null }
+ * Returns the updated SignalOut.
+ * 400 on malformed binding string, 404 if the signal isn't required.
+ */
+export function putSignalBinding(signalName, binding) {
+  return apiFetch(`${BASE()}/signals/${encodeURIComponent(signalName)}/binding`, {
+    method: 'PUT',
+    body: JSON.stringify({ binding }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Bound simulation (real InfluxDB data)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/models/{uid}/simulate-bound
+ * body: { start, end, resample?, x0?, params? }
+ * Returns SimulateOut — same shape as runSimulate().
+ * 400 lists unbound signals; 503 if DB unreachable mid-fetch.
+ */
+export function runSimulateBound(start, end, resample = '15min', x0 = null, params = null) {
+  const body = { start, end, resample };
+  if (x0) body.x0 = x0;
+  if (params) body.params = params;
+  return apiFetch(`${BASE()}/simulate-bound`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Model management (list / create / rename / delete — model-level, not document)
 // ---------------------------------------------------------------------------
 

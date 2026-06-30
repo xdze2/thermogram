@@ -10,6 +10,7 @@ from ..models import (
 )
 from ..store import (
     _build_element,
+    binding_map_from_doc,
     doc_to_group_with_elem_map,
     element_to_out,
     get_doc,
@@ -50,8 +51,10 @@ def get_document(model_id: str) -> dict:
             element_ids=claimed_eids,
         ))
 
-    # Derived signals (liveness-correct from grouping rule).
-    signals: list[SignalOut] = [signal_to_out(sig) for sig in gr.signals]
+    # Derived signals (liveness-correct from grouping rule), with stored
+    # bindings injected from doc.signals by signal name.
+    bmap = binding_map_from_doc(doc)
+    signals: list[SignalOut] = [signal_to_out(sig, bmap) for sig in gr.signals]
 
     return {
         "model_id": model_id,

@@ -1,6 +1,7 @@
 <script>
   import { assembly, requiredSignals, loading, error } from '../stores/model.js';
-  import { runSimulate, fetchIdentifiability } from '../lib/api.js';
+  import { runSimulate, fetchIdentifiability, runSimulateBound } from './api.js';
+  import SignalBindingPanel from './SignalBindingPanel.svelte';
 
   // ---------------------------------------------------------------------------
   // Identifiability
@@ -32,14 +33,23 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Simulation
+  // Shared simulation result state
+  // Both the synthetic path and the bound path write here; one chart renders both.
   // ---------------------------------------------------------------------------
   let simResult = null;
   let simLoading = false;
   let simError   = '';
+  /**
+   * Which path produced the current result, so the legend is informative.
+   * @type {'synthetic' | 'bound' | null}
+   */
+  let simSource = null;
 
-  // Scenario inputs — sliders for quick iteration
-  let tExtOffset = 0;     // °C offset added to a synthetic T_ext base
+  // ---------------------------------------------------------------------------
+  // Path A: Synthetic scenario (sliders)
+  // ---------------------------------------------------------------------------
+
+  let tExtOffset = 0;       // °C offset added to a synthetic T_ext base
   let solarIntensity = 300; // W/m² peak solar for the synthetic G_sol
 
   /** Build a 48-hour synthetic signal pair at 1h resolution. */
@@ -65,11 +75,13 @@
     simLoading = true;
     simError   = '';
     simResult  = null;
+    simSource  = null;
     try {
       const signals = buildScenario(tExtOffset, solarIntensity);
       const states  = $assembly?.states ?? ['T_room'];
       const x0 = states.map(() => 18.0);  // start all states at 18°C
       simResult = await runSimulate(signals, x0);
+      simSource = 'synthetic';
     } catch (err) {
       simError = err.message ?? String(err);
     } finally {
@@ -78,7 +90,50 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Hand-rolled SVG line chart
+  // Path B: Bound simulation (real InfluxDB data)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Default to the last 7 days. We build ISO-8601 local strings (no Z suffix)
+   * since the backend accepts ISO-8601 and the user's intent is local time.
+   */
+  function todayLocal() {
+    const d = new Date();
+    d.setSeconds(0, 0);
+    return d.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+  }
+
+  function sevenDaysAgo() {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    d.setSeconds(0, 0);
+    return d.toISOString().slice(0, 16);
+  }
+
+  let boundStart  = sevenDaysAgo();
+  let boundEnd    = todayLocal();
+  let boundResample = '15min';
+
+  /** All required signals have a non-null binding. */
+  $: allBound = $requiredSignals.length > 0 && $requiredSignals.every(s => !!s.binding);
+
+  async function runSimBound() {
+    simLoading = true;
+    simError   = '';
+    simResult  = null;
+    simSource  = null;
+    try {
+      simResult = await runSimulateBound(boundStart, boundEnd, boundResample);
+      simSource = 'bound';
+    } catch (err) {
+      simError = err.message ?? String(err);
+    } finally {
+      simLoading = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hand-rolled SVG line chart (shared by both paths)
   // ---------------------------------------------------------------------------
 
   const CHART_W = 560;
@@ -123,15 +178,29 @@
       return { v: v.toFixed(1), y: scaleY(v) };
     });
 
-    // X-axis ticks (hours)
+    // X-axis ticks: for bound results use date labels; for synthetic use hours.
+    let xTicks;
     const nXTicks = 6;
-    const xTicks = Array.from({ length: nXTicks + 1 }, (_, i) => {
-      const tv = tMin + i * (tMax - tMin) / nXTicks;
-      return { label: `${Math.round(tv / 3600)}h`, x: scaleX(tv) };
-    });
+    if (simSource === 'bound') {
+      // t is seconds from epoch; convert to date strings.
+      xTicks = Array.from({ length: nXTicks + 1 }, (_, i) => {
+        const tv = tMin + i * (tMax - tMin) / nXTicks;
+        const d = new Date(tv * 1000);
+        const label = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}h`;
+        return { label, x: scaleX(tv) };
+      });
+    } else {
+      xTicks = Array.from({ length: nXTicks + 1 }, (_, i) => {
+        const tv = tMin + i * (tMax - tMin) / nXTicks;
+        return { label: `${Math.round(tv / 3600)}h`, x: scaleX(tv) };
+      });
+    }
 
-    return { series, yTicks, xTicks, vMin: (vMin - vPad).toFixed(1), vMax: (vMax + vPad).toFixed(1) };
+    return { series, yTicks, xTicks };
   }
+
+  // X-axis label depends on which simulation source produced the result
+  $: xAxisLabel = simSource === 'bound' ? 'Date/time' : 'Time (hours)';
 </script>
 
 <div class="p-4 space-y-6">
@@ -209,39 +278,26 @@
   </section>
 
   <!-- =========================================================
-       Required signals — generated from assembly.required_signals
+       Required signals — with InfluxDB binding controls
   ========================================================= -->
   <section>
     <h2 class="text-xl font-semibold mb-1">Required signals</h2>
     <p class="text-sm text-base-content/60 mb-3">
-      Inputs the derived model needs to simulate. One entry per boundary signal
-      demanded by the module set. Supply a series or scenario for each below.
+      Inputs the derived model needs to simulate. Bind each signal to an
+      InfluxDB source to run a real-data simulation below.
     </p>
 
-    {#if $requiredSignals.length === 0}
-      <div class="text-sm text-base-content/40 mb-3">
-        No signals required yet — add elements with boundaries set.
-      </div>
-    {:else}
-      <div class="flex flex-wrap gap-2 mb-3">
-        {#each $requiredSignals as sig}
-          <div class="badge badge-outline gap-1 font-mono">
-            <span>{sig.name}</span>
-            <span class="text-base-content/40 text-xs">{sig.kind}</span>
-            {#if sig.meta?.orientation}
-              <span class="text-base-content/40 text-xs">{sig.meta.orientation}</span>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    {/if}
+    <SignalBindingPanel />
   </section>
 
   <!-- =========================================================
-       Forward simulation
+       Forward simulation — Path A: Synthetic scenario
   ========================================================= -->
   <section>
-    <h2 class="text-xl font-semibold mb-1">Forward simulation</h2>
+    <h2 class="text-xl font-semibold mb-1">
+      Synthetic simulation
+      <span class="badge badge-ghost badge-sm ml-2 align-middle">quick exploration</span>
+    </h2>
     <p class="text-sm text-base-content/60 mb-3">
       Sends a synthetic 48-hour scenario to the server and plots the returned
       state trajectories. Adjust the sliders to explore different conditions.
@@ -288,19 +344,105 @@
       </div>
     </div>
 
-    <!-- Action buttons -->
-    <div class="flex gap-2 flex-wrap mb-4">
-      <button
-        class="btn btn-primary btn-sm"
-        onclick={runSim}
-        disabled={simLoading || !$assembly}
-      >
-        {#if simLoading}
-          <span class="loading loading-spinner loading-xs"></span>
-        {/if}
-        Run simulation
-      </button>
+    <button
+      class="btn btn-primary btn-sm"
+      onclick={runSim}
+      disabled={simLoading || !$assembly}
+    >
+      {#if simLoading && simSource === null}
+        <span class="loading loading-spinner loading-xs"></span>
+      {/if}
+      Run simulation
+    </button>
+  </section>
+
+  <!-- =========================================================
+       Forward simulation — Path B: Bound (real InfluxDB data)
+  ========================================================= -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">
+      Real-data simulation
+      <span class="badge badge-accent badge-sm ml-2 align-middle">InfluxDB</span>
+    </h2>
+    <p class="text-sm text-base-content/60 mb-3">
+      Fetches real measurements from InfluxDB for the bound signals and runs the
+      forward simulation. All required signals must be bound above.
+    </p>
+
+    {#if $requiredSignals.length > 0 && !allBound}
+      <div role="alert" class="alert alert-warning mb-3 text-sm py-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+        </svg>
+        <span>
+          Bind all required signals above before running.
+          Unbound:
+          {$requiredSignals.filter(s => !s.binding).map(s => s.name).join(', ')}.
+        </span>
+      </div>
+    {/if}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+      <div class="form-control">
+        <label class="label" for="bound-start">
+          <span class="label-text">Start</span>
+        </label>
+        <input
+          id="bound-start"
+          type="datetime-local"
+          class="input input-bordered input-sm"
+          bind:value={boundStart}
+        />
+      </div>
+
+      <div class="form-control">
+        <label class="label" for="bound-end">
+          <span class="label-text">End</span>
+        </label>
+        <input
+          id="bound-end"
+          type="datetime-local"
+          class="input input-bordered input-sm"
+          bind:value={boundEnd}
+        />
+      </div>
     </div>
+
+    <div class="form-control mb-4 max-w-[12rem]">
+      <label class="label" for="bound-resample">
+        <span class="label-text">Resample interval</span>
+      </label>
+      <select id="bound-resample" class="select select-bordered select-sm" bind:value={boundResample}>
+        <option value="1min">1 min</option>
+        <option value="5min">5 min</option>
+        <option value="15min">15 min (default)</option>
+        <option value="30min">30 min</option>
+        <option value="1h">1 hour</option>
+      </select>
+    </div>
+
+    <button
+      class="btn btn-accent btn-sm"
+      onclick={runSimBound}
+      disabled={simLoading || !$assembly || !allBound}
+    >
+      {#if simLoading && simSource === null}
+        <span class="loading loading-spinner loading-xs"></span>
+      {/if}
+      Run with real data
+    </button>
+  </section>
+
+  <!-- =========================================================
+       Shared result area — used by BOTH simulation paths
+  ========================================================= -->
+  <section aria-label="Simulation results">
+
+    {#if simLoading}
+      <div class="flex justify-center py-6">
+        <span class="loading loading-spinner loading-md"></span>
+      </div>
+    {/if}
 
     {#if simError}
       <div role="alert" class="alert alert-error mb-3 text-sm">
@@ -308,8 +450,21 @@
       </div>
     {/if}
 
-    <!-- SVG line chart -->
+    <!-- SVG line chart — shared by both paths -->
     {#if chartData}
+      <!-- Source label so user knows which path produced the current chart -->
+      <div class="flex items-center gap-2 mb-2">
+        {#if simSource === 'bound'}
+          <span class="badge badge-accent badge-sm">Real data — InfluxDB</span>
+          <span class="text-xs text-base-content/60">
+            {boundStart} → {boundEnd} ({boundResample})
+          </span>
+        {:else}
+          <span class="badge badge-ghost badge-sm">Synthetic scenario</span>
+          <span class="text-xs text-base-content/60">48-hour synthetic signals</span>
+        {/if}
+      </div>
+
       <div class="border border-base-300 rounded-lg p-2 overflow-x-auto">
         <svg
           viewBox="0 0 {CHART_W} {CHART_H}"
@@ -355,7 +510,7 @@
             text-anchor="middle"
             font-size="10"
             fill="oklch(40% 0 0)"
-          >Time (hours)</text>
+          >{xAxisLabel}</text>
           <text
             x={10}
             y={PAD.top + INNER_H / 2}
@@ -410,9 +565,10 @@
       </div>
     {:else if !simLoading}
       <div class="border border-base-300 rounded-lg p-8 text-center text-base-content/40 text-sm">
-        Press "Run simulation" to see the temperature trajectory.
+        Press "Run simulation" or "Run with real data" to see the temperature trajectory.
       </div>
     {/if}
+
   </section>
 
 </div>

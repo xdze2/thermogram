@@ -84,20 +84,95 @@ def element_to_out(eid: str, spec: ElementSpec) -> ElementOut:
     )
 
 
-def signal_to_out(signal: "Signal | Any") -> SignalOut:
+def signal_to_out(
+    signal: "Signal | Any",
+    binding_map: dict[str, str | None] | None = None,
+) -> SignalOut:
     """
     Serialise a Signal to its API response shape.
 
     Accepts both ``api.models.Signal`` (from stored doc) and
     ``grouping.Signal`` (from the grouping rule) — both share the same
-    fields (id, name, kind, role, meta) so duck typing applies.
+    identity fields (id, name, kind, role, meta) so duck typing applies.
+
+    Parameters
+    ----------
+    signal:
+        The Signal object to serialise (either flavour).
+    binding_map:
+        Optional ``{signal_name: binding_string}`` mapping.  When provided,
+        the binding for this signal's name is injected into the response.
+        When absent, falls back to ``signal.binding`` if the attribute exists
+        (i.e. the signal is an ``api.models.Signal`` with a stored binding).
     """
+    # Prefer explicit binding_map over the attribute on the signal object.
+    if binding_map is not None:
+        binding = binding_map.get(signal.name)
+    else:
+        binding = getattr(signal, "binding", None)
     return SignalOut(
         id=signal.id,
         name=signal.name,
         kind=signal.kind,
         role=signal.role,
         meta=signal.meta,
+        binding=binding,
+    )
+
+
+# ── binding helpers ────────────────────────────────────────────────────────────
+
+def binding_map_from_doc(doc: "RoomDoc") -> dict[str, str | None]:
+    """
+    Build a ``{signal_name: binding_string_or_None}`` lookup from the stored
+    signals in *doc*.
+
+    Only signals with a non-None binding are included — callers treat a missing
+    key as ``binding=None``.  Used by assembly / document routes to inject
+    bindings onto derived Signal objects (which are binding-agnostic).
+    """
+    return {
+        sig.name: sig.binding
+        for sig in doc.signals.values()
+        if sig.binding is not None
+    }
+
+
+def set_signal_binding(doc: "RoomDoc", signal_name: str, binding: str | None) -> None:
+    """
+    Set or clear the InfluxDB binding for the Signal named *signal_name* in
+    *doc*.
+
+    If *doc.signals* already has an entry for this name (by any sid), updates
+    it in place.  Otherwise creates a minimal stub entry — binding information
+    must persist even when the signal's other metadata is derived at read time.
+
+    Parameters
+    ----------
+    doc:
+        The in-memory ``RoomDoc`` to mutate.
+    signal_name:
+        The signal's ODE name (e.g. ``"T_ext"``, ``"G_sol_S"``).
+    binding:
+        The InfluxDB query string, or ``None`` to clear.
+    """
+    # Look for an existing stored Signal entry by name.
+    for sig in doc.signals.values():
+        if sig.name == signal_name:
+            sig.binding = binding
+            return
+    # No existing entry — create a minimal stub so the binding persists.
+    # The stub carries only what's needed for persistence; identity fields
+    # (kind, role, meta) are left as placeholders and will be overridden
+    # by the derived signal at read time.
+    sid = doc.next_signal_id()
+    doc.signals[sid] = Signal(
+        id=sid,
+        name=signal_name,
+        kind="",    # placeholder — derived at read time
+        role="",    # placeholder — derived at read time
+        meta={},
+        binding=binding,
     )
 
 
@@ -276,6 +351,8 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
                 "kind": sig.kind,
                 "role": sig.role,
                 "meta": dict(sig.meta),
+                # Omit binding key when None to keep old JSON compact.
+                **( {"binding": sig.binding} if sig.binding is not None else {} ),
             }
             for sid, sig in doc.signals.items()
         },
@@ -308,6 +385,8 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
             kind=v["kind"],
             role=v["role"],
             meta=dict(v.get("meta", {})),
+            # Tolerate absence in old JSON — defaults to None.
+            binding=v.get("binding"),
         )
         for sid, v in d.get("signals", {}).items()
     }

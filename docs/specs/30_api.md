@@ -146,14 +146,20 @@ The client never creates, deletes, or routes these — they are server-computed.
   "name": "T_ext",
   "kind": "temperature",
   "role": "exterior",
-  "meta": {}
+  "meta": {},
+  "binding": "open_meteo/temperature_2m"
 }
 ```
 
+`binding` is the optional InfluxDB query string (`measurement/field?tag=val[&tag2=val2]`),
+or `null` when unbound.  Identity fields (`id`, `name`, `kind`, `role`, `meta`) are kept
+binding-agnostic — grouping never reads `binding`.
+
 Signals are derived by the grouping rule's liveness invariant: they exist when at least one
 element's boundary field references them, and are garbage-collected automatically when the
-last such element is removed or its boundary field changes. No Signal CRUD endpoints exist —
-they are read-only projections on `/document` and `/assembly`.
+last such element is removed or its boundary field changes.  Signal identity (everything
+except `binding`) is read-only — no Signal CRUD endpoints exist.  Bindings are set via
+`PUT /models/{id}/signals/{name}/binding`.
 
 ### `Problem`
 ```json
@@ -301,6 +307,74 @@ re-pull invariant refreshes the derived signal list and modules.
 
 **Response `204`** (no body). Signal GC happens at read time (liveness invariant in the
 grouping rule); no routing cleanup is needed because modules are derived, not stored.
+
+---
+
+---
+
+## InfluxDB signal-binding
+
+### `GET /api/influx/signals`
+
+List all queryable signal names from the connected InfluxDB instance.
+
+**Response `200`:** `["open_meteo/temperature_2m", "daikin_aircon/inside_temperature?mac=…&name=Salon&type=aircon", …]`
+
+Signal names follow the format `measurement/field?tag=val[&tag2=val2]`.
+
+**Response `503`:** `{"detail": "InfluxDB unreachable: …"}` when the DB is not reachable.
+
+---
+
+### `PUT /api/models/{id}/signals/{signal_name}/binding`
+
+Set or clear the InfluxDB binding for the named signal.
+
+`signal_name` must be a derived required signal for the model (e.g. `T_ext`, `G_sol_S`); returns
+`404` if not found.
+
+**Request body:**
+```json
+{"binding": "open_meteo/temperature_2m"}
+```
+Use `{"binding": null}` to clear a previously set binding.
+
+**Response `200`:** `<Signal>` (the updated SignalOut with `binding` populated or `null`).
+
+**Response `400`:** Malformed binding string (must parse as `measurement/field[?tag=val]`).
+
+**Response `404`:** `signal_name` is not a required signal for this model.
+
+---
+
+### `POST /api/models/{id}/simulate-bound`
+
+Run the forward simulation by fetching real InfluxDB data for each bound required signal.
+All required signals must be bound; unbound signals are rejected with a descriptive 400.
+
+**Request body:**
+```json
+{
+  "start":    "2026-05-25T00:00:00Z",
+  "end":      "2026-05-27T00:00:00Z",
+  "resample": "15min",
+  "x0":       [20.0, 20.0],
+  "params":   {"H_ve": 3.2}
+}
+```
+
+`start` / `end` are ISO-8601 strings (timezone-naive strings are treated as UTC).  `resample`
+is a pandas offset string (default `"15min"`).  `x0` and `params` follow the same conventions
+as `POST /simulate`; both are optional.  The time step `dt` is inferred from `resample`.
+
+**Response `200`:** same shape as `POST /simulate`:
+```json
+{"t": [0.0, 900.0, …], "states": {"T_room": [20.0, …]}}
+```
+
+**Response `400`:** Incomplete room, unbound required signals, or empty/NaN series.
+
+**Response `503`:** InfluxDB unreachable during fetch.
 
 ---
 

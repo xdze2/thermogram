@@ -16,6 +16,7 @@ from .models import RoomDoc
 from .store import _store, load_all_models, save_model
 from .routes import registry, document, assembly, simulate, identifiability, topology
 from .routes import models as models_router
+from .routes.influx import influx_router, model_router as influx_model_router
 
 
 @asynccontextmanager
@@ -51,3 +52,5 @@ app.include_router(assembly.router, prefix=PREFIX)
 app.include_router(simulate.router, prefix=PREFIX)
 app.include_router(identifiability.router, prefix=PREFIX)
 app.include_router(topology.router, prefix=PREFIX)
+app.include_router(influx_router, prefix=PREFIX)
+app.include_router(influx_model_router, prefix=PREFIX)
