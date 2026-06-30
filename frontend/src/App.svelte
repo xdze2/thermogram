@@ -1,12 +1,12 @@
 <script>
   import ElementList    from './lib/ElementList.svelte';
   import ModuleGraph    from './lib/ModuleGraph.svelte';
-  import SimulationPanel from './lib/SimulationPanel.svelte';
   import StudiesPanel   from './lib/StudiesPanel.svelte';
+  import SignalBindingPanel from './lib/SignalBindingPanel.svelte';
   import ModelHome      from './lib/ModelHome.svelte';
-  import { loading, error, refreshAll } from './stores/model.js';
+  import { assembly, loading, error, refreshAll } from './stores/model.js';
   import { route, navigate } from './stores/route.js';
-  import { setModelId } from './lib/api.js';
+  import { setModelId, fetchIdentifiability } from './lib/api.js';
 
   // When the route changes to editor (navigation from home, or hash edited
   // manually), point the API client at the new uid and reload the model stores.
@@ -22,8 +22,34 @@
     }
   });
 
-  /** Active right-column tab: 'simulate' | 'studies' */
-  let rightTab = $state('simulate');
+  // ---------------------------------------------------------------------------
+  // Identifiability (left column, bottom section)
+  // ---------------------------------------------------------------------------
+  let identStatus  = $state(null);
+  let identLoading = $state(false);
+  let identError   = $state('');
+
+  async function loadIdentifiability() {
+    identLoading = true;
+    identError   = '';
+    try {
+      identStatus = await fetchIdentifiability();
+    } catch (err) {
+      identError = err.message ?? String(err);
+    } finally {
+      identLoading = false;
+    }
+  }
+
+  const STATUS_BADGE = {
+    resolvable:      'badge-success',
+    borderline:      'badge-warning',
+    prior_dominated: 'badge-error',
+  };
+
+  function statusBadge(s) {
+    return STATUS_BADGE[s] ?? 'badge-ghost';
+  }
 </script>
 
 <!-- ============================================================================ -->
@@ -140,65 +166,99 @@
       <main class="grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-base-300 flex-1 overflow-auto">
 
         <!-- LEFT COLUMN: what the room IS (authoring / structure) -->
-        <div class="flex flex-col divide-y divide-base-300">
+        <div class="flex flex-col divide-y divide-base-300 overflow-y-auto">
 
-          <!-- Left-top: Elements -->
+          <!-- 1. Elements -->
           <section aria-label="Building elements">
             <ElementList />
           </section>
 
-          <!-- Left-bottom: Topology + modules + routing + ownership check -->
+          <!-- 2. Required signals + sensor bindings -->
+          <section aria-label="Required signals">
+            <div class="p-4">
+              <h2 class="text-sm font-medium text-base-content/70 uppercase tracking-wider mb-2">Required signals</h2>
+              <SignalBindingPanel />
+            </div>
+          </section>
+
+          <!-- 3. Topology + modules + routing + ownership check -->
           <section aria-label="Topology and routing">
             <ModuleGraph />
+          </section>
+
+          <!-- 4. Identifiability (pre-fit verdict) -->
+          <section aria-label="Identifiability">
+            <div class="p-4 space-y-3">
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-medium text-base-content/70 uppercase tracking-wider">Identifiability</h2>
+                <span class="badge badge-ghost badge-xs">pre-fit verdict</span>
+              </div>
+              <p class="text-xs text-base-content/50">
+                Predicts which parameters the observed signals can resolve before running
+                any Bayesian inference. Computed from the eigenstructure of the linearised
+                system and broadband signal statistics.
+              </p>
+
+              {#if identLoading}
+                <div class="flex justify-center py-4">
+                  <span class="loading loading-spinner loading-md" aria-label="Checking identifiability…"></span>
+                </div>
+              {:else if identError}
+                <div role="alert" class="alert alert-error text-sm py-2">
+                  <span>{identError}</span>
+                </div>
+              {:else if identStatus}
+                <div class="overflow-x-auto">
+                  <table class="table table-xs w-full">
+                    <thead>
+                      <tr>
+                        <th>Parameter</th>
+                        <th>Status</th>
+                        <th class="text-right">&tau; (h)</th>
+                        <th class="text-right">Max corr.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each Object.entries(identStatus.param_status) as [name, info]}
+                        <tr class="hover">
+                          <td class="font-mono text-xs">{name}</td>
+                          <td>
+                            <span class="badge {statusBadge(info.status)} badge-xs">
+                              {info.status.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td class="text-right font-mono text-xs">
+                            {info.tau_h != null ? info.tau_h.toFixed(1) : '—'}
+                          </td>
+                          <td class="text-right font-mono text-xs">
+                            {info.correlation != null ? info.correlation.toFixed(2) : '—'}
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {:else}
+                <p class="text-xs text-base-content/50">
+                  Press the button below to compute verdicts.
+                </p>
+              {/if}
+
+              <button
+                class="btn btn-outline btn-sm"
+                onclick={loadIdentifiability}
+                disabled={identLoading || !$assembly?.parameters?.length}
+              >
+                {identLoading ? 'Checking…' : 'Run identifiability check'}
+              </button>
+            </div>
           </section>
 
         </div>
 
         <!-- RIGHT COLUMN: how the room BEHAVES (results + studies) -->
-        <div class="flex flex-col">
-
-          <!-- Tab bar for the right column -->
-          <div class="tabs tabs-border px-4 pt-3 border-b border-base-300" role="tablist" aria-label="Right panel view">
-            <button
-              class="tab {rightTab === 'simulate' ? 'tab-active' : ''}"
-              role="tab"
-              aria-selected={rightTab === 'simulate'}
-              aria-controls="panel-simulate"
-              onclick={() => { rightTab = 'simulate'; }}
-            >
-              Simulation
-            </button>
-            <button
-              class="tab {rightTab === 'studies' ? 'tab-active' : ''}"
-              role="tab"
-              aria-selected={rightTab === 'studies'}
-              aria-controls="panel-studies"
-              onclick={() => { rightTab = 'studies'; }}
-            >
-              Studies
-            </button>
-          </div>
-
-          <!-- Simulation panel -->
-          <section
-            id="panel-simulate"
-            role="tabpanel"
-            aria-label="Simulation and results"
-            class="flex-1 {rightTab !== 'simulate' ? 'hidden' : ''}"
-          >
-            <SimulationPanel />
-          </section>
-
-          <!-- Studies panel -->
-          <section
-            id="panel-studies"
-            role="tabpanel"
-            aria-label="Studies"
-            class="flex-1 {rightTab !== 'studies' ? 'hidden' : ''}"
-          >
-            <StudiesPanel modelId={$route.uid} />
-          </section>
-
+        <div class="flex flex-col overflow-hidden">
+          <StudiesPanel modelId={$route.uid} />
         </div>
 
       </main>

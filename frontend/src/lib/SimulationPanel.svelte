@@ -1,36 +1,6 @@
 <script>
   import { assembly, requiredSignals, loading, error } from '../stores/model.js';
-  import { runSimulate, fetchIdentifiability, runSimulateBound } from './api.js';
-  import SignalBindingPanel from './SignalBindingPanel.svelte';
-
-  // ---------------------------------------------------------------------------
-  // Identifiability
-  // ---------------------------------------------------------------------------
-  let identStatus = null;     // { param_status: { name: {status, reason, tau_h, correlation} } }
-  let identLoading = false;
-  let identError   = '';
-
-  async function loadIdentifiability() {
-    identLoading = true;
-    identError   = '';
-    try {
-      identStatus = await fetchIdentifiability();
-    } catch (err) {
-      identError = err.message ?? String(err);
-    } finally {
-      identLoading = false;
-    }
-  }
-
-  const STATUS_BADGE = {
-    resolvable:      'badge-success',
-    borderline:      'badge-warning',
-    prior_dominated: 'badge-error',
-  };
-
-  function statusBadge(s) {
-    return STATUS_BADGE[s] ?? 'badge-ghost';
-  }
+  import { runSimulate, runSimulateBound } from './api.js';
 
   // ---------------------------------------------------------------------------
   // Shared simulation result state
@@ -208,91 +178,6 @@
 </script>
 
 <div class="p-4 space-y-6">
-
-  <!-- =========================================================
-       Identifiability report
-       (Per-parameter priors now live inline on the module cards;
-        this section is the detailed pre-fit verdict with τ/correlation.)
-  ========================================================= -->
-  <section>
-    <h2 class="text-xl font-semibold mb-1">
-      Identifiability
-      <span class="badge badge-ghost badge-sm ml-2 align-middle">about fitting, not simulating</span>
-    </h2>
-    <p class="text-sm text-base-content/60 mb-3">
-      Pre-fit verdict: predicts which parameters the observed signals can resolve,
-      before running any Bayesian inference. Computed from the eigenstructure
-      of the linearised system and the broadband signal statistics.
-    </p>
-
-    {#if identLoading}
-      <div class="flex justify-center py-6">
-        <span class="loading loading-spinner loading-md"></span>
-      </div>
-    {:else if identError}
-      <div role="alert" class="alert alert-error mb-3">
-        <span>{identError}</span>
-      </div>
-    {:else if identStatus}
-      <div class="overflow-x-auto">
-        <table class="table table-sm w-full">
-          <thead>
-            <tr>
-              <th>Parameter</th>
-              <th>Status</th>
-              <th class="text-right">&tau; (h)</th>
-              <th class="text-right">Max correlation</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each Object.entries(identStatus.param_status) as [name, info]}
-              <tr class="hover">
-                <td class="font-mono font-medium">{name}</td>
-                <td>
-                  <span class="badge {statusBadge(info.status)} badge-sm">
-                    {info.status.replace('_', ' ')}
-                  </span>
-                </td>
-                <td class="text-right font-mono">
-                  {info.tau_h != null ? info.tau_h.toFixed(1) : '—'}
-                </td>
-                <td class="text-right font-mono">
-                  {info.correlation != null ? info.correlation.toFixed(2) : '—'}
-                </td>
-                <td class="text-sm text-base-content/70">{info.reason}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {:else}
-      <p class="text-base-content/60 text-sm">
-        Run the identifiability check to see verdicts.
-      </p>
-    {/if}
-
-    <button
-      class="btn btn-outline btn-sm mt-3"
-      onclick={loadIdentifiability}
-      disabled={identLoading || !$assembly?.parameters?.length}
-    >
-      {identLoading ? 'Checking…' : 'Run identifiability check'}
-    </button>
-  </section>
-
-  <!-- =========================================================
-       Required signals — with InfluxDB binding controls
-  ========================================================= -->
-  <section>
-    <h2 class="text-xl font-semibold mb-1">Required signals</h2>
-    <p class="text-sm text-base-content/60 mb-3">
-      Inputs the derived model needs to simulate. Bind each signal to an
-      InfluxDB source to run a real-data simulation below.
-    </p>
-
-    <SignalBindingPanel />
-  </section>
 
   <!-- =========================================================
        Forward simulation — Path A: Synthetic scenario
