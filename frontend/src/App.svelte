@@ -2,6 +2,7 @@
   import ElementList    from './lib/ElementList.svelte';
   import ModuleGraph    from './lib/ModuleGraph.svelte';
   import SimulationPanel from './lib/SimulationPanel.svelte';
+  import StudiesPanel   from './lib/StudiesPanel.svelte';
   import ModelHome      from './lib/ModelHome.svelte';
   import { loading, error, refreshAll } from './stores/model.js';
   import { route, navigate } from './stores/route.js';
@@ -20,6 +21,9 @@
       refreshAll();
     }
   });
+
+  /** Active right-column tab: 'simulate' | 'studies' */
+  let rightTab = 'simulate';
 </script>
 
 {#if $route.view === 'home'}
@@ -93,15 +97,49 @@
 
       </div>
 
-      <!-- RIGHT COLUMN: how the room BEHAVES (results) -->
-      <div class="flex flex-col divide-y divide-base-300">
+      <!-- RIGHT COLUMN: how the room BEHAVES (results + studies) -->
+      <div class="flex flex-col">
 
-        <!-- Right column: simulation + identifiability report. Per-parameter
-             priors now live inline on the module cards (left column); this panel
-             holds the scenario sliders, trajectory graph, and the detailed
-             identifiability verdict (τ / correlation). -->
-        <section aria-label="Simulation and results" class="flex-1">
+        <!-- Tab bar for the right column -->
+        <div class="tabs tabs-border px-4 pt-3 border-b border-base-300" role="tablist" aria-label="Right panel view">
+          <button
+            class="tab {rightTab === 'simulate' ? 'tab-active' : ''}"
+            role="tab"
+            aria-selected={rightTab === 'simulate'}
+            aria-controls="panel-simulate"
+            onclick={() => { rightTab = 'simulate'; }}
+          >
+            Simulation
+          </button>
+          <button
+            class="tab {rightTab === 'studies' ? 'tab-active' : ''}"
+            role="tab"
+            aria-selected={rightTab === 'studies'}
+            aria-controls="panel-studies"
+            onclick={() => { rightTab = 'studies'; }}
+          >
+            Studies
+          </button>
+        </div>
+
+        <!-- Simulation panel -->
+        <section
+          id="panel-simulate"
+          role="tabpanel"
+          aria-label="Simulation and results"
+          class="flex-1 {rightTab !== 'simulate' ? 'hidden' : ''}"
+        >
           <SimulationPanel />
+        </section>
+
+        <!-- Studies panel -->
+        <section
+          id="panel-studies"
+          role="tabpanel"
+          aria-label="Studies"
+          class="flex-1 {rightTab !== 'studies' ? 'hidden' : ''}"
+        >
+          <StudiesPanel modelId={$route.uid} />
         </section>
 
       </div>

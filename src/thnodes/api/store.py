@@ -23,6 +23,9 @@ from .models import (
     SensorOut,
     Signal,
     SignalOut,
+    Study,
+    StudyResults,
+    StudyTimeRange,
 )
 
 # ── persistence directory (can be monkeypatched in tests) ─────────────────────
@@ -383,7 +386,69 @@ def roomdoc_to_dict(doc: RoomDoc) -> dict:
             }
             for sid, s in doc.sensors.items()
         }
+    if doc.studies:
+        d["studies"] = {
+            study_uid: _study_to_dict(study)
+            for study_uid, study in doc.studies.items()
+        }
     return d
+
+
+def _study_to_dict(study: Study) -> dict:
+    """Serialise a Study dataclass to a JSON-safe dict (stored under 'studies' key)."""
+    d: dict = {
+        "uid": study.uid,
+        "model_uid": study.model_uid,
+        "name": study.name,
+        "created_at": study.created_at,
+        "updated_at": study.updated_at,
+        "signal_overrides": dict(study.signal_overrides),
+        "params": dict(study.params),
+        "results": {
+            "simulate": study.results.simulate,
+            "fit": study.results.fit,
+        },
+    }
+    if study.time_range is not None:
+        d["time_range"] = {
+            "start": study.time_range.start,
+            "end": study.time_range.end,
+            "resample": study.time_range.resample,
+        }
+    else:
+        d["time_range"] = None
+    return d
+
+
+def _study_from_dict(d: dict) -> Study:
+    """Deserialise a dict entry from the 'studies' key back into a Study dataclass."""
+    tr_raw = d.get("time_range")
+    if tr_raw is not None:
+        time_range: StudyTimeRange | None = StudyTimeRange(
+            start=tr_raw["start"],
+            end=tr_raw["end"],
+            resample=tr_raw.get("resample", "15min"),
+        )
+    else:
+        time_range = None
+
+    results_raw = d.get("results", {})
+    results = StudyResults(
+        simulate=results_raw.get("simulate"),
+        fit=results_raw.get("fit"),
+    )
+
+    return Study(
+        uid=d["uid"],
+        model_uid=d["model_uid"],
+        name=d.get("name", "Untitled study"),
+        created_at=d["created_at"],
+        updated_at=d["updated_at"],
+        time_range=time_range,
+        signal_overrides=dict(d.get("signal_overrides", {})),
+        params=dict(d.get("params", {})),
+        results=results,
+    )
 
 
 def roomdoc_from_dict(d: dict) -> RoomDoc:
@@ -425,6 +490,11 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
         for sid, v in d.get("sensors", {}).items()
     }
 
+    studies = {
+        study_uid: _study_from_dict(sv)
+        for study_uid, sv in d.get("studies", {}).items()
+    }
+
     # Recover counters, falling back to max-existing + 1 to avoid ID collisions.
     if "_elem_counter" in d:
         elem_counter = int(d["_elem_counter"])
@@ -450,6 +520,7 @@ def roomdoc_from_dict(d: dict) -> RoomDoc:
         elements=elements,
         signals=signals,
         sensors=sensors,
+        studies=studies,
         _elem_counter=elem_counter,
         _signal_counter=signal_counter,
         _sensor_counter=sensor_counter,

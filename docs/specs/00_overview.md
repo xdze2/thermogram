@@ -43,6 +43,7 @@ read-only projection. The specs here are organised around that authoring core.
 | 20  | [`20_layout.md`](20_layout.md)| **UI layout** — 2-column single-page; element-form authoring, derived topology | **built** |
 | 30  | [`30_api.md`](30_api.md)      | the FastAPI ↔ Svelte contract (endpoints, JSON shapes, model management) | **built** |
 | 40  | [`40_physics.md`](40_physics.md) | engine invariants as checkable statements (star topology, exactly-once ownership, channels, forms, band rule, grouping rule) | **built** |
+| 50  | [`50_studies.md`](50_studies.md) | **Studies** — per-model run configurations (time window, signal-binding overrides, params, results); one model → many studies | **target** |
 
 **Status legend.** *built* = the implementation conforms; the spec describes existing
 behavior. *target* = intended design; the current code does not yet satisfy it.

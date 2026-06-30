@@ -29,7 +29,9 @@ import {
   createSensor,
   deleteSensor,
   putSensorBinding,
+  getModelId,
 } from '../lib/api.js';
+import { loadStudies } from './studies.js';
 
 // ---------------------------------------------------------------------------
 // Core writable stores (private write surface — .set() only called here)
@@ -117,9 +119,15 @@ export const setSignalBinding = (signalName, binding) =>
 // Read actions (non-mutating)
 // ---------------------------------------------------------------------------
 
-/** Pull all three reads in parallel. Called once on app start from main.js. */
+/**
+ * Pull document, assembly, registry, and studies in parallel.
+ * Called when the editor opens a model (see App.svelte $effect).
+ * Studies failures are silenced into console warnings so a missing studies
+ * endpoint (backend not yet built) does not break the existing editor flow.
+ */
 export async function refreshAll() {
   await withLoading(async () => {
+    const modelId = getModelId();
     const [asm, doc, reg] = await Promise.all([
       fetchAssembly(),
       fetchDocument(),
@@ -128,5 +136,11 @@ export async function refreshAll() {
     assembly.set(asm);
     roomDoc.set(doc);
     registry.set(reg);
+
+    // Studies are a separate data layer — failures must not propagate to the
+    // shared `error` store and must not interrupt the document/assembly refresh.
+    loadStudies(modelId).catch((err) => {
+      console.warn('[studies] loadStudies failed during refreshAll:', err.message ?? err);
+    });
   });
 }

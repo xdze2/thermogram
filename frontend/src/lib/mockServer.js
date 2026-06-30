@@ -130,6 +130,82 @@ export async function installMockServer() {
       return jsonResponse(fixtures.simulate, 200);
     }
 
+    // -----------------------------------------------------------------------
+    // Studies stubs — stateless (matches the rest of the mock philosophy).
+    // These ensure loadStudies() returns cleanly so the Studies panel renders
+    // its empty-state UI rather than logging a 404 warning.
+    // -----------------------------------------------------------------------
+
+    // GET /api/models/{uid}/studies  → empty list
+    if (method === 'GET' && url.match(/\/studies\/?$/)) {
+      return jsonResponse([]);
+    }
+    // POST /api/models/{uid}/studies  → stub created study
+    if (method === 'POST' && url.match(/\/studies\/?$/)) {
+      const name = (() => { try { return JSON.parse(init?.body ?? '{}').name; } catch { return 'Untitled study'; } })();
+      return jsonResponse({
+        uid: 'study_mock001',
+        model_uid: 'default',
+        name: name || 'Untitled study',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        time_range: null,
+        signal_overrides: {},
+        params: {},
+        results: { simulate: null, fit: null },
+      }, 201);
+    }
+    // PATCH /api/models/{uid}/studies/{study_id}  → echo the body back
+    if (method === 'PATCH' && url.match(/\/studies\/[^/]+\/?$/)) {
+      const patch = (() => { try { return JSON.parse(init?.body ?? '{}'); } catch { return {}; } })();
+      return jsonResponse({
+        uid: 'study_mock001',
+        model_uid: 'default',
+        name: patch.name ?? 'Untitled study',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        time_range: patch.time_range ?? null,
+        signal_overrides: patch.signal_overrides ?? {},
+        params: patch.params ?? {},
+        results: { simulate: null, fit: null },
+      });
+    }
+    // DELETE /api/models/{uid}/studies/{study_id}/results  → study with null results
+    if (method === 'DELETE' && url.includes('/studies/') && url.endsWith('/results')) {
+      return jsonResponse({
+        uid: 'study_mock001',
+        model_uid: 'default',
+        name: 'Untitled study',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        time_range: null,
+        signal_overrides: {},
+        params: {},
+        results: { simulate: null, fit: null },
+      });
+    }
+    // DELETE /api/models/{uid}/studies/{study_id}  → 204
+    if (method === 'DELETE' && url.match(/\/studies\/[^/]+\/?$/)) {
+      return emptyResponse(204);
+    }
+    // POST /api/models/{uid}/studies/{study_id}/run/simulate  → stub result
+    if (method === 'POST' && url.includes('/studies/') && url.endsWith('/run/simulate')) {
+      return jsonResponse({
+        uid: 'study_mock001',
+        model_uid: 'default',
+        name: 'Untitled study',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        time_range: { start: '2026-06-17T00:00:00Z', end: '2026-06-18T00:00:00Z', resample: '15min' },
+        signal_overrides: {},
+        params: {},
+        results: {
+          simulate: fixtures.simulate,
+          fit: null,
+        },
+      });
+    }
+
     // Anything else (identifiability, topology.svg) — real fetch
     return realFetch(input, init);
   };

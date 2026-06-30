@@ -67,6 +67,49 @@ class ElementSpec:
     fields: dict[str, Any]
 
 
+# ── study dataclasses ─────────────────────────────────────────────────────────
+
+@dataclass
+class StudyTimeRange:
+    """Time window for a study run."""
+    start: str
+    end: str
+    resample: str = "15min"
+
+
+@dataclass
+class StudyResults:
+    """Accumulated results for a study (written only by run endpoints)."""
+    simulate: dict | None = None   # {ran_at, t, states} or null
+    fit: None = None               # reserved for Step 2–3
+
+
+@dataclass
+class Study:
+    """
+    A run configuration attached to a model.
+
+    ``signal_overrides`` maps signal names to binding strings (or null to
+    explicitly inherit the model default).  Only overridden signals appear
+    here; signals absent from the dict fall through to the model-level binding.
+
+    ``params`` holds parameter overrides for the forward simulation.  Any
+    parameter not listed here falls back to its prior mean.
+
+    ``results`` is the only field the server writes on a run; all other fields
+    are author-controlled and only change on explicit PATCH.
+    """
+    uid: str
+    model_uid: str
+    name: str
+    created_at: str
+    updated_at: str
+    time_range: StudyTimeRange | None = None
+    signal_overrides: dict[str, str | None] = field(default_factory=dict)
+    params: dict[str, float] = field(default_factory=dict)
+    results: StudyResults = field(default_factory=StudyResults)
+
+
 @dataclass
 class RoomDoc:
     uid: str = field(default="")              # stable server-assigned opaque UID
@@ -74,6 +117,7 @@ class RoomDoc:
     elements: dict[str, ElementSpec] = field(default_factory=dict)   # id -> spec
     signals: dict[str, Signal] = field(default_factory=dict)         # id -> Signal (bindings only)
     sensors: dict[str, Sensor] = field(default_factory=dict)         # id -> Sensor
+    studies: dict[str, Study] = field(default_factory=dict)          # study_uid -> Study
     _elem_counter: int = field(default=0, repr=False)
     _signal_counter: int = field(default=0, repr=False)
     _sensor_counter: int = field(default=0, repr=False)
@@ -305,6 +349,60 @@ class SignalOut(BaseModel):
     role: str
     meta: dict = {}
     binding: str | None = None
+
+
+# ── study API schemas ─────────────────────────────────────────────────────────
+
+class StudyTimeRangeIn(BaseModel):
+    """Time-range sub-object in create/patch bodies."""
+    start: str | None = None
+    end: str | None = None
+    resample: str | None = None
+
+
+class StudyTimeRangeOut(BaseModel):
+    start: str
+    end: str
+    resample: str
+
+
+class StudyResultsOut(BaseModel):
+    simulate: dict | None = None
+    fit: None = None
+
+
+class StudyOut(BaseModel):
+    """API response shape for a Study."""
+    uid: str
+    model_uid: str
+    name: str
+    created_at: str
+    updated_at: str
+    time_range: StudyTimeRangeOut | None = None
+    signal_overrides: dict[str, str | None] = {}
+    params: dict[str, float] = {}
+    results: StudyResultsOut = StudyResultsOut()
+
+
+class StudyCreateIn(BaseModel):
+    """Request body for POST /studies (all fields optional)."""
+    name: str = "Untitled study"
+    time_range: StudyTimeRangeIn | None = None
+    signal_overrides: dict[str, str | None] = {}
+    params: dict[str, float] = {}
+
+
+class StudyPatchIn(BaseModel):
+    """Request body for PATCH /studies/{study_id} (all fields optional)."""
+    name: str | None = None
+    time_range: StudyTimeRangeIn | None = None
+    signal_overrides: dict[str, str | None] | None = None
+    params: dict[str, float] | None = None
+
+
+class StudyRunSimulateIn(BaseModel):
+    """Request body for POST /studies/{study_id}/run/simulate."""
+    x0: list[float] | None = None
 
 
 # ── registry schemas ───────────────────────────────────────────────────────────

@@ -241,3 +241,47 @@ export function renameModel(uid, name) {
 export function deleteModel(uid) {
   return apiFetch(`/api/models/${uid}`, { method: 'DELETE' });
 }
+
+// ---------------------------------------------------------------------------
+// Studies (scoped to a model; model_id passed explicitly to avoid coupling
+// to the module-level currentUid — callers own the model context here)
+// ---------------------------------------------------------------------------
+
+/** GET /api/models/{modelId}/studies → Study[] */
+export function fetchStudies(modelId) {
+  return apiFetch(`/api/models/${modelId}/studies`);
+}
+
+/** POST /api/models/{modelId}/studies {name?, time_range?, ...} → Study (201) */
+export function createStudy(modelId, body = {}) {
+  return apiFetch(`/api/models/${modelId}/studies`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** PATCH /api/models/{modelId}/studies/{studyId} {name?, time_range?, ...} → Study */
+export function patchStudy(modelId, studyId, body) {
+  return apiFetch(`/api/models/${modelId}/studies/${studyId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+/** DELETE /api/models/{modelId}/studies/{studyId} → 204 */
+export function deleteStudy(modelId, studyId) {
+  return apiFetch(`/api/models/${modelId}/studies/${studyId}`, { method: 'DELETE' });
+}
+
+/** DELETE /api/models/{modelId}/studies/{studyId}/results → Study (200, results nulled) */
+export function clearStudyResults(modelId, studyId) {
+  return apiFetch(`/api/models/${modelId}/studies/${studyId}/results`, { method: 'DELETE' });
+}
+
+/** POST /api/models/{modelId}/studies/{studyId}/run/simulate {x0?} → Study */
+export function runStudySimulate(modelId, studyId, body = {}) {
+  return apiFetch(`/api/models/${modelId}/studies/${studyId}/run/simulate`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
