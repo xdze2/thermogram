@@ -23,7 +23,7 @@
   });
 
   /** Active right-column tab: 'simulate' | 'studies' */
-  let rightTab = 'simulate';
+  let rightTab = $state('simulate');
 </script>
 
 {#if $route.view === 'home'}
